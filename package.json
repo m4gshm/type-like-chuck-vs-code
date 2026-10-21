@@ -2,7 +2,7 @@
   "name": "tlc",
   "displayName": "TLC — Type like Chuck",
   "icon": "icon.png",
-  "description": "Type like Chuck: universal inline code completions from OpenAI-compatible APIs with configurable FIM prompt templates.",
+  "description": "Type like Chuck - one more AI autocomplete tool",
   "version": "0.1.0",
   "publisher": "m4gshm",
   "license": "Apache-2.0",

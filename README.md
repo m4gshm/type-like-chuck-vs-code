@@ -1,5 +1,7 @@
 # TLC — Type like Chuck
 
+*Type like Chuck — one more AI autocomplete tool.*
+
 Universal inline (ghost text) code completions from any OpenAI-compatible API, with configurable fill-in-the-middle (FIM) prompt templates. Works in files of any language.
 
 ## Features
