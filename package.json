@@ -1,0 +1,193 @@
+{
+  "name": "tlc",
+  "displayName": "TLC — Type like Chuck",
+  "icon": "icon.png",
+  "description": "Type like Chuck: universal inline code completions from OpenAI-compatible APIs with configurable FIM prompt templates.",
+  "version": "0.1.0",
+  "publisher": "m4gshm",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/m4gshm/vs-code-l8t"
+  },
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tlc.triggerCompletion",
+        "title": "Trigger Completion Now",
+        "category": "TLC"
+      },
+      {
+        "command": "tlc.setApiKey",
+        "title": "Set API Key",
+        "category": "TLC"
+      },
+      {
+        "command": "tlc.clearApiKey",
+        "title": "Clear API Key",
+        "category": "TLC"
+      },
+      {
+        "command": "tlc.selectModel",
+        "title": "Select Model",
+        "category": "TLC"
+      },
+      {
+        "command": "tlc.toggleCompletions",
+        "title": "Toggle Completions",
+        "category": "TLC"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "tlc.triggerCompletion",
+        "key": "ctrl+alt+space",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "TLC",
+      "properties": {
+        "tlc.baseUrl": {
+          "type": "string",
+          "order": 1,
+          "default": "http://127.0.0.1:1234/v1",
+          "description": "Base URL of the OpenAI-compatible API (e.g. http://127.0.0.1:1234/v1)."
+        },
+        "tlc.model": {
+          "type": "string",
+          "order": 2,
+          "default": "Qwen2.5-Coder-1.5B",
+          "description": "Model name sent in completion requests. Use the \"TLC: Select Model\" command to pick one from the server's /v1/models list."
+        },
+        "tlc.promptTemplate": {
+          "order": 3,
+          "type": "string",
+          "default": "qwen2",
+          "enum": [
+            "qwen2",
+            "qwen3",
+            "lfm2",
+            "mellum",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Qwen2 / Qwen2.5-Coder FIM format",
+            "Qwen3 / Qwen3-Coder FIM format",
+            "Liquid AI LFM2 FIM format",
+            "JetBrains Mellum FIM format",
+            "User-defined template from the Prefix / Suffix / Middle / Stop settings below"
+          ],
+          "description": "Built-in FIM prompt template, or \"custom\" to use the markers from the Prefix / Suffix / Middle / Stop settings below. Tip: \"TLC: Create Template\" copies the elements of the selected template into those settings."
+        },
+        "tlc.prefix": {
+          "order": 4,
+          "type": "string",
+          "default": "<|fim_prefix|>",
+          "markdownDescription": "Marker placed before the code prefix. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+        },
+        "tlc.suffix": {
+          "order": 5,
+          "type": "string",
+          "default": "<|fim_suffix|>",
+          "markdownDescription": "Marker placed before the code suffix. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+        },
+        "tlc.middle": {
+          "order": 6,
+          "type": "string",
+          "default": "<|fim_middle|>",
+          "markdownDescription": "Marker placed after the suffix, where generation begins. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+        },
+        "tlc.stop": {
+          "order": 7,
+          "type": "string",
+          "default": "<|fim_prefix|>,<|fim_suffix|>,<|fim_middle|>",
+          "markdownDescription": "Reserved tokens used as stop sequences and masked in user code, comma-separated. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+        },
+        "tlc.prefixContextMaxLength": {
+          "type": "integer",
+          "order": 8,
+          "default": 8000,
+          "minimum": 0,
+          "description": "Maximum number of characters of code before the cursor sent as context."
+        },
+        "tlc.suffixContextMaxLength": {
+          "type": "integer",
+          "order": 9,
+          "default": 2000,
+          "minimum": 0,
+          "description": "Maximum number of characters of code after the cursor sent as context."
+        },
+        "tlc.maxTokens": {
+          "type": "integer",
+          "order": 10,
+          "default": 256,
+          "minimum": 1,
+          "description": "Maximum number of tokens to generate."
+        },
+        "tlc.debounceMs": {
+          "type": "integer",
+          "order": 11,
+          "default": 250,
+          "minimum": 50,
+          "maximum": 1000,
+          "description": "Minimum interval in milliseconds between automatic completion requests."
+        },
+        "tlc.forbiddenFileNames": {
+          "type": "array",
+          "order": 12,
+          "default": [
+            ".env"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns of files in which completions are disabled (e.g. .env, *.secret)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "check-types": "tsc --noEmit",
+    "unit": "vitest run",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "package": "npm run compile && node scripts/make-icon.mjs && vsce package --no-dependencies",
+    "test": "npm run unit && npm run compile-tests && vscode-test"
+  },
+  "dependencies": {
+    "micromatch": "^4.0.8",
+    "openai": "^6.27.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/micromatch": "^4.0.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.97.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "mocha": "^11.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
