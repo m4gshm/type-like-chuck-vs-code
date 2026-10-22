@@ -15,6 +15,33 @@ export interface CompletionResult {
   text: string;
 }
 
+export interface ModelInfo {
+  id: string;
+  /** Maximum context length (tokens) reported by the server, if known. */
+  contextLength?: number;
+}
+
+/** Picks the context length out of the raw /v1/models entry (server-specific field names). */
+export function extractModelContextLength(raw: Record<string, unknown>): number | undefined {
+  const meta = (raw.meta ?? {}) as Record<string, unknown>;
+  const candidates = [
+    raw.max_context,
+    raw.context_length,
+    raw.max_model_len,
+    raw.context_window,
+    raw.n_ctx,
+    meta.n_ctx,
+    meta.n_ctx_train,
+    meta.max_context,
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+  }
+  return undefined;
+}
+
 export type CompletionErrorKind = 'auth' | 'connection' | 'other';
 
 export class CompletionError extends Error {
@@ -59,14 +86,15 @@ export class CompletionsClient {
     this.client = this.createClient();
   }
 
-  /** Lists model ids available on the server via GET /v1/models. */
-  async listModels(): Promise<string[]> {
+  /** Lists models available on the server via GET /v1/models. */
+  async listModels(): Promise<ModelInfo[]> {
     const page = await this.client.models.list();
-    const ids: string[] = [];
+    const models: ModelInfo[] = [];
     for await (const model of page) {
-      ids.push(String(model.id));
+      const raw = model as unknown as Record<string, unknown>;
+      models.push({ id: String(model.id), contextLength: extractModelContextLength(raw) });
     }
-    return ids;
+    return models;
   }
 
   /**

@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { CompletionState } from './completion_state';
 
-const ENABLED_TEXT = '$(sparkle) TLC';
-const DISABLED_TEXT = '$(circle-slash) TLC';
-const BUSY_TEXT = '$(loading~spin) TLC';
-const ERROR_TEXT = '$(error) TLC';
+const ENABLED_TEXT = '$(tlc-cowboy)';
+const DISABLED_TEXT = '$(circle-slash)';
+const BUSY_TEXT = '$(loading~spin)';
+const ERROR_TEXT = '$(error)';
 
 /** Status bar indicator: enabled/disabled, request in flight, last error. */
 export class StatusBar {

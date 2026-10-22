@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { readConfig, ExtensionConfig } from './config';
+import { readConfig, effectiveContextLengths, ExtensionConfig } from './config';
 import { ApiKeyStorage } from './api_key_storage';
-import { CompletionsClient } from './completions_client';
+import { CompletionsClient, ModelInfo } from './completions_client';
 import { CompletionProvider } from './completion_provider';
 import { CompletionState } from './completion_state';
 import { ForbiddenFiles } from './forbidden_files';
@@ -54,16 +54,23 @@ export function activate(context: vscode.ExtensionContext): void {
      * Shows the model QuickPick (server models with supported-family marks
      * plus a manual-entry item) and returns the chosen model id, if any.
      */
-    const presentModelQuickPick = async (models: string[]): Promise<string | undefined> => {
-      const supported = pickSupportedModel(models);
-      const items: Array<vscode.QuickPickItem & { id?: string }> = models.map((id) => ({
-        label: id,
-        description: id === supported ? '$(check) supported' : id === config.model ? '$(check) current' : undefined,
-        id,
+    const presentModelQuickPick = async (models: ModelInfo[]): Promise<{ id: string; contextLength?: number } | undefined> => {
+      const supported = pickSupportedModel(models.map((m) => m.id));
+      const items: Array<vscode.QuickPickItem & { model: ModelInfo }> = models.map((m) => ({
+        label: m.id,
+        description:
+          m.id === supported
+            ? '$(check) supported'
+            : m.id === config.model
+              ? '$(check) current'
+              : undefined,
+        detail: m.contextLength !== undefined ? `context: ${m.contextLength}` : undefined,
+        model: m,
       }));
       items.push({
         label: '$(pencil) Enter model id manuallyвЂ¦',
         detail: `Current: ${config.model}`,
+        model: { id: '' },
       });
 
       const chosen = await vscode.window.showQuickPick(items, {
@@ -74,24 +81,59 @@ export function activate(context: vscode.ExtensionContext): void {
       if (chosen === undefined) {
         return undefined;
       }
-      if (chosen.id !== undefined) {
-        return chosen.id;
+      if (chosen.model.id.length > 0) {
+        return { id: chosen.model.id, contextLength: chosen.model.contextLength };
       }
-      return vscode.window.showInputBox({
+      const manual = await vscode.window.showInputBox({
         title: 'TLC: Model Id',
         prompt: 'Model name sent in completion requests',
         value: config.model,
       });
+      return manual === undefined ? undefined : { id: manual };
     };
 
-    /** Persists a model id in settings and refreshes the cached config. */
-    const setModel = async (modelId: string): Promise<void> => {
-      if (modelId.length === 0 || modelId === config.model) {
+    /** Rewrites prefixContextMaxLength/suffixContextMaxLength so their sum fits
+     * tlc.contextMaxLength (proportional, priority to the prefix). */
+    const clampContextSettings = async (): Promise<void> => {
+      const limit = config.contextMaxLength;
+      if (limit <= 0) {
         return;
       }
-      await vscode.workspace.getConfiguration('tlc').update('model', modelId, vscode.ConfigurationTarget.Global);
+      const { prefix, suffix } = effectiveContextLengths(config);
+      if (prefix === config.prefixMaxLength && suffix === config.suffixMaxLength) {
+        return;
+      }
+      const settings = vscode.workspace.getConfiguration('tlc');
+      await settings.update('prefixContextMaxLength', prefix, vscode.ConfigurationTarget.Global);
+      await settings.update('suffixContextMaxLength', suffix, vscode.ConfigurationTarget.Global);
       config = readConfig();
-      void vscode.window.showInformationMessage(`TLC model set to ${modelId}.`);
+      log(`Context budgets clamped to ${prefix} + ${suffix} (limit ${limit}).`);
+    };
+
+    /** Persists a model id (and its context length) in settings and refreshes the cached config. */
+    const setModel = async (modelId: string, contextLength?: number): Promise<void> => {
+      if (modelId.length === 0) {
+        return;
+      }
+      const settings = vscode.workspace.getConfiguration('tlc');
+      const modelChanged = modelId !== config.model;
+      const contextChanged =
+        contextLength !== undefined && contextLength !== config.contextMaxLength;
+      if (!modelChanged && !contextChanged) {
+        return;
+      }
+      if (modelChanged) {
+        await settings.update('model', modelId, vscode.ConfigurationTarget.Global);
+      }
+      if (contextChanged) {
+        await settings.update('contextMaxLength', contextLength, vscode.ConfigurationTarget.Global);
+        log(`Context limit for "${modelId}" set to ${contextLength}.`);
+      }
+      config = readConfig();
+      if (modelChanged) {
+        void vscode.window.showInformationMessage(`TLC model set to ${modelId}.`);
+      }
+      await clampContextSettings();
     };
 
     /**
@@ -100,25 +142,33 @@ export function activate(context: vscode.ExtensionContext): void {
      * - with multiple models, the picker is shown only when the configured
      *   model is not on the list (the user's manual choice always wins);
      * - an empty list is logged and ignored.
+     * Every application also refreshes tlc.contextMaxLength from the model
+     * metadata reported by the server.
      */
-    const applyModelList = async (models: string[]): Promise<void> => {
+    const applyModelList = async (models: ModelInfo[]): Promise<void> => {
+      // Re-clamp even when the model is unchanged (e.g. the limit was set
+      // earlier but the budgets were not rewritten yet).
+      await clampContextSettings();
       if (models.length === 0) {
         log(`Model list from ${config.baseUrl} is empty; keeping "${config.model}".`);
         return;
       }
       if (models.length === 1) {
-        if (models[0] !== config.model) {
-          await setModel(models[0]);
+        if (models[0].id !== config.model || models[0].contextLength !== config.contextMaxLength) {
+          await setModel(models[0].id, models[0].contextLength);
         }
         return;
       }
-      if (models.includes(config.model)) {
+      const current = models.find((m) => m.id === config.model);
+      if (current !== undefined) {
+        // The user's manual choice wins; still refresh the context limit.
+        await setModel(current.id, current.contextLength);
         return;
       }
       log(`"${config.model}" is not in the model list of ${config.baseUrl}; showing the picker.`);
       const chosen = await presentModelQuickPick(models);
       if (chosen !== undefined) {
-        await setModel(chosen);
+        await setModel(chosen.id, chosen.contextLength);
       }
     };
 
@@ -155,7 +205,7 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showInformationMessage('TLC API key cleared.');
     }),
     vscode.commands.registerCommand('tlc.selectModel', async () => {
-      let models: string[] = [];
+      let models: ModelInfo[] = [];
       try {
         models = await client.listModels();
       } catch (err) {
@@ -167,7 +217,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const chosen = await presentModelQuickPick(models);
       if (chosen !== undefined) {
-        await setModel(chosen);
+        await setModel(chosen.id, chosen.contextLength);
       }
     }),
     vscode.commands.registerCommand('tlc.toggleCompletions', async () => {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ExtensionConfig } from './config';
+import { ExtensionConfig, effectiveContextLengths } from './config';
 import { CompletionsClient, CompletionError } from './completions_client';
 import { extractContext } from './prompt';
 import { ForbiddenFiles } from './forbidden_files';
@@ -19,9 +19,12 @@ export interface ProviderDeps {
   trace: (message: string) => void;
 }
 
-interface ActiveCompletion {
+interface CachedCompletion {
   line: number;
-  startCharacter: number;
+  character: number;
+  /** Document version at cache creation; any edit (deleted char, deleted line) invalidates. */
+  version: number;
+  createdAt: number;
   text: string;
 }
 
@@ -48,31 +51,31 @@ const sleep = (ms: number, token: vscode.CancellationToken) =>
   });
 
 /**
- * Inline completion provider: rate-limit debounce, cancellation, pending
- * request reuse, and an active-completion cache (prefix typing re-serves the
- * same suggestion without a new API call).
+ * Inline completion provider: trailing debounce (typing pause), manual
+ * trigger bypass, cancellation, pending-request reuse, and an exact-position
+ * completion cache served without a new API call.
  */
 export class CompletionProvider implements vscode.InlineCompletionItemProvider {
-  private nextRequestTime = 0;
+  private skipDebounceOnce = false;
   private activeRequest:
-    | { line: number; controller: AbortController; completion: Promise<string> }
+    | { controller: AbortController; completion: Promise<string> }
     | undefined;
   private pending: PendingCompletion | undefined;
-  private activeCompletion: ActiveCompletion | undefined;
+  private cache: CachedCompletion | undefined;
 
-  constructor(private readonly deps: ProviderDeps) {}
+  constructor(private readonly deps: ProviderDeps) { }
 
   cancelActiveRequests(): void {
     this.activeRequest?.controller.abort();
     this.activeRequest = undefined;
     this.pending?.abort();
     this.pending = undefined;
-    this.activeCompletion = undefined;
+    this.cache = undefined;
   }
 
-  /** Drops the throttle so the next invocation requests immediately (manual trigger). */
+  /** Makes the next invocation skip the debounce window (manual trigger). */
   resetThrottle(): void {
-    this.nextRequestTime = 0;
+    this.skipDebounceOnce = true;
   }
 
   onDisabled(): void {
@@ -109,17 +112,11 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     position: vscode.Position,
     token: vscode.CancellationToken,
   ): Promise<{ text: string } | undefined> {
-    // Re-serve the cached completion while the user types its prefix.
-    const cached = this.activeCompletion;
-    if (
-      cached &&
-      cached.line === position.line &&
-      position.character >= cached.startCharacter
-    ) {
-      const typed = document.lineAt(position.line).text.slice(cached.startCharacter, position.character);
-      if (cached.text.startsWith(typed)) {
-        return { text: cached.text.slice(typed.length) };
-      }
+    // Re-serve the cached completion only at the exact cursor position it was
+    // created for, while the document is unchanged and the TTL has not expired.
+    const cached = this.cachedValue(document, position);
+    if (cached !== undefined) {
+      return { text: cached };
     }
 
     // Reuse a request kept pending from a cancelled invocation on the same line.
@@ -131,7 +128,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     ) {
       const text = await this.awaitRequest(pendingHere.completion, token);
       if (text !== undefined && text.length > 0) {
-        this.activeCompletion = { line: position.line, startCharacter: position.character, text };
+        this.storeCache(document, position, text);
         return { text };
       }
       return undefined;
@@ -144,13 +141,23 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       return undefined;
     }
 
-    // Rate-limit: wait out the remaining debounce window (abort-aware).
-    const waitUntil = this.nextRequestTime;
-    if (waitUntil > performance.now()) {
+    // Trailing debounce: every invocation pushes the send deadline out, so the
+    // request fires only after the user pauses typing. Manual trigger bypasses.
+    const config = this.deps.getConfig();
+    const now = performance.now();
+    if (this.skipDebounceOnce) {
+      this.skipDebounceOnce = false;
+    } else {
+      if (!config.autoTrigger) {
+        this.deps.trace('provider skipped: auto-trigger is disabled');
+        return undefined;
+      }
+      const deadline = now + config.debounceMs;
       try {
-        await sleep(waitUntil - performance.now(), token);
+        await sleep(deadline - now, token);
       } catch {
-        this.cancelActiveRequests();
+        // Cancelled while waiting: keep the pending request and cache intact
+        // (a follow-up invocation may reuse either). Just stop this invocation.
         return undefined;
       }
     }
@@ -171,14 +178,14 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       }
     });
 
-    const config = this.deps.getConfig();
     const { registry } = this.deps.resolveTemplates();
     const { template } = registry.resolve(config.promptTemplate);
+    const lengths = effectiveContextLengths(config);
     const context = extractContext(
       document.getText(),
       document.offsetAt(position),
-      config.prefixMaxLength,
-      config.suffixMaxLength,
+      lengths.prefix,
+      lengths.suffix,
     );
 
     const request = this.deps.client
@@ -189,15 +196,14 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
         signal: controller.signal,
       })
       .then((r) => r.text);
-    this.activeRequest = { line: position.line, controller, completion: request };
+    this.activeRequest = { controller, completion: request };
     this.deps.status.setBusy(true);
-    this.nextRequestTime = performance.now() + config.debounceMs;
     this.deps.trace(`sending completion request to ${config.baseUrl} (model ${config.model}, template ${template.id})`);
 
     try {
       const text = await request;
       if (text.length > 0) {
-        this.activeCompletion = { line: position.line, startCharacter: position.character, text };
+        this.storeCache(document, position, text);
       }
       this.deps.status.clearError();
       return { text };
@@ -209,6 +215,44 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       }
       this.deps.status.setBusy(false);
     }
+  }
+
+  private cachedValue(document: vscode.TextDocument, position: vscode.Position): string | undefined {
+    const config = this.deps.getConfig();
+    if (!config.cacheEnabled) {
+      return undefined;
+    }
+    const cache = this.cache;
+    if (!cache) {
+      return undefined;
+    }
+    if (performance.now() - cache.createdAt >= config.cacheTtlMs) {
+      this.cache = undefined;
+      return undefined;
+    }
+    // Same document state (deleted char / deleted line changes the version) and
+    // exactly the cursor position the completion was created for.
+    if (
+      cache.version !== document.version ||
+      cache.line !== position.line ||
+      cache.character !== position.character
+    ) {
+      return undefined;
+    }
+    return cache.text;
+  }
+
+  private storeCache(document: vscode.TextDocument, position: vscode.Position, text: string): void {
+    if (!this.deps.getConfig().cacheEnabled) {
+      return;
+    }
+    this.cache = {
+      line: position.line,
+      character: position.character,
+      version: document.version,
+      createdAt: performance.now(),
+      text,
+    };
   }
 
   private async awaitRequest(

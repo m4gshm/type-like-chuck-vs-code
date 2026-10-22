@@ -70,6 +70,10 @@ npm run unit         # unit tests (vitest)
 npm test             # unit + integration tests (@vscode/test-electron)
 ```
 
+## Credits
+
+Extension icon: ["Cowboy" by Robin Lopez from the Noun Project](https://thenounproject.com/icon/cowboy-6661201/), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
 Debug with F5 (Run Extension) and smoke-test against a local OpenAI-compatible server such as LM Studio.
 
 ## License

@@ -26,6 +26,15 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "icons": {
+      "tlc-cowboy": {
+        "description": "TLC cowboy silhouette (monochrome)",
+        "default": {
+          "fontPath": "./fonts/tlc-codicons.woff",
+          "fontCharacter": "\\E001"
+        }
+      }
+    },
     "commands": [
       {
         "command": "tlc.triggerCompletion",
@@ -119,38 +128,64 @@
           "default": "<|fim_prefix|>,<|fim_suffix|>,<|fim_middle|>",
           "markdownDescription": "Reserved tokens used as stop sequences and masked in user code, comma-separated. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
         },
-        "tlc.prefixContextMaxLength": {
+        "tlc.contextMaxLength": {
           "type": "integer",
           "order": 8,
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum combined prefix+suffix context (characters). Filled automatically from /v1/models when the model is updated; 0 means unlimited. When exceeded, the prefix and suffix budgets are scaled proportionally with priority to the prefix."
+        },
+        "tlc.prefixContextMaxLength": {
+          "type": "integer",
+          "order": 9,
           "default": 8000,
           "minimum": 0,
           "description": "Maximum number of characters of code before the cursor sent as context."
         },
         "tlc.suffixContextMaxLength": {
           "type": "integer",
-          "order": 9,
+          "order": 10,
           "default": 2000,
           "minimum": 0,
           "description": "Maximum number of characters of code after the cursor sent as context."
         },
         "tlc.maxTokens": {
           "type": "integer",
-          "order": 10,
+          "order": 11,
           "default": 256,
           "minimum": 1,
           "description": "Maximum number of tokens to generate."
         },
+        "tlc.autoTrigger": {
+          "type": "boolean",
+          "order": 12,
+          "default": true,
+          "description": "Trigger completions automatically after a typing pause. When off, completions are only requested via the manual shortcut (Ctrl+Alt+Space)."
+        },
         "tlc.debounceMs": {
           "type": "integer",
-          "order": 11,
+          "order": 13,
           "default": 250,
           "minimum": 50,
           "maximum": 1000,
-          "description": "Minimum interval in milliseconds between automatic completion requests."
+          "description": "How long (in milliseconds) typing must pause before an automatic completion request is sent."
+        },
+        "tlc.cacheEnabled": {
+          "type": "boolean",
+          "order": 14,
+          "default": true,
+          "description": "Re-serve the last completion at the same cursor position without a new API request."
+        },
+        "tlc.cacheTtlMs": {
+          "type": "integer",
+          "order": 15,
+          "default": 10000,
+          "minimum": 1000,
+          "description": "Lifetime of the cached completion in milliseconds."
         },
         "tlc.forbiddenFileNames": {
           "type": "array",
-          "order": 12,
+          "order": 16,
           "default": [
             ".env"
           ],
@@ -187,6 +222,9 @@
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
     "mocha": "^11.0.0",
+    "svg2ttf": "^6.1.0",
+    "svgicons2svgfont": "^16.0.0",
+    "ttf2woff": "^3.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

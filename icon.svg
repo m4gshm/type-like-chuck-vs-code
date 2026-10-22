@@ -1,48 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- TLC icon: Chuck-style face with cowboy hat and beard -->
-  <!-- subtle circular backdrop -->
-  <circle cx="64" cy="64" r="60" fill="#1e3a5f"/>
-
-  <!-- neck/shoulders -->
-  <path d="M40 108 Q40 88 64 88 Q88 88 88 108 L88 118 Q76 122 64 122 Q52 122 40 118 Z" fill="#2e5d8a"/>
-
-  <!-- face -->
-  <circle cx="64" cy="56" r="26" fill="#f0c197"/>
-
-  <!-- beard: large rounded shape covering the lower face -->
-  <path d="M36 56
-           Q36 90 50 96
-           Q57 99 59 93
-           Q61 88 64 88
-           Q67 88 69 93
-           Q71 99 78 96
-           Q92 90 92 56
-           Q86 74 64 74
-           Q42 74 36 56 Z"
-        fill="#8a5a2b"/>
-  <!-- mustache -->
-  <path d="M50 68 Q57 64 64 68 Q71 64 78 68 Q74 76 64 73 Q54 76 50 68 Z" fill="#6e4520"/>
-  <!-- mouth line inside beard -->
-  <path d="M58 82 Q64 85 70 82" stroke="#3d2712" stroke-width="2" fill="none" stroke-linecap="round"/>
-
-  <!-- eyes -->
-  <circle cx="55" cy="52" r="3.2" fill="#2b1c0e"/>
-  <circle cx="73" cy="52" r="3.2" fill="#2b1c0e"/>
-  <!-- eyebrows -->
-  <path d="M49 45 Q55 42 61 45" stroke="#6e4520" stroke-width="3" fill="none" stroke-linecap="round"/>
-  <path d="M67 45 Q73 42 79 45" stroke="#6e4520" stroke-width="3" fill="none" stroke-linecap="round"/>
-
-  <!-- nose -->
-  <path d="M64 54 Q62 62 64 64" stroke="#d9a273" stroke-width="3" fill="none" stroke-linecap="round"/>
-
-  <!-- cowboy hat: brim -->
-  <path d="M18 34 Q28 26 44 30 Q56 33 64 33 Q72 33 84 30 Q100 26 110 34 Q112 38 106 40 Q86 46 64 46 Q42 46 22 40 Q16 38 18 34 Z"
-        fill="#7a4a21"/>
-  <!-- hat crown -->
-  <path d="M40 32 Q38 12 50 8 Q64 4 78 8 Q90 12 88 32 Q76 37 64 37 Q52 37 40 32 Z"
-        fill="#8a5a2b"/>
-  <!-- hat band -->
-  <path d="M40 27 Q64 36 88 27 L88 32 Q64 41 40 32 Z" fill="#4a2c12"/>
-  <!-- crown crease -->
-  <path d="M64 8 L64 26" stroke="#6e4520" stroke-width="3" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="-5.0 -10.0 110.0 116.0">
+<g>
+ <path d="m47.172 82.633h5.6602v16.977h-5.6602z"/>
+ <path d="m36.191 68.289h4.5938v5.3789h17.535v-5.3789h4.707v-6.2188h5.4336v-8.5156h6.332v-7.6172h4.4805v-4.707h9.0742v-5.0977h5.3789v-4.9844h6.1055v-6.668h-12.27v1.625h-7.5078v2.9141h-11.652v-22.242h-5.8828v-6.3867h-26.387v6.3867h-4.9844v22.297h-11.43v-2.9141h-7.5078v-1.625l-12.211 0.003906v6.668h6.1055v4.9844h5.3789v5.0977h9.0742v4.707h4.4805v7.6172h6.1055v8.5156h4.9844v4.5938h-13.949v4.4805h-8.1797v2.4648h-7.5625v3.7539h-6.4375v22.184h25.996v-11.094h-5.6602v-4.3711h5.6602v-6.5h4.8164v21.961h11.035v-16.977h-5.6602v-14.34zm11.82-22.297h4.8164v-5.043h13.668v13.668h-10.363v-3.5312h-8.125v-5.043zm-2.2969 12.719h8.6289v6.0508h-8.6289z"/>
+ <path d="m93.5 77.367v-3.7539h-7.5625v-2.4648h-8.1797v-4.4805h-13.949v15.965h-5.6562v16.977h11.035v-21.961h4.8164v6.4961h5.6602v4.3711h-5.6602v11.094h25.996v-22.242z"/>
+</g>
 </svg>

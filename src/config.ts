@@ -9,8 +9,13 @@ export interface ExtensionConfig {
   customTemplate: CustomTemplateDefinition | undefined;
   prefixMaxLength: number;
   suffixMaxLength: number;
+  /** Maximum combined prefix+suffix context; 0 = unlimited. Filled from /v1/models on model update. */
+  contextMaxLength: number;
   maxTokens: number;
   debounceMs: number;
+  autoTrigger: boolean;
+  cacheEnabled: boolean;
+  cacheTtlMs: number;
   forbiddenFileNames: string[];
 }
 
@@ -37,8 +42,28 @@ export function readConfig(): ExtensionConfig {
       : undefined,
     prefixMaxLength: c.get<number>('prefixContextMaxLength', 8000),
     suffixMaxLength: c.get<number>('suffixContextMaxLength', 2000),
+    contextMaxLength: c.get<number>('contextMaxLength', 0),
     maxTokens: c.get<number>('maxTokens', 256),
     debounceMs: c.get<number>('debounceMs', 250),
+    autoTrigger: c.get<boolean>('autoTrigger', true),
+    cacheEnabled: c.get<boolean>('cacheEnabled', true),
+    cacheTtlMs: c.get<number>('cacheTtlMs', 10_000),
     forbiddenFileNames: c.get<string[]>('forbiddenFileNames', ['.env']),
   };
+}
+
+/**
+ * Clamps the prefix/suffix budgets to contextMaxLength (when set): the total
+ * is scaled proportionally to the current sizes, with the rounding (and thus
+ * the priority) in favor of tlc.prefixContextMaxLength.
+ */
+export function effectiveContextLengths(config: ExtensionConfig): { prefix: number; suffix: number } {
+  const p = config.prefixMaxLength;
+  const s = config.suffixMaxLength;
+  const max = config.contextMaxLength;
+  if (max <= 0 || p + s <= max) {
+    return { prefix: p, suffix: s };
+  }
+  const prefix = Math.min(max, Math.max(0, Math.ceil((max * p) / (p + s))));
+  return { prefix, suffix: Math.max(0, max - prefix) };
 }
