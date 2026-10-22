@@ -13,6 +13,8 @@ export interface ExtensionConfig {
   contextMaxLength: number;
   maxTokens: number;
   debounceMs: number;
+  /** How long a typing invocation waits for an in-flight pending request; 0 disables the wait. */
+  pendingGraceMs: number;
   autoTrigger: boolean;
   cacheEnabled: boolean;
   cacheTtlMs: number;
@@ -45,6 +47,7 @@ export function readConfig(): ExtensionConfig {
     contextMaxLength: c.get<number>('contextMaxLength', 0),
     maxTokens: c.get<number>('maxTokens', 256),
     debounceMs: c.get<number>('debounceMs', 250),
+    pendingGraceMs: c.get<number>('pendingGraceMs', 150),
     autoTrigger: c.get<boolean>('autoTrigger', true),
     cacheEnabled: c.get<boolean>('cacheEnabled', true),
     cacheTtlMs: c.get<number>('cacheTtlMs', 10_000),

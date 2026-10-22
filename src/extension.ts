@@ -68,7 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
         model: m,
       }));
       items.push({
-        label: '$(pencil) Enter model id manuallyвЂ¦',
+        label: '$(pencil) Enter model id manually…',
         detail: `Current: ${config.model}`,
         model: { id: '' },
       });

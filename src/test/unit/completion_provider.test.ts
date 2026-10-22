@@ -53,6 +53,7 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
     suffixMaxLength: 2000,
     maxTokens: 256,
     debounceMs: 250,
+    pendingGraceMs: 150,
     autoTrigger: true,
     cacheEnabled: true,
     cacheTtlMs: 10_000,

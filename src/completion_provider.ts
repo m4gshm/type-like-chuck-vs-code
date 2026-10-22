@@ -128,12 +128,36 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       position.character >= pendingHere.positionCharacter
     ) {
       this.pending = undefined;
-      const text = await this.awaitRequest(pendingHere.completion, token);
-      if (text !== undefined && text.length > 0) {
-        this.storeCache(document, position, text);
-        return { text };
+      // If the user typed past the request's start position, give the in-flight
+      // request only a short grace period before discarding it in favor of a
+      // fresh request with up-to-date context (tlc.pendingGraceMs; 0 skips the
+      // wait). Re-invocation at the same position (no edits) keeps waiting for
+      // the full result.
+      const config = this.deps.getConfig();
+      const typedOn = position.character > pendingHere.positionCharacter;
+      const grace =
+        typedOn && config.pendingGraceMs > 0
+          ? sleep(config.pendingGraceMs, token).then(
+              () => undefined,
+              () => undefined,
+            )
+          : undefined;
+      const result = await (grace
+        ? Promise.race([this.awaitRequest(pendingHere.completion, token), grace])
+        : this.awaitRequest(pendingHere.completion, token));
+      if (!result || token.isCancellationRequested) {
+        return undefined;
       }
-      return undefined;
+      if (result.text !== undefined && result.text.length > 0) {
+        this.storeCache(document, position, result.text);
+        return { text: result.text };
+      }
+      if (result.failed) {
+        // The request already surfaced its error; don't fire another one right away.
+        return undefined;
+      }
+      // Grace expired: the stale request is no longer worth waiting for.
+      pendingHere.abort();
     }
     this.pending?.abort();
     this.pending = undefined;
@@ -260,12 +284,12 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
   private async awaitRequest(
     request: Promise<string>,
     token: vscode.CancellationToken,
-  ): Promise<string | undefined> {
+  ): Promise<{ text?: string; failed?: boolean }> {
     try {
-      const text = await request;
-      return text;
+      return { text: await request };
     } catch (err) {
-      return this.handleRequestError(err) ?? undefined;
+      this.handleRequestError(err);
+      return { failed: err instanceof CompletionError };
     } finally {
       void token;
     }

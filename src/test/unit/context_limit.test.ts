@@ -13,6 +13,7 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     contextMaxLength: 0,
     maxTokens: 256,
     debounceMs: 250,
+    pendingGraceMs: 150,
     autoTrigger: true,
     cacheEnabled: true,
     cacheTtlMs: 10_000,

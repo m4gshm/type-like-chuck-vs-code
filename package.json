@@ -170,22 +170,30 @@
           "maximum": 1000,
           "description": "How long (in milliseconds) typing must pause before an automatic completion request is sent."
         },
+        "tlc.pendingGraceMs": {
+          "type": "integer",
+          "order": 14,
+          "default": 150,
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "How long (in milliseconds) typing past a pending request waits for its result before discarding it and requesting afresh after the debounce pause. 0 never waits."
+        },
         "tlc.cacheEnabled": {
           "type": "boolean",
-          "order": 14,
+          "order": 15,
           "default": true,
           "description": "Re-serve the last completion at the same cursor position without a new API request."
         },
         "tlc.cacheTtlMs": {
           "type": "integer",
-          "order": 15,
+          "order": 16,
           "default": 10000,
           "minimum": 1000,
           "description": "Lifetime of the cached completion in milliseconds."
         },
         "tlc.forbiddenFileNames": {
           "type": "array",
-          "order": 16,
+          "order": 17,
           "default": [
             ".env"
           ],
