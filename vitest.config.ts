@@ -9,6 +9,9 @@ export default defineConfig({
   },
   test: {
     include: ['src/test/unit/**/*.test.ts'],
+    coverage: {
+      include: ['src/**'],
+    },
     fakeTimers: {
       toFake: ['setTimeout', 'clearTimeout', 'performance'],
     },

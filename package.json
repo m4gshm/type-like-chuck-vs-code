@@ -213,7 +213,8 @@
     "unit": "vitest run",
     "compile-tests": "tsc -p tsconfig.test.json",
     "package": "npm run compile && node scripts/make-icon.mjs && vsce package --no-dependencies",
-    "test": "npm run unit && npm run compile-tests && vscode-test"
+    "test": "npm run unit && npm run compile-tests && vscode-test",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "micromatch": "^4.0.8",
@@ -225,6 +226,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.97.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",

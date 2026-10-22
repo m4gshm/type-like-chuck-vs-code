@@ -51,7 +51,7 @@ export class CompletionError extends Error {
 }
 
 export class CompletionsClient {
-  private client: OpenAI;
+  private client: Pick<OpenAI, 'completions' | 'models'>;
   private apiKey: string | undefined;
 
   constructor(
@@ -59,12 +59,18 @@ export class CompletionsClient {
     private readonly getModel: () => string,
     private readonly getMaxTokens: () => number,
     private readonly logCause?: (message: string) => void,
+    private readonly createSdk: (options: {
+      baseURL: string;
+      apiKey: string;
+      defaultHeaders: Record<string, string>;
+      maxRetries: number;
+    }) => Pick<OpenAI, 'completions' | 'models'> = (options) => new OpenAI(options),
   ) {
     this.client = this.createClient();
   }
 
-  private createClient(): OpenAI {
-    return new OpenAI({
+  private createClient(): Pick<OpenAI, 'completions' | 'models'> {
+    return this.createSdk({
       baseURL: this.getBaseUrl(),
       apiKey: this.apiKey || 'TLC',
       defaultHeaders: { 'User-Agent': 'TLC' },

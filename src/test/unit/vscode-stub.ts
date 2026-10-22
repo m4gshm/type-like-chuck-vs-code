@@ -35,6 +35,40 @@ export class CancellationError extends Error {
   }
 }
 
-export const window = { showErrorMessage: async () => undefined, showWarningMessage: async () => undefined };
+export const window = {
+  showErrorMessage: async () => undefined,
+  showWarningMessage: async () => undefined,
+  showInformationMessage: async () => undefined,
+  /** Records created status bar items so tests can inspect their text. */
+  createdStatusBarItems: [] as StatusBarItemStub[],
+  createStatusBarItem: (alignment?: number, priority?: number): StatusBarItemStub => {
+    const item = new StatusBarItemStub(alignment, priority);
+    window.createdStatusBarItems.push(item);
+    return item;
+  },
+};
+
+export const StatusBarAlignment = { Left: 1, Right: 2 } as const;
+
+export class StatusBarItemStub {
+  text = '';
+  tooltip: string | undefined;
+  command: string | undefined;
+  shown = false;
+  disposed = false;
+  constructor(
+    readonly alignment?: number,
+    readonly priority?: number,
+  ) {}
+  show(): void {
+    this.shown = true;
+  }
+  hide(): void {
+    this.shown = false;
+  }
+  dispose(): void {
+    this.disposed = true;
+  }
+}
 
 export const commands = { registerCommand: () => ({ dispose() {} }), executeCommand: async () => undefined };

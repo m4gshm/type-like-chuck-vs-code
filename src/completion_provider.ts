@@ -28,6 +28,9 @@ interface CachedCompletion {
   text: string;
 }
 
+/** Sentinel: the pending-request grace window expired. */
+const GRACE_EXPIRED: unique symbol = Symbol('graceExpired');
+
 const sleep = (ms: number, token: vscode.CancellationToken) =>
   new Promise<void>((resolve, reject) => {
     if (token.isCancellationRequested) {
@@ -70,7 +73,6 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     this.activeRequest = undefined;
     this.pending?.abort();
     this.pending = undefined;
-    this.cache = undefined;
   }
 
   /** Makes the next invocation skip the debounce window (manual trigger). */
@@ -128,6 +130,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       position.character >= pendingHere.positionCharacter
     ) {
       this.pending = undefined;
+      pendingHere.consume();
       // If the user typed past the request's start position, give the in-flight
       // request only a short grace period before discarding it in favor of a
       // fresh request with up-to-date context (tlc.pendingGraceMs; 0 skips the
@@ -135,29 +138,46 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       // the full result.
       const config = this.deps.getConfig();
       const typedOn = position.character > pendingHere.positionCharacter;
-      const grace =
-        typedOn && config.pendingGraceMs > 0
-          ? sleep(config.pendingGraceMs, token).then(
-              () => undefined,
-              () => undefined,
-            )
-          : undefined;
-      const result = await (grace
-        ? Promise.race([this.awaitRequest(pendingHere.completion, token), grace])
-        : this.awaitRequest(pendingHere.completion, token));
-      if (!result || token.isCancellationRequested) {
-        return undefined;
+      if (typedOn && config.pendingGraceMs <= 0) {
+        // Never wait for the stale request: drop it right away.
+        pendingHere.abort();
+      } else {
+        const raced: { text?: string; failed?: boolean } | typeof GRACE_EXPIRED = typedOn
+          ? await (async () => {
+              this.deps.status.setBusy(true);
+              try {
+                return await Promise.race([
+                  this.awaitRequest(pendingHere.completion, token),
+                  sleep(config.pendingGraceMs, token).then(
+                    () => GRACE_EXPIRED,
+                    () => GRACE_EXPIRED,
+                  ),
+                ]) as { text?: string; failed?: boolean } | typeof GRACE_EXPIRED;
+              } finally {
+                this.deps.status.setBusy(false);
+              }
+            })()
+          : await (async () => {
+              this.deps.status.setBusy(true);
+              try {
+                return await this.awaitRequest(pendingHere.completion, token);
+              } finally {
+                this.deps.status.setBusy(false);
+              }
+            })();
+        if (raced === GRACE_EXPIRED) {
+          // Grace expired: the stale request is no longer worth waiting for.
+          pendingHere.abort();
+        } else if (token.isCancellationRequested) {
+          return undefined;
+        } else if (raced.text !== undefined && raced.text.length > 0) {
+          this.storeCache(document, position, raced.text);
+          return { text: raced.text };
+        } else if (raced.failed) {
+          // The request already surfaced its error; don't fire another one right away.
+          return undefined;
+        }
       }
-      if (result.text !== undefined && result.text.length > 0) {
-        this.storeCache(document, position, result.text);
-        return { text: result.text };
-      }
-      if (result.failed) {
-        // The request already surfaced its error; don't fire another one right away.
-        return undefined;
-      }
-      // Grace expired: the stale request is no longer worth waiting for.
-      pendingHere.abort();
     }
     this.pending?.abort();
     this.pending = undefined;
