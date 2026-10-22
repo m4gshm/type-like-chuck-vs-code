@@ -38,6 +38,15 @@ function fakeDocument(lines: string[], fileName = 'main.ts', version = 1) {
     lineAt: (line: number) => ({ text: lines[line] }),
     offsetAt: (p: { line: number; character: number }) =>
       lines.slice(0, p.line).reduce((n, l) => n + l.length + 1, 0) + p.character,
+    positionAt: (offset: number) => {
+      let line = 0;
+      let rest = offset;
+      while (line < lines.length && rest > lines[line].length) {
+        rest -= lines[line].length + 1;
+        line += 1;
+      }
+      return new Position(line, Math.max(0, rest));
+    },
   };
 }
 
@@ -48,7 +57,7 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
   const defaults = {
     baseUrl: 'http://stub/v1',
     model: 'stub-model',
-    promptTemplate: 'qwen2.5',
+    promptTemplate: 'qwen2',
     customTemplate: undefined,
     prefixMaxLength: 8000,
     suffixMaxLength: 2000,
@@ -70,7 +79,7 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
       },
     } as never,
     getConfig: () => config,
-    resolveTemplates: () => buildTemplateRegistry('qwen2.5', undefined),
+    resolveTemplates: () => buildTemplateRegistry('qwen2', undefined),
     forbidden: () => new ForbiddenFiles(config.forbiddenFileNames),
     state: {
       isEnabled: () => enabled,
@@ -144,6 +153,34 @@ describe('CompletionProvider', () => {
     expect(calls()).toBe(2);
   });
 
+  it('never serves the cached completion in a different document (same version/position)', async () => {
+    const { deps, calls } = makeDeps(async () => ({ text: 'from main.ts' }));
+    const provider = new CompletionProvider(deps);
+    const token = new FakeToken();
+
+    const first = provider.provideInlineCompletionItems(
+      fakeDocument([''], 'main.ts', 1) as never,
+      new Position(0, 0) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await first)[0].insertText).toBe('from main.ts');
+    expect(calls()).toBe(1);
+
+    // Another file that happens to share the version number and cursor
+    // position must not receive the other document's completion.
+    const other = provider.provideInlineCompletionItems(
+      fakeDocument([''], 'other.ts', 1) as never,
+      new Position(0, 0) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await other)[0].insertText).toBe('from main.ts');
+    expect(calls()).toBe(2);
+  });
+
   it('drops the cached completion after the TTL expires', async () => {
     const { deps, calls } = makeDeps(async () => ({ text: 'cached' }));
     const provider = new CompletionProvider(deps);
@@ -212,6 +249,52 @@ describe('CompletionProvider', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(second).toHaveLength(1);
     expect(calls()).toBe(2);
+  });
+
+  it('drops a completion that fully duplicates the text after the cursor', async () => {
+    // Cursor before " = 1;": the model suggests exactly what is already there.
+    const { deps, calls } = makeDeps(async () => ({ text: ' = 1;' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['const x = 1;']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 7) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(0);
+    expect(calls()).toBe(1); // the request was made, the suggestion is just useless
+  });
+
+  it('replaces the overlapping suffix part when the completion extends it', async () => {
+    // Completion " = 1; // done" overlaps " = 1;" and adds a tail: the overlap
+    // must be replaced (not duplicated), yielding "const x = 1; // done".
+    const { deps } = makeDeps(async () => ({ text: ' = 1; // done' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['const x = 1;']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 7) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    const items = await result;
+    expect(items).toHaveLength(1);
+    expect(items[0].insertText).toBe(' = 1; // done');
+    const range = items[0].range as { start: { character: number }; end: { character: number } };
+    expect(range.start.character).toBe(7);
+    expect(range.end.character).toBe(12); // the " = 1;" part is replaced, not doubled
+  });
+
+  it('keeps a plain insertion range when nothing overlaps', async () => {
+    const { deps } = makeDeps(async () => ({ text: '.length' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['const x = 1;']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 7) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    const items = await result;
+    expect(items[0].insertText).toBe('.length');
+    const range = items[0].range as { start: { character: number }; end: { character: number } };
+    expect(range.start.character).toBe(7);
+    expect(range.end.character).toBe(7);
   });
 
   it('keeps the cache across cancelActiveRequests (a click must not invalidate it)', async () => {
@@ -318,7 +401,43 @@ describe('CompletionProvider pending reuse', () => {
     void invocation1;
   });
 
-  it('waits the full pending result when the cursor did not move past it', async () => {
+  it('discards the pending request when undo reverted the document to the same position (stale context)', async () => {
+    const first = deferred();
+    let impl = first;
+    const harness = makeDeps(async () => impl.promise);
+    const provider = new CompletionProvider(harness.deps);
+    const token = new FakeToken();
+
+    const invocation1 = provider.provideInlineCompletionItems(
+      fakeDocument(['abc']) as never,
+      new Position(0, 3) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    token.cancel();
+
+    // Same cursor position but a different document version (undo/redo): the
+    // pending request was built from a context that no longer exists, so it is
+    // dropped and a fresh request fires after the debounce.
+    const second = deferred();
+    impl = second;
+    const token2 = new FakeToken();
+    const invocation2 = provider.provideInlineCompletionItems(
+      fakeDocument(['abd'], 'main.ts', 2) as never,
+      new Position(0, 3) as never,
+      {} as never,
+      token2 as never,
+    );
+    await vi.advanceTimersByTimeAsync(5000); // way past the grace and the TTL
+    second.resolve({ text: 'fresh context result' });
+    expect((await invocation2)[0].insertText).toBe('fresh context result');
+    expect(harness.calls()).toBe(2);
+    first.resolve({ text: 'stale' });
+    void invocation1;
+  });
+
+  it('waits the full pending result when re-invoked at the same position with the document unchanged', async () => {
     const first = deferred();
     const harness = makeDeps(async () => first.promise);
     const provider = new CompletionProvider(harness.deps);
@@ -333,11 +452,11 @@ describe('CompletionProvider pending reuse', () => {
     await vi.advanceTimersByTimeAsync(250);
     token.cancel();
 
-    // Same position (edit happened elsewhere → cache miss), no typing past the
-    // request start: no grace limit, the result is awaited however long it takes.
+    // Re-invocation at the same position with no edits: no grace limit, the
+    // result is awaited however long it takes.
     const token2 = new FakeToken();
     const invocation2 = provider.provideInlineCompletionItems(
-      fakeDocument(['abc'], 'main.ts', 2) as never,
+      fakeDocument(['abc'], 'main.ts', 1) as never,
       new Position(0, 3) as never,
       {} as never,
       token2 as never,

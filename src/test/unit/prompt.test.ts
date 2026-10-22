@@ -22,6 +22,18 @@ describe('extractContext', () => {
     expect(extractContext(text, text.length, 10, 10).suffix).toBe('');
     expect(extractContext(text, 4, 0, 0)).toEqual({ prefix: '', suffix: '' });
   });
+
+  it('never splits a surrogate pair at a truncation boundary', () => {
+    const emoji = '😀'; // one astral character = two UTF-16 code units
+    const doc = 'x'.repeat(9) + emoji + emoji + emoji + 'y'.repeat(9);
+    const offset = 9 + emoji.length; // cursor right after the first emoji
+    // prefixMaxLength=1 lands between the first emoji's halves; the boundary
+    // shifts back so the whole emoji stays in the prefix. suffixMaxLength=3
+    // lands between the third emoji's halves; it shifts back to its start.
+    const ctx = extractContext(doc, offset, 1, 3);
+    expect(ctx.prefix).toBe(emoji);
+    expect(ctx.suffix).toBe(emoji);
+  });
 });
 
 describe('maskReservedTokens', () => {
@@ -34,5 +46,13 @@ describe('maskReservedTokens', () => {
   it('leaves text without reserved tokens untouched', () => {
     const code = 'plain code';
     expect(maskReservedTokens(code, ['<|fim_prefix|>'])).toBe(code);
+  });
+
+  it('masks independently of the token order (longest tokens first)', () => {
+    const code = 'const a = "<|fim_prefix|>"; const b = "<|fim_pad|>";';
+    const one = maskReservedTokens(code, ['<|fim_prefix|>', '<|fim_pad|>']);
+    const other = maskReservedTokens(code, ['<|fim_pad|>', '<|fim_prefix|>']);
+    expect(one).toBe(other);
+    expect(one).toBe('const a = "< |fim_prefix|>"; const b = "< |fim_pad|>";');
   });
 });

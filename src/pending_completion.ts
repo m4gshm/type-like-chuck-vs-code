@@ -17,8 +17,11 @@ export class PendingCompletion {
   private readonly timer: ReturnType<typeof setTimeout>;
 
   constructor(
+    readonly fileName: string,
     readonly line: number,
     readonly positionCharacter: number,
+    /** Document version at request time; detects undo/redo back to the same position. */
+    readonly version: number,
     readonly completion: Promise<string>,
     private readonly controller: { abort(): void },
     lifetimeMs = 1000,

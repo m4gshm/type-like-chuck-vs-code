@@ -39,8 +39,8 @@ suite('TLC extension', () => {
     stub = await startStubServer({ chunks: ['  console.log', '("hi")\nEXTRA'] });
     await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
-    const { registry } = buildTemplateRegistry('qwen2.5', undefined);
-    const { template } = registry.resolve('qwen2.5');
+    const { registry } = buildTemplateRegistry('qwen2', undefined);
+    const { template } = registry.resolve('qwen2');
 
     const controller = new AbortController();
     const client = new CompletionsClient(() => stub.url, () => 'stub', () => 64);
@@ -57,7 +57,7 @@ suite('TLC extension', () => {
     stub = await startStubServer({ chunks: ['slow result'], delayMs: 500 });
     await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
-    const { template } = buildTemplateRegistry('qwen2.5', undefined).registry.resolve('qwen2.5');
+    const { template } = buildTemplateRegistry('qwen2', undefined).registry.resolve('qwen2');
 
     const controller = new AbortController();
     const client = new CompletionsClient(() => stub.url, () => 'stub', () => 64);
@@ -90,7 +90,7 @@ suite('TLC extension', () => {
     stub = await startStubServer({ status: 401 });
     await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
-    const { template } = buildTemplateRegistry('qwen2.5', undefined).registry.resolve('qwen2.5');
+    const { template } = buildTemplateRegistry('qwen2', undefined).registry.resolve('qwen2');
 
     const client = new CompletionsClient(() => stub.url, () => 'stub', () => 64);
     try {
@@ -103,7 +103,7 @@ suite('TLC extension', () => {
 
   test('connection failure surfaces a connection error', async function () {
     this.timeout(30000);
-    const { template } = buildTemplateRegistry('qwen2.5', undefined).registry.resolve('qwen2.5');
+    const { template } = buildTemplateRegistry('qwen2', undefined).registry.resolve('qwen2');
 
     const deadPort = await new Promise<number>((resolve) => {
       const srv = require('node:http').createServer();

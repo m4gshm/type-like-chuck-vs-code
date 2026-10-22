@@ -186,8 +186,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // - selecting a built-in template removes stored copies of its markers;
   // - editing any field switches the selection to "custom".
   let syncingTemplateFields = false;
-
-  /** Removes marker/stop settings entries that just duplicate a built-in template. */
   const cleanupTemplateFields = async (selectedId: string | undefined): Promise<void> => {
     if (selectedId === undefined || selectedId === 'custom') {
       return;
@@ -197,16 +195,22 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     const cfg = vscode.workspace.getConfiguration('tlc');
-    const stored: Array<[string, string]> = [
-      ['prefix', template.markers.prefix],
-      ['suffix', template.markers.suffix],
-      ['middle', template.markers.middle],
-      ['stop', template.reservedTokens.join(',')],
+    const parseStop = (raw: string | undefined): string =>
+      (raw ?? '')
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+        .join(',');
+    const stored: Array<[string, string, (raw: string | undefined) => string]> = [
+      ['prefix', template.markers.prefix, (raw) => raw ?? ''],
+      ['suffix', template.markers.suffix, (raw) => raw ?? ''],
+      ['middle', template.markers.middle, (raw) => raw ?? ''],
+      ['stop', template.reservedTokens.join(','), parseStop],
     ];
     syncingTemplateFields = true;
     try {
-      for (const [key, builtinValue] of stored) {
-        if (cfg.get<string>(key) === builtinValue) {
+      for (const [key, builtinValue, normalize] of stored) {
+        if (normalize(cfg.get<string>(key)) === builtinValue) {
           await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
         }
       }
@@ -220,6 +224,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!event.affectsConfiguration('tlc')) {
         return;
       }
+      // Refresh the cached config first: everything below (including
+      // client.refresh()) derives from the new settings.
+      modelConfig.reload();
       if (event.affectsConfiguration('tlc.promptTemplate') && !syncingTemplateFields) {
         const selectedId = vscode.workspace.getConfiguration('tlc').get<string>('promptTemplate');
         if (selectedId !== 'custom') {
@@ -234,8 +241,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }
 
-      // The SDK captures baseURL at construction time, so the client only
-      // needs a refresh when the server URL changes.
+      // The SDK captures baseURL at construction time.
       const baseUrlChanged = event.affectsConfiguration('tlc.baseUrl');
       if (baseUrlChanged) {
         client.refresh();
@@ -247,9 +253,7 @@ export function activate(context: vscode.ExtensionContext): void {
         log(warning);
       }
 
-      // When the server URL changes, resolve the model against its list:
-      // one model is applied automatically, several show the picker when the
-      // configured model is not on the list.
+      // Resolve the model against the new server's list.
       if (baseUrlChanged) {
         try {
           await modelConfig.applyModelList(await client.listModels());
@@ -270,9 +274,8 @@ export function activate(context: vscode.ExtensionContext): void {
       // Server not reachable at startup: keep the configured model silently.
     }
 
-    // Template validation: a known built-in or a usable custom template is
-    // fine; otherwise suggest a template matching the model name, and if that
-    // fails too, warn with a shortcut to the settings editor.
+    // Template validation: fall back to a template matching the model name,
+    // then to a warning with a shortcut to the settings editor.
     const selected = config().promptTemplate;
     const usable =
       selected === 'custom'

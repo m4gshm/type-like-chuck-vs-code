@@ -7,6 +7,7 @@ import { PendingCompletion } from './pending_completion';
 import { CompletionState } from './completion_state';
 import { StatusBar } from './status_bar';
 import { ResolvedTemplates } from './templates';
+import { overlapLength } from './overlap';
 
 export interface ProviderDeps {
   client: CompletionsClient;
@@ -20,9 +21,9 @@ export interface ProviderDeps {
 }
 
 interface CachedCompletion {
+  fileName: string;
   line: number;
   character: number;
-  /** Document version at cache creation; any edit (deleted char, deleted line) invalidates. */
   version: number;
   createdAt: number;
   text: string;
@@ -106,7 +107,20 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     if (completion === undefined || completion.text.length === 0) {
       return [];
     }
-    return [new vscode.InlineCompletionItem(completion.text, new vscode.Range(position, position))];
+    // Fully overlapping suggestions are useless; partial overlaps must replace
+    // the duplicated characters instead of doubling them.
+    const offset = document.offsetAt(position);
+    const following = document.getText().slice(offset, offset + completion.text.length);
+    const overlap = overlapLength(completion.text, following);
+    if (overlap >= completion.text.length) {
+      this.deps.trace('provider skipped: completion duplicates the existing text after the cursor');
+      return [];
+    }
+    const range =
+      overlap > 0
+        ? new vscode.Range(position, document.positionAt(offset + overlap))
+        : new vscode.Range(position, position);
+    return [new vscode.InlineCompletionItem(completion.text, range)];
   }
 
   private async getOrCreateCompletion(
@@ -114,32 +128,31 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     position: vscode.Position,
     token: vscode.CancellationToken,
   ): Promise<{ text: string } | undefined> {
-    // Re-serve the cached completion only at the exact cursor position it was
-    // created for, while the document is unchanged and the TTL has not expired.
     const cached = this.cachedValue(document, position);
     if (cached !== undefined) {
       return { text: cached };
     }
 
-    // Reuse a request kept pending from a cancelled invocation on the same line,
-    // but only once: after consuming it, later typing must trigger a fresh request.
+    // Undo/redo back to the request's exact position (same character,
+    // different version) means the request's context no longer exists.
     const pendingHere = this.pending;
     if (
       pendingHere &&
+      pendingHere.fileName === document.fileName &&
       pendingHere.line === position.line &&
-      position.character >= pendingHere.positionCharacter
+      position.character >= pendingHere.positionCharacter &&
+      !(
+        position.character === pendingHere.positionCharacter &&
+        document.version !== pendingHere.version
+      )
     ) {
       this.pending = undefined;
       pendingHere.consume();
-      // If the user typed past the request's start position, give the in-flight
-      // request only a short grace period before discarding it in favor of a
-      // fresh request with up-to-date context (tlc.pendingGraceMs; 0 skips the
-      // wait). Re-invocation at the same position (no edits) keeps waiting for
-      // the full result.
+      // Typed past the request start: wait only pendingGraceMs for the stale
+      // result before requesting afresh; unchanged position waits in full.
       const config = this.deps.getConfig();
       const typedOn = position.character > pendingHere.positionCharacter;
       if (typedOn && config.pendingGraceMs <= 0) {
-        // Never wait for the stale request: drop it right away.
         pendingHere.abort();
       } else {
         const raced: { text?: string; failed?: boolean } | typeof GRACE_EXPIRED = typedOn
@@ -166,7 +179,6 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
               }
             })();
         if (raced === GRACE_EXPIRED) {
-          // Grace expired: the stale request is no longer worth waiting for.
           pendingHere.abort();
         } else if (token.isCancellationRequested) {
           return undefined;
@@ -187,8 +199,8 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       return undefined;
     }
 
-    // Trailing debounce: every invocation pushes the send deadline out, so the
-    // request fires only after the user pauses typing. Manual trigger bypasses.
+    // Trailing debounce: the request fires only after the user pauses typing;
+    // the manual trigger bypasses it.
     const config = this.deps.getConfig();
     const now = performance.now();
     if (this.skipDebounceOnce) {
@@ -209,12 +221,14 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     }
 
     const controller = new AbortController();
-    token.onCancellationRequested(() => {
+    const cancelSubscription = token.onCancellationRequested(() => {
       // Keep the request briefly pending so fast typing can re-use it.
       if (this.activeRequest && this.activeRequest.controller === controller) {
         this.pending = new PendingCompletion(
+          document.fileName,
           position.line,
           position.character,
+          document.version,
           this.activeRequest.completion,
           controller,
         );
@@ -256,6 +270,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     } catch (err) {
       return this.handleRequestError(err);
     } finally {
+      cancelSubscription.dispose();
       if (this.activeRequest && this.activeRequest.controller === controller) {
         this.activeRequest = undefined;
       }
@@ -276,9 +291,8 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       this.cache = undefined;
       return undefined;
     }
-    // Same document state (deleted char / deleted line changes the version) and
-    // exactly the cursor position the completion was created for.
     if (
+      cache.fileName !== document.fileName ||
       cache.version !== document.version ||
       cache.line !== position.line ||
       cache.character !== position.character
@@ -293,6 +307,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       return;
     }
     this.cache = {
+      fileName: document.fileName,
       line: position.line,
       character: position.character,
       version: document.version,

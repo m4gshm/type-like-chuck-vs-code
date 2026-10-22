@@ -78,4 +78,12 @@ describe('template registry', () => {
     expect(warnings).toHaveLength(1);
     expect(registry.resolve('custom').template.id).toBe(DEFAULT_TEMPLATE_ID);
   });
+
+  it('rejects a custom template whose markers are all empty', () => {
+    const { registry, warnings } = buildTemplateRegistry('custom', {
+      id: 'empty', prefix: '', suffix: '', middle: '',
+    });
+    expect(warnings).toHaveLength(1);
+    expect(registry.resolve('custom').template.id).toBe(DEFAULT_TEMPLATE_ID);
+  });
 });

@@ -10,7 +10,7 @@
 /** Longest repeating block considered. */
 const MAX_BLOCK_LENGTH = 64;
 
-/** Repeats required for a single-character block (long runs like `aaaa...`). */
+/** Repeats required for a single-character block (long runs like `aaaa...`); pure-whitespace runs are exempt. */
 const SINGLE_CHAR_THRESHOLD = 24;
 
 /** Repeats required for multi-character blocks. */
@@ -27,6 +27,11 @@ export function detectLoop(text: string): LoopDetection {
   const maxBlock = Math.min(MAX_BLOCK_LENGTH, Math.floor(text.length / 2));
   for (let block = 1; block <= maxBlock; block += 1) {
     const candidate = text.slice(text.length - block);
+    // Long runs of whitespace are legitimate output (deep indentation), not a
+    // degenerate loop — exempt blocks consisting solely of whitespace.
+    if (/^\s+$/.test(candidate)) {
+      continue;
+    }
     let repeats = 1;
     let pos = text.length - block;
     while (pos - block >= 0 && text.slice(pos - block, pos) === candidate) {

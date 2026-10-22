@@ -3,7 +3,7 @@ import { PendingCompletion } from '../../pending_completion';
 
 function makePending(lifetimeMs = 1000) {
   const controller = { abort: vi.fn() };
-  const pending = new PendingCompletion(3, 7, Promise.resolve('text'), controller, lifetimeMs);
+  const pending = new PendingCompletion('main.ts', 3, 7, 1, Promise.resolve('text'), controller, lifetimeMs);
   return { pending, controller };
 }
 

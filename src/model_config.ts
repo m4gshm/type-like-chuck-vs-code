@@ -29,14 +29,14 @@ export class ModelConfig {
     return this.config;
   }
 
-  private async reload(): Promise<void> {
+  /** Re-reads the configuration; must be called after any tlc settings change. */
+  reload(): void {
     this.config = this.host.readConfig();
   }
 
   /**
-   * Persists a model id (and its context length) in settings and refreshes
-   * the cached config. A model without metadata resets the context limit to
-   * "unlimited" — the previous model's limit must not clamp the new one.
+   * Persists a model id and its context length. A model without metadata
+   * resets the context limit to "unlimited".
    */
   async setModel(modelId: string, contextLength?: number): Promise<void> {
     if (modelId.length === 0) {
@@ -46,7 +46,9 @@ export class ModelConfig {
     const modelChanged = modelId !== this.config.model;
     const limitChanged =
       contextLength !== undefined && contextLength !== this.config.contextMaxLength;
-    const limitReset = modelChanged && contextLength === undefined && this.config.contextMaxLength !== 0;
+    // A model without metadata resets the limit even when the id is unchanged:
+    // the previous limit may come from another server.
+    const limitReset = contextLength === undefined && this.config.contextMaxLength !== 0;
     if (!modelChanged && !limitChanged && !limitReset) {
       return;
     }
@@ -61,7 +63,7 @@ export class ModelConfig {
           : `Context limit reset to unlimited (no metadata for "${modelId}").`,
       );
     }
-    await this.reload();
+    this.reload();
     if (modelChanged) {
       this.host.notify(`TLC model set to ${modelId}.`);
     }
@@ -78,8 +80,6 @@ export class ModelConfig {
    * metadata reported by the server.
    */
   async applyModelList(models: ModelInfo[]): Promise<void> {
-    // Re-clamp even when the model is unchanged (e.g. the limit was set
-    // earlier but the budgets were not rewritten yet).
     await this.clampContextSettings();
     if (models.length === 0) {
       this.host.log(`Model list is empty; keeping "${this.config.model}".`);
@@ -94,7 +94,6 @@ export class ModelConfig {
     }
     const current = models.find((m) => m.id === this.config.model);
     if (current !== undefined) {
-      // The user's manual choice wins; still refresh the context limit.
       await this.setModel(current.id, current.contextLength);
       return;
     }
@@ -118,7 +117,7 @@ export class ModelConfig {
     }
     await this.host.updateSetting('prefixContextMaxLength', prefix);
     await this.host.updateSetting('suffixContextMaxLength', suffix);
-    await this.reload();
+    this.reload();
     this.host.log(`Context budgets clamped to ${prefix} + ${suffix} (limit ${limit}).`);
   }
 }

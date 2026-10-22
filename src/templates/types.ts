@@ -30,7 +30,8 @@ export function templateFromDefinition(def: CustomTemplateDefinition): FimTempla
     typeof def.id !== 'string' || def.id.length === 0 ||
     typeof def.prefix !== 'string' ||
     typeof def.suffix !== 'string' ||
-    typeof def.middle !== 'string'
+    typeof def.middle !== 'string' ||
+    (def.prefix.length === 0 && def.suffix.length === 0 && def.middle.length === 0)
   ) {
     return undefined;
   }

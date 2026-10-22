@@ -129,6 +129,13 @@ describe('ModelConfig.setModel', () => {
     expect(setup1.updates).toHaveLength(0);
   });
 
+  it('resets the context limit when the same model reports no metadata (another server)', async () => {
+    const setup1 = setup(mkConfig({ contextMaxLength: 8192 }));
+    await setup1.modelConfig.setModel('qwen2.5-coder-1.5b', undefined);
+    expect(setup1.config.contextMaxLength).toBe(0);
+    expect(setup1.updates.map((u) => u.key)).toContain('contextMaxLength');
+  });
+
   it('ignores empty model ids', async () => {
     const setup1 = setup(mkConfig());
     await setup1.modelConfig.setModel('');

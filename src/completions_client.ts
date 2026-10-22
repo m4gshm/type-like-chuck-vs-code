@@ -104,7 +104,7 @@ export class CompletionsClient {
   }
 
   /**
-   * Requests a single-line completion. Streams chunks (abort-aware),
+   * Requests a single-line completion: streams chunks (abort-aware),
    * accumulates them and truncates at the first newline.
    */
   async complete({ prefix, suffix, template, signal }: CompletionRequestParams): Promise<CompletionResult> {

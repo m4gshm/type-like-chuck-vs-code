@@ -28,6 +28,17 @@ describe('detectLoop', () => {
     expect(result.looped).toBe(true);
   });
 
+  it('triggers exactly at the homogeneous-run boundary and not one below it', () => {
+    // A run of 'a' is caught via the 2-character block first: 12 chars = 6 repeats.
+    expect(detectLoop('a'.repeat(12)).looped).toBe(true);
+    expect(detectLoop('a'.repeat(11)).looped).toBe(false);
+  });
+
+  it('does not treat long whitespace runs (deep indentation) as a loop', () => {
+    expect(detectLoop('{' + ' '.repeat(40)).looped).toBe(false);
+    expect(detectLoop('def f():' + '\t'.repeat(30)).looped).toBe(false);
+  });
+
   it('does not trigger on normal text', () => {
     expect(detectLoop('function foo(a, b) { return a + b; }').looped).toBe(false);
     expect(detectLoop('const x = [[1, 2], [3, 4]];').looped).toBe(false);

@@ -15,7 +15,6 @@ const SUPPORTED_PATTERNS: readonly string[] = [
   'qwen',
 ];
 
-/** Returns the first model id matching a supported pattern, if any. */
 export function pickSupportedModel(models: readonly string[]): string | undefined {
   for (const pattern of SUPPORTED_PATTERNS) {
     const match = models.find((id) => id.toLowerCase().includes(pattern));
