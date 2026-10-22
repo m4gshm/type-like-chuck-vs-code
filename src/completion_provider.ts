@@ -119,13 +119,15 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       return { text: cached };
     }
 
-    // Reuse a request kept pending from a cancelled invocation on the same line.
+    // Reuse a request kept pending from a cancelled invocation on the same line,
+    // but only once: after consuming it, later typing must trigger a fresh request.
     const pendingHere = this.pending;
     if (
       pendingHere &&
       pendingHere.line === position.line &&
       position.character >= pendingHere.positionCharacter
     ) {
+      this.pending = undefined;
       const text = await this.awaitRequest(pendingHere.completion, token);
       if (text !== undefined && text.length > 0) {
         this.storeCache(document, position, text);
