@@ -11,6 +11,8 @@ export class StatusBar {
   private readonly item: vscode.StatusBarItem;
   private busy = false;
   private hasError = false;
+  /** Connection failure text shown in the tooltip while the watchdog is active. */
+  private connectionReason: string | undefined;
 
   constructor(state: CompletionState) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -36,12 +38,21 @@ export class StatusBar {
     this.refresh();
   }
 
+  setConnectionReason(reason: string | undefined): void {
+    this.connectionReason = reason;
+    this.refresh();
+  }
+
   refresh(): void {
     const enabled = this.state.isEnabled();
     this.item.text = !enabled ? DISABLED_TEXT : this.hasError ? ERROR_TEXT : this.busy ? BUSY_TEXT : ENABLED_TEXT;
-    this.item.tooltip = enabled
-      ? 'TLC completions enabled (click to toggle)'
-      : 'TLC completions disabled (click to toggle)';
+    this.item.tooltip = this.connectionReason !== undefined
+      ? `${this.connectionReason}\n\n${enabled
+        ? 'TLC keeps retrying; completions pause if the server stays unreachable. Click to toggle.'
+        : 'TLC is paused. Click to re-enable.'}`
+      : enabled
+        ? 'TLC completions enabled (click to toggle)'
+        : 'TLC completions disabled (click to toggle)';
     this.item.command = 'tlc.toggleCompletions';
   }
 

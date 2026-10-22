@@ -7,6 +7,7 @@ import { CompletionState } from './completion_state';
 import { ForbiddenFiles } from './forbidden_files';
 import { ModelConfig } from './model_config';
 import { StatusBar } from './status_bar';
+import { ConnectionWatchdog } from './connection_watchdog';
 import { buildTemplateRegistry, ResolvedTemplates } from './templates';
 import { pickSupportedModel, pickTemplateForModel } from './model_selection';
 
@@ -50,6 +51,31 @@ export function activate(context: vscode.ExtensionContext): void {
   const state = new CompletionState(context.globalState);
   const status = new StatusBar(state);
 
+  const watchdog = new ConnectionWatchdog({
+    probe: () => client.listModels(),
+    disable: (reason) => {
+      provider.cancelActiveRequests();
+      state.setConnectionBlocked(true);
+      status.setConnectionReason(reason);
+      status.refresh();
+    },
+    enable: () => {
+      state.setConnectionBlocked(false);
+      status.setConnectionReason(undefined);
+      status.clearError();
+      status.refresh();
+    },
+    notifyFailure: (message) => {
+      status.setConnectionReason(message);
+      void vscode.window.showWarningMessage(message);
+    },
+    clearFailure: () => {
+      status.setConnectionReason(undefined);
+      status.clearError();
+    },
+    log,
+  });
+
   const provider = new CompletionProvider({
     client,
     getConfig: config,
@@ -57,6 +83,7 @@ export function activate(context: vscode.ExtensionContext): void {
     forbidden: () => forbidden,
     state,
     status,
+    watchdog,
     log,
     trace,
   });
@@ -155,6 +182,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('tlc.toggleCompletions', async () => {
+      // Manual toggle wins: cancel any auto-disable/auto-re-enable watch.
+      watchdog.reset();
       const enabled = !state.isEnabled();
       await state.setEnabled(enabled);
       if (!enabled) {

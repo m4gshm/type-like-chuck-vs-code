@@ -88,6 +88,7 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
       },
     } as unknown as CompletionState,
     status: { setBusy: () => undefined, setError: () => undefined, clearError: () => undefined } as unknown as StatusBar,
+    watchdog: { reportFailure: () => undefined, reportSuccess: () => undefined },
     log: () => undefined,
     trace: () => undefined,
   };
@@ -335,6 +336,47 @@ describe('CompletionProvider', () => {
     expect(errors).toContain('error');
     // Busy was switched on for the request and off again afterwards.
     expect(busyLog).toEqual([true, false]);
+  });
+
+  it('forwards connection failures to the watchdog instead of warning directly', async () => {
+    const failures: string[] = [];
+    const successes: number[] = [];
+    const { deps } = makeDeps(async () => {
+      throw new CompletionError('connection', 'Cannot reach the completions API');
+    });
+    deps.watchdog = {
+      reportFailure: (m) => failures.push(m),
+      reportSuccess: () => successes.push(1),
+    };
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['']);
+    const token = new FakeToken();
+
+    for (let i = 0; i < 3; i += 1) {
+      const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 0) as never, {} as never, token as never);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(await result).toHaveLength(0);
+    }
+    expect(failures).toEqual([
+      'Cannot reach the completions API',
+      'Cannot reach the completions API',
+      'Cannot reach the completions API',
+    ]);
+    expect(successes).toHaveLength(0);
+  });
+
+  it('reports request success to the watchdog', async () => {
+    const successes: number[] = [];
+    const { deps } = makeDeps(async () => ({ text: 'ok' }));
+    deps.watchdog = { reportFailure: () => undefined, reportSuccess: () => successes.push(1) };
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 0) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(1);
+    expect(successes).toHaveLength(1);
   });
 });
 

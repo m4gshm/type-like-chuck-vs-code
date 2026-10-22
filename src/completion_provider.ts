@@ -9,6 +9,12 @@ import { StatusBar } from './status_bar';
 import { ResolvedTemplates } from './templates';
 import { overlapLength } from './overlap';
 
+/** Connection-failure coalescing the provider reports to (see ConnectionWatchdog). */
+export interface ConnectionWatchdogLike {
+  reportFailure(message: string): void;
+  reportSuccess(): void;
+}
+
 export interface ProviderDeps {
   client: CompletionsClient;
   getConfig: () => ExtensionConfig;
@@ -16,6 +22,7 @@ export interface ProviderDeps {
   forbidden: () => ForbiddenFiles;
   state: CompletionState;
   status: StatusBar;
+  watchdog: ConnectionWatchdogLike;
   log: (message: string) => void;
   trace: (message: string) => void;
 }
@@ -262,6 +269,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
 
     try {
       const text = await request;
+      this.deps.watchdog.reportSuccess();
       if (text.length > 0) {
         this.storeCache(document, position, text);
       }
@@ -321,7 +329,9 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     token: vscode.CancellationToken,
   ): Promise<{ text?: string; failed?: boolean }> {
     try {
-      return { text: await request };
+      const text = await request;
+      this.deps.watchdog.reportSuccess();
+      return { text };
     } catch (err) {
       this.handleRequestError(err);
       return { failed: err instanceof CompletionError };
@@ -340,6 +350,9 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
             void vscode.commands.executeCommand('tlc.setApiKey');
           }
         });
+      } else if (err.kind === 'connection') {
+        // Surfaced once per outage by the watchdog, not on every request.
+        this.deps.watchdog.reportFailure(err.message);
       } else {
         void vscode.window.showWarningMessage(err.message);
       }
