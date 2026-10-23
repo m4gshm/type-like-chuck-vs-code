@@ -7,7 +7,7 @@ import { PendingCompletion } from './pending_completion';
 import { CompletionState } from './completion_state';
 import { StatusBar } from './status_bar';
 import { ResolvedTemplates } from './templates';
-import { overlapLength } from './overlap';
+import { overlapLength, trailingOverlapLength } from './overlap';
 
 /** Connection-failure coalescing the provider reports to (see ConnectionWatchdog). */
 export interface ConnectionWatchdogLike {
@@ -118,8 +118,16 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     // the duplicated characters instead of doubling them.
     const offset = document.offsetAt(position);
     const following = document.getText().slice(offset, offset + completion.text.length);
-    const overlap = overlapLength(completion.text, following);
-    if (overlap >= completion.text.length) {
+    // The model may continue its generation into the suffix: trim the tail
+    // duplicating the text after the cursor before the overlap handling.
+    const tailOverlap = trailingOverlapLength(completion.text, following);
+    const text = tailOverlap > 0 ? completion.text.slice(0, completion.text.length - tailOverlap) : completion.text;
+    if (text.length === 0) {
+      this.deps.trace('provider skipped: completion duplicates the existing text after the cursor');
+      return [];
+    }
+    const overlap = overlapLength(text, following);
+    if (overlap >= text.length) {
       this.deps.trace('provider skipped: completion duplicates the existing text after the cursor');
       return [];
     }
@@ -127,7 +135,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       overlap > 0
         ? new vscode.Range(position, document.positionAt(offset + overlap))
         : new vscode.Range(position, position);
-    return [new vscode.InlineCompletionItem(completion.text, range)];
+    return [new vscode.InlineCompletionItem(text, range)];
   }
 
   private async getOrCreateCompletion(

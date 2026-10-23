@@ -283,6 +283,25 @@ describe('CompletionProvider', () => {
     expect(range.end.character).toBe(12); // the " = 1;" part is replaced, not doubled
   });
 
+  it('trims the completion tail that duplicates the start of the following text', async () => {
+    // The model continued into the suffix and generated its "}" itself
+    // (api_test.go case): the duplicated brace must be trimmed, leaving a
+    // single clean suggestion.
+    const { deps } = makeDeps(async () => ({ text: '&fourth, &fifth}' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['x(&third, }', '\tc        = clone.Deep(entities)']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 10) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    const items = await result;
+    expect(items).toHaveLength(1);
+    expect(items[0].insertText).toBe('&fourth, &fifth');
+    const range = items[0].range as { start: { character: number }; end: { character: number } };
+    expect(range.start.character).toBe(10);
+    expect(range.end.character).toBe(10);
+  });
+
   it('keeps a plain insertion range when nothing overlaps', async () => {
     const { deps } = makeDeps(async () => ({ text: '.length' }));
     const provider = new CompletionProvider(deps);

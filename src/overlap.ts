@@ -13,3 +13,20 @@ export function overlapLength(completion: string, following: string): number {
   }
   return k;
 }
+
+/**
+ * Length of the completion's tail that duplicates the start of the following
+ * document text — the model continued its generation into the suffix. The
+ * duplicated tail must be trimmed, otherwise the inserted text doubles the
+ * characters already present after the cursor.
+ */
+export function trailingOverlapLength(completion: string, following: string): number {
+  const max = Math.min(completion.length, following.length);
+  for (let k = max; k > 0; k -= 1) {
+    const tail = completion.slice(completion.length - k);
+    if (following.startsWith(tail)) {
+      return k;
+    }
+  }
+  return 0;
+}
