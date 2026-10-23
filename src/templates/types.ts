@@ -5,13 +5,12 @@ export interface FimMarkers {
 }
 
 export interface FimTemplate {
-  /** Unique template id, selectable via `tlc.promptTemplate`. */
+  /** Selectable via `tlc.promptTemplate`. */
   readonly id: string;
   /** Reserved tokens sent as API stop sequences and masked inside user code. */
   readonly reservedTokens: readonly string[];
   /** Structural markers, so tooling can display and copy template elements. */
   readonly markers: FimMarkers;
-  /** Renders the FIM prompt for the given code prefix and suffix. */
   render(prefix: string, suffix: string): string;
 }
 

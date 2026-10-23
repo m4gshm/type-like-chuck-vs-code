@@ -3,13 +3,12 @@ import { ModelInfo } from './completions_client';
 
 /** Host services the model configuration needs from the VS Code layer. */
 export interface ModelConfigHost {
-  /** Reads the current configuration (used after every settings update). */
   readConfig(): ExtensionConfig;
-  /** Persists a tlc setting in the user settings (global scope). */
+  /** Persists a tlc setting in user (global) settings. */
   updateSetting(key: string, value: unknown): Promise<void>;
   log(message: string): void;
   notify(message: string): void;
-  /** Asks the user to pick a model from the list; undefined = cancelled. */
+  /** Asks the user to pick a model; undefined = cancelled. */
   chooseModel(models: ModelInfo[]): Promise<{ id: string; contextLength?: number } | undefined>;
   /** Notified whenever the model setting actually changes. */
   onModelChanged?(modelId: string): Promise<void> | void;

@@ -6,6 +6,7 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
   return {
     baseUrl: 'http://stub/v1',
     model: 'm',
+    apiKey: '',
     promptTemplate: undefined,
     customTemplate: undefined,
     prefixMaxLength: 8000,

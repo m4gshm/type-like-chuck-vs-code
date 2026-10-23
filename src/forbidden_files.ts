@@ -4,7 +4,6 @@ import micromatch from 'micromatch';
 export class ForbiddenFiles {
   constructor(private readonly patterns: readonly string[]) {}
 
-  /** Returns true when completions must not be requested for this file. */
   isForbidden(fileName: string): boolean {
     if (this.patterns.length === 0) {
       return false;

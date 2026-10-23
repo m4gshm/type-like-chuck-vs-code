@@ -7,6 +7,7 @@ function mkConfig(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
   return {
     baseUrl: 'http://stub/v1',
     model: 'qwen2.5-coder-1.5b',
+    apiKey: '',
     promptTemplate: 'qwen2',
     customTemplate: undefined,
     prefixMaxLength: 8000,

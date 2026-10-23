@@ -37,6 +37,7 @@ plain Node; `vscode` is stubbed in `src/test/unit/vscode-stub.ts`).
 | `config.ts` | Reads `tlc.*` settings into `ExtensionConfig`; `effectiveContextLengths()` clamps prefix/suffix budgets to `contextMaxLength` |
 | `model_config.ts` | `ModelConfig`: applies `/v1/models` lists, persists model + context limit, clamps budgets; host callbacks (`updateSetting`, `chooseModel`, `onModelChanged`, …) isolate it from VS Code |
 | `model_selection.ts` | `pickSupportedModel` (family substrings) and `pickTemplateForModel` (model → built-in template id) |
+| `model_polling.ts` | Poll interval constant and `modelIdsKey` (change detection for `/v1/models`) |
 | `completions_client.ts` | OpenAI SDK wrapper: `/v1/models`, streaming FIM request, stop-token cut, loop detection, line truncation, error classification (`auth`/`connection`/`other`) |
 | `completion_provider.ts` | `InlineCompletionItemProvider`: debounce, manual trigger, cache, pending-request grace, forbidden files |
 | `templates/` | `TemplateRegistry`, built-ins (qwen2, qwen3, lfm2, mellum), custom template compiled from the marker settings |
@@ -62,14 +63,24 @@ When changing behavior, update `README.md` **and** the setting descriptions in
 - **Model lists**: one model on the server → applied automatically; several and
   the configured model is present → kept; otherwise the picker is shown. Manual
   selection always wins. There is **no** "auto-pick first supported model".
+  The list is polled every 30 s (`model_polling.ts`) and via the
+  `TLC: Test Connection` command; the picker/auto-apply run **only when the
+  list changed** since the last check (`modelIdsKey`), so a dismissed picker is
+  not re-shown every poll.
 - **Context limit**: `tlc.contextMaxLength` is filled from `/v1/models` metadata;
   prefix/suffix budgets are re-clamped proportionally (priority to the prefix).
-- API key lives in VS Code secret storage, never in settings.
+- API key: preferred home is VS Code secret storage (`TLC: Set API Key`);
+  the plaintext `tlc.apiKey` setting **overrides** it when non-empty
+  (priority is resolved in `effectiveApiKey`/`syncApiKey` in `extension.ts`).
 - Suggestions are single-line: truncate at the first newline and strip reserved
   tokens; they must never leak into the inserted text.
 
 ## Conventions
 
+- **Comments**: do not write comments that restate what the code already says.
+  Comment only non-obvious rationale, invariants and gotchas; keep JSDoc on
+  exported APIs to one short line. When editing code, remove nearby comments
+  that became redundant.
 - TypeScript, ESM sources bundled by esbuild; no build step for unit tests.
 - Constructors take a "host" interface (functions/ports) instead of importing
   `vscode` — follow this pattern for new logic that needs testing.

@@ -11,7 +11,8 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 - **Built-in FIM templates** for Qwen2.5, Qwen3, LFM2 (Liquid AI) and Mellum (JetBrains), plus user-defined custom templates.
 - **Streaming** requests against the legacy OpenAI `POST /v1/completions` endpoint with stop sequences derived from the template's reserved tokens.
 - **Single-line suggestions** that accept with <kbd>Tab</kbd> and dismiss with <kbd>Esc</kbd> via VS Code's native inline suggestions.
-- **Safe by default** — the API key is stored in VS Code secret storage, and completions are disabled in files such as `.env`.
+- **Automatic model tracking** — the server's `/v1/models` list is polled every 30 s: a changed model is picked up automatically and the prompt template follows its family (unless `custom`). Run `TLC: Test Connection` to check the server and load the model list immediately.
+- **Safe by default** — the recommended key storage is VS Code secret storage (`TLC: Set API Key`); the optional `tlc.apiKey` setting (plaintext, for synced settings) takes precedence when set, and completions are disabled in files such as `.env`.
 
 ## Setup
 
@@ -29,6 +30,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `TLC: Trigger Completion Now` | Request a completion immediately, bypassing the debounce |
 | `TLC: Set API Key` | Store the API key in secret storage (empty input clears usage) |
 | `TLC: Clear API Key` | Remove the stored API key |
+| `TLC: Test Connection` | Check that `tlc.baseUrl` is reachable, fetch `/v1/models` and apply the model list (also updates the template to match the model family) |
 | `TLC: Select Model` | Pick a model from the server's `GET /v1/models` list (or enter an id manually); supported-family models are marked with a check |
 | `TLC: Toggle Completions` | Enable/disable completions for this workspace (persisted). Also available by clicking the TLC item in the status bar |
 
@@ -36,7 +38,8 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `tlc.baseUrl` | `http://127.0.0.1:1234/v1` | Base URL of the OpenAI-compatible API |
+| `tlc.apiKey` | `""` | Optional API key (plaintext, e.g. for synced settings). Takes precedence over the secret-stored key when non-empty |
+| `tlc.baseUrl` | `http://127.0.0.1:1234/v1` | Base URL of the OpenAI-compatible API. Saving a new value (Enter/blur) acts like `TLC: Test Connection`: the server is probed and the model list applied |
 | `tlc.model` | `Qwen2.5-Coder-1.5B` | Model name sent in requests |
 | `tlc.promptTemplate` | `qwen2` | Built-in template id or `custom` |
 | `tlc.prefix` / `tlc.suffix` / `tlc.middle` / `tlc.stop` | see Settings → TLC | Elements of the custom template (used when `promptTemplate` is `custom`) |
@@ -51,7 +54,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `tlc.cacheTtlMs` | `10000` (≥1000) | Lifetime of the cached completion |
 | `tlc.forbiddenFileNames` | `[".env"]` | Globs of files where completions are disabled |
 
-All settings apply live. On startup and whenever `tlc.baseUrl` changes, the configured model is validated against the server's `/v1/models` list: a single-model server applies that model automatically; on multi-model servers the configured model is kept when present, otherwise the picker is shown (a model from a supported family — partial match: qwen, mellum, lfm, ... — is marked with a check). Manual selection via `TLC: Select Model` or `tlc.model` always wins afterwards.
+All settings apply live. On startup and whenever `tlc.baseUrl` changes, the configured model is validated against the server's `/v1/models` list: a single-model server applies that model automatically; on multi-model servers the configured model is kept when present, otherwise the picker is shown (a model from a supported family — partial match: qwen, mellum, lfm, ... — is marked with a check). While the extension runs, the list is re-checked every 30 s, so server-side model changes are picked up automatically too. Manual selection via `TLC: Select Model` or `tlc.model` always wins afterwards.
 
 ## Custom FIM templates
 

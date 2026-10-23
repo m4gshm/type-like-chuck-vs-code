@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 
 const SECRET_KEY = 'tlc.apiKey';
 
-/** Stores the API key in VS Code secret storage (never in plain settings). */
+/** Stores the API key in VS Code secret storage (the recommended home; the
+ * plaintext tlc.apiKey setting overrides it, see extension.ts). */
 export class ApiKeyStorage {
   constructor(private readonly secrets: vscode.SecretStorage) {}
 

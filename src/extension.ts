@@ -10,6 +10,7 @@ import { StatusBar } from './status_bar';
 import { ConnectionWatchdog } from './connection_watchdog';
 import { buildTemplateRegistry, ResolvedTemplates } from './templates';
 import { pickSupportedModel, pickTemplateForModel } from './model_selection';
+import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('TLC', { log: true });
@@ -109,6 +110,24 @@ export function activate(context: vscode.ExtensionContext): void {
     trace,
   });
 
+  /**
+   * Fetches /v1/models and applies the list when it changed since the last
+   * check (startup, poll, baseUrl change, manual test). Reports reachability
+   * to the watchdog. `lastModelIds === undefined` forces the first check.
+   */
+  let lastModelIds: string | undefined;
+  const checkServerModels = async (): Promise<ModelInfo[]> => {
+    const models = await client.listModels();
+    watchdog.reportSuccess();
+    const ids = modelIdsKey(models);
+    const changed = lastModelIds !== ids;
+    lastModelIds = ids;
+    if (changed && models.length > 0) {
+      await modelConfig.applyModelList(models);
+    }
+    return models;
+  };
+
   const selector: vscode.DocumentSelector = { pattern: '**' };
   const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, provider);
 
@@ -178,13 +197,35 @@ export function activate(context: vscode.ExtensionContext): void {
       } else {
         await apiKeyStorage.set(key);
       }
-      await client.setApiKey(key.length === 0 ? undefined : key);
+      if (config().apiKey.length > 0) {
+        void vscode.window.showWarningMessage(
+          'TLC: tlc.apiKey is set in the settings and takes precedence over the secret-stored key.',
+        );
+      }
+      await client.setApiKey(config().apiKey.length > 0 ? config().apiKey : key.length === 0 ? undefined : key);
       void vscode.window.showInformationMessage('TLC API key updated.');
     }),
     vscode.commands.registerCommand('tlc.clearApiKey', async () => {
       await apiKeyStorage.clear();
-      await client.setApiKey(undefined);
+      await client.setApiKey(config().apiKey.length > 0 ? config().apiKey : undefined);
       void vscode.window.showInformationMessage('TLC API key cleared.');
+    }),
+    vscode.commands.registerCommand('tlc.testConnection', async () => {
+      try {
+        const models = await checkServerModels();
+        const current = config().model;
+        const onList = models.some((m) => m.id === current);
+        void vscode.window.showInformationMessage(
+          `TLC: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
+          + (onList
+            ? `Current model: ${current}.`
+            : `Model updated from the server (was "${current}").`),
+        );
+      } catch (err) {
+        const message = `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`;
+        watchdog.reportFailure(message);
+        void vscode.window.showWarningMessage(message);
+      }
     }),
     vscode.commands.registerCommand('tlc.selectModel', async () => {
       let models: ModelInfo[] = [];
@@ -214,6 +255,18 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showInformationMessage(enabled ? 'TLC completions enabled.' : 'TLC completions disabled.');
     }),
   );
+
+  /** Effective API key: the tlc.apiKey setting wins over secret storage. */
+  const effectiveApiKey = async (): Promise<string | undefined> => {
+    const fromSettings = config().apiKey;
+    if (fromSettings.length > 0) {
+      return fromSettings;
+    }
+    return apiKeyStorage.get();
+  };
+  const syncApiKey = async (): Promise<void> => {
+    await client.setApiKey(await effectiveApiKey());
+  };
 
   // Cancel in-flight requests when the cursor jumps away (line change, click, Esc).
   context.subscriptions.push(
@@ -296,6 +349,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (baseUrlChanged) {
         client.refresh();
       }
+      if (event.affectsConfiguration('tlc.apiKey')) {
+        await syncApiKey();
+      }
 
       templates = buildTemplateRegistry(config().promptTemplate, config().customTemplate);
       forbidden = new ForbiddenFiles(config().forbiddenFileNames);
@@ -303,23 +359,45 @@ export function activate(context: vscode.ExtensionContext): void {
         log(warning);
       }
 
-      // Resolve the model against the new server's list.
+      // Resolve the model against the new server's list. Editing the setting
+      // commits on Enter/blur: behave like "TLC: Test Connection" and surface
+      // the outcome to the user.
       if (baseUrlChanged) {
         try {
-          await modelConfig.applyModelList(await client.listModels());
+          const models = await checkServerModels();
+          const current = config().model;
+          const onList = models.some((m) => m.id === current);
+          void vscode.window.showInformationMessage(
+            `TLC: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
+            + (onList ? `Current model: ${current}.` : `Model updated from the server (was "${current}").`),
+          );
         } catch (err) {
-          log(`Cannot list models from ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+          const message = `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`;
+          watchdog.reportFailure(message);
+          void vscode.window.showWarningMessage(message);
         }
       }
     }),
   );
 
+  // Poll the server's model list: detect model changes while the extension
+  // runs (the server may load another model) and double as a health probe.
+  const pollTimer = setInterval(() => {
+    void checkServerModels().catch((err: unknown) => {
+      watchdog.reportFailure(
+        `Cannot reach the completions API (${config().baseUrl}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }, MODEL_POLL_INTERVAL_MS);
+  pollTimer.unref?.();
+  context.subscriptions.push(new vscode.Disposable(() => clearInterval(pollTimer)));
+
   // On startup: validate the configured model against the server's list,
   // then validate the selected template.
   void (async () => {
-    await client.setApiKey(await apiKeyStorage.get());
+    await syncApiKey();
     try {
-      await modelConfig.applyModelList(await client.listModels());
+      await checkServerModels();
     } catch {
       // Server not reachable at startup: keep the configured model silently.
     }

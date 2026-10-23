@@ -4,6 +4,8 @@ import { CustomTemplateDefinition } from './templates/types';
 export interface ExtensionConfig {
   baseUrl: string;
   model: string;
+  /** Plaintext API key from the tlc.apiKey setting; takes precedence over secret storage when non-empty. */
+  apiKey: string;
   promptTemplate: string | undefined;
   /** The custom template compiled from the tlc.prefix / tlc.suffix / tlc.middle / tlc.stop fields, if usable. */
   customTemplate: CustomTemplateDefinition | undefined;
@@ -38,6 +40,7 @@ export function readConfig(): ExtensionConfig {
   return {
     baseUrl: c.get<string>('baseUrl', 'http://127.0.0.1:1234/v1'),
     model: c.get<string>('model', 'Qwen2.5-Coder-1.5B'),
+    apiKey: c.get<string>('apiKey', ''),
     promptTemplate: c.get<string>('promptTemplate'),
     customTemplate: hasMarkers
       ? { id: 'custom', prefix, suffix, middle, stop }
