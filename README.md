@@ -29,8 +29,8 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `TLC: Trigger Completion Now` | Request a completion immediately, bypassing the debounce |
 | `TLC: Set API Key` | Store the API key in secret storage (empty input clears usage) |
 | `TLC: Clear API Key` | Remove the stored API key |
-| `TLC: Select Model` | Pick a model from the server's `GET /v1/models` list (or enter an id manually). Also available by clicking the model name in the status bar |
-| `TLC: Toggle Completions` | Enable/disable completions for this workspace (persisted) |
+| `TLC: Select Model` | Pick a model from the server's `GET /v1/models` list (or enter an id manually); supported-family models are marked with a check |
+| `TLC: Toggle Completions` | Enable/disable completions for this workspace (persisted). Also available by clicking the TLC item in the status bar |
 
 ## Settings
 
@@ -42,11 +42,16 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `tlc.prefix` / `tlc.suffix` / `tlc.middle` / `tlc.stop` | see Settings → TLC | Elements of the custom template (used when `promptTemplate` is `custom`) |
 | `tlc.prefixContextMaxLength` | `8000` | Max characters of code before the cursor |
 | `tlc.suffixContextMaxLength` | `2000` | Max characters of code after the cursor |
+| `tlc.contextMaxLength` | `0` | Max combined prefix+suffix context (characters); filled automatically from `/v1/models`, `0` = unlimited |
 | `tlc.maxTokens` | `256` | Max tokens to generate |
-| `tlc.debounceMs` | `250` (50–1000) | Minimum interval between automatic requests |
+| `tlc.autoTrigger` | `true` | Trigger completions automatically after a typing pause |
+| `tlc.debounceMs` | `250` (50–1000) | Pause before an automatic request is sent |
+| `tlc.pendingGraceMs` | `150` (0–1000) | How long typing past a pending request waits for its result before requesting afresh |
+| `tlc.cacheEnabled` | `true` | Re-serve the last completion at the same cursor position without a new API request |
+| `tlc.cacheTtlMs` | `10000` (≥1000) | Lifetime of the cached completion |
 | `tlc.forbiddenFileNames` | `[".env"]` | Globs of files where completions are disabled |
 
-All settings apply live. When `tlc.baseUrl` changes, the extension automatically selects the first supported model from the new server's `/v1/models` list (partial match: qwen, mellum, lfm, ...); manual selection via `TLC: Select Model` or `tlc.model` always wins afterwards.
+All settings apply live. On startup and whenever `tlc.baseUrl` changes, the configured model is validated against the server's `/v1/models` list: a single-model server applies that model automatically; on multi-model servers the configured model is kept when present, otherwise the picker is shown (a model from a supported family — partial match: qwen, mellum, lfm, ... — is marked with a check). Manual selection via `TLC: Select Model` or `tlc.model` always wins afterwards.
 
 ## Custom FIM templates
 
@@ -55,10 +60,11 @@ The markers are shown in the Prefix / Suffix / Middle / Stop settings and can be
 - **Prefix / Suffix / Middle** - the FIM markers
 - **Stop** - reserved tokens, comma-separated (sent as stop sequences and masked in your code)
 
-All fields apply live. The fields and the selection stay in sync: selecting a built-in template in `tlc.promptTemplate` copies its markers into the marker fields; editing any of them switches `promptTemplate` to `custom`. If the fields are unusable, the default template is used with a warning in the TLC output channel.
+All fields apply live. The fields and the selection stay in sync: selecting a built-in template in `tlc.promptTemplate` clears the stored marker fields (they revert to their defaults, since the built-in markers are used directly); editing any of them switches `promptTemplate` to `custom`. If the fields are unusable, the default template is used with a warning in the TLC output channel.
 
 - `prefix`, `suffix`, `middle` are the FIM markers placed around the code context.
 - `stop` lists reserved tokens: they are sent as API stop sequences and masked inside your own code so the model is not confused by them.
+- When the model changes (startup, `tlc.baseUrl` change, `TLC: Select Model`) and a built-in template matches the new model's family better than the selected one, the selection is switched automatically — unless `promptTemplate` is `custom`.
 - Custom template names that collide with built-ins are ignored; an unknown `tlc.promptTemplate` falls back to the default template with a warning in the TLC output channel.
 
 ## Building and testing

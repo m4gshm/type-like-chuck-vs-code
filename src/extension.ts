@@ -33,10 +33,31 @@ export function activate(context: vscode.ExtensionContext): void {
       log,
       notify: (message) => void vscode.window.showInformationMessage(message),
       chooseModel: (models) => presentModelQuickPick(models),
+      onModelChanged: (modelId) => applyTemplateSuggestion(modelId),
     },
     readConfig(),
   );
   const config = (): ExtensionConfig => modelConfig.current;
+
+  /**
+   * Switches the prompt template to the built-in matching the model family
+   * (unless the user chose "custom" or the match is already selected).
+   */
+  const applyTemplateSuggestion = async (modelId: string): Promise<void> => {
+    const selected = config().promptTemplate;
+    if (selected === 'custom') {
+      return;
+    }
+    const suggestion = pickTemplateForModel(modelId);
+    if (suggestion === undefined || suggestion === selected) {
+      return;
+    }
+    await vscode.workspace.getConfiguration('tlc').update('promptTemplate', suggestion, vscode.ConfigurationTarget.Global);
+    templates = buildTemplateRegistry(suggestion, config().customTemplate);
+    void vscode.window.showInformationMessage(
+      `TLC: template "${suggestion}" selected to match model "${modelId}".`,
+    );
+  };
   templates = buildTemplateRegistry(config().promptTemplate, config().customTemplate);
   forbidden = new ForbiddenFiles(config().forbiddenFileNames);
 
@@ -317,12 +338,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const suggestion = pickTemplateForModel(config().model);
     if (suggestion !== undefined) {
-      await vscode.workspace.getConfiguration('tlc').update('promptTemplate', suggestion, vscode.ConfigurationTarget.Global);
-      templates = buildTemplateRegistry(suggestion, config().customTemplate);
+      await applyTemplateSuggestion(config().model);
       await cleanupTemplateFields(suggestion);
-      void vscode.window.showInformationMessage(
-        `TLC: template "${suggestion}" selected to match model "${config().model}".`,
-      );
       return;
     }
 

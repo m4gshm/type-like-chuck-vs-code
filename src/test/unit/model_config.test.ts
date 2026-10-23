@@ -148,4 +148,18 @@ describe('ModelConfig.setModel', () => {
     expect(setup1.config.prefixMaxLength).toBe(800);
     expect(setup1.config.suffixMaxLength).toBe(200);
   });
+
+  it('notifies onModelChanged when the model changes and stays silent otherwise', async () => {
+    const changes: string[] = [];
+    const setup1 = setup(mkConfig({ model: 'qwen2.5-coder-1.5b', contextMaxLength: 4096 }));
+    setup1.modelConfig['host'].onModelChanged = (id) => {
+      changes.push(id);
+    };
+
+    await setup1.modelConfig.setModel('qwen2.5-coder-1.5b', 4096); // unchanged
+    expect(changes).toHaveLength(0);
+
+    await setup1.modelConfig.setModel('qwen3-coder-30b', 4096); // new model
+    expect(changes).toEqual(['qwen3-coder-30b']);
+  });
 });

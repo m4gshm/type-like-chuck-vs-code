@@ -102,31 +102,31 @@
             "JetBrains Mellum FIM format",
             "User-defined template from the Prefix / Suffix / Middle / Stop settings below"
           ],
-          "description": "Built-in FIM prompt template, or \"custom\" to use the markers from the Prefix / Suffix / Middle / Stop settings below. Tip: \"TLC: Create Template\" copies the elements of the selected template into those settings."
+          "description": "Built-in FIM prompt template, or \"custom\" to use the markers from the Prefix / Suffix / Middle / Stop settings below."
         },
         "tlc.prefix": {
           "order": 4,
           "type": "string",
           "default": "<|fim_prefix|>",
-          "markdownDescription": "Marker placed before the code prefix. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+          "markdownDescription": "Marker placed before the code prefix. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
         },
         "tlc.suffix": {
           "order": 5,
           "type": "string",
           "default": "<|fim_suffix|>",
-          "markdownDescription": "Marker placed before the code suffix. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+          "markdownDescription": "Marker placed before the code suffix. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
         },
         "tlc.middle": {
           "order": 6,
           "type": "string",
           "default": "<|fim_middle|>",
-          "markdownDescription": "Marker placed after the suffix, where generation begins. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+          "markdownDescription": "Marker placed after the suffix, where generation begins. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
         },
         "tlc.stop": {
           "order": 7,
           "type": "string",
           "default": "<|fim_prefix|>,<|fim_suffix|>,<|fim_middle|>",
-          "markdownDescription": "Reserved tokens used as stop sequences and masked in user code, comma-separated. These fields always mirror the selected template: choosing a built-in template overwrites them, editing any of them switches Prompt Template to `custom` and your values are used."
+          "markdownDescription": "Reserved tokens used as stop sequences and masked in user code, comma-separated. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
         },
         "tlc.contextMaxLength": {
           "type": "integer",

@@ -11,6 +11,8 @@ export interface ModelConfigHost {
   notify(message: string): void;
   /** Asks the user to pick a model from the list; undefined = cancelled. */
   chooseModel(models: ModelInfo[]): Promise<{ id: string; contextLength?: number } | undefined>;
+  /** Notified whenever the model setting actually changes. */
+  onModelChanged?(modelId: string): Promise<void> | void;
 }
 
 /**
@@ -65,6 +67,7 @@ export class ModelConfig {
     }
     this.reload();
     if (modelChanged) {
+      await this.host.onModelChanged?.(modelId);
       this.host.notify(`TLC model set to ${modelId}.`);
     }
     await this.clampContextSettings();
