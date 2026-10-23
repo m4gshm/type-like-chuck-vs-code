@@ -141,12 +141,10 @@ describe('CompletionProvider', () => {
     expect((await first)[0].insertText).toBe('function foo');
     expect(calls()).toBe(1);
 
-    // Same document state and same cursor position → served from the cache.
     const second = await provider.provideInlineCompletionItems(doc as never, new Position(0, 0) as never, {} as never, token as never);
     expect(second[0].insertText).toBe('function foo');
     expect(calls()).toBe(1);
 
-    // A document edit (deleted char / deleted line → new version) invalidates.
     const edited = fakeDocument(['function foo'], 'main.ts', 2);
     const third = provider.provideInlineCompletionItems(edited as never, new Position(0, 12) as never, {} as never, token as never);
     await vi.advanceTimersByTimeAsync(250);
@@ -217,7 +215,6 @@ describe('CompletionProvider', () => {
     const doc = fakeDocument(['x = ']);
     const token = new FakeToken();
 
-    // Automatic invocation (typing) does not request anything.
     const auto = await provider.provideInlineCompletionItems(doc as never, new Position(0, 4) as never, {} as never, token as never);
     expect(auto).toHaveLength(0);
     expect(calls()).toBe(0);
@@ -253,7 +250,6 @@ describe('CompletionProvider', () => {
   });
 
   it('drops a completion that fully duplicates the text after the cursor', async () => {
-    // Cursor before " = 1;": the model suggests exactly what is already there.
     const { deps, calls } = makeDeps(async () => ({ text: ' = 1;' }));
     const provider = new CompletionProvider(deps);
     const doc = fakeDocument(['const x = 1;']);
@@ -353,7 +349,6 @@ describe('CompletionProvider', () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(await result).toHaveLength(0);
     expect(errors).toContain('error');
-    // Busy was switched on for the request and off again afterwards.
     expect(busyLog).toEqual([true, false]);
   });
 

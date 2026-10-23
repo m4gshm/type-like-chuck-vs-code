@@ -268,7 +268,6 @@ export function activate(context: vscode.ExtensionContext): void {
     await client.setApiKey(await effectiveApiKey());
   };
 
-  // Cancel in-flight requests when the cursor jumps away (line change, click, Esc).
   context.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection((event) => {
       if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse
@@ -392,8 +391,6 @@ export function activate(context: vscode.ExtensionContext): void {
   pollTimer.unref?.();
   context.subscriptions.push(new vscode.Disposable(() => clearInterval(pollTimer)));
 
-  // On startup: validate the configured model against the server's list,
-  // then validate the selected template.
   void (async () => {
     await syncApiKey();
     try {
@@ -402,8 +399,6 @@ export function activate(context: vscode.ExtensionContext): void {
       // Server not reachable at startup: keep the configured model silently.
     }
 
-    // Template validation: fall back to a template matching the model name,
-    // then to a warning with a shortcut to the settings editor.
     const selected = config().promptTemplate;
     const usable =
       selected === 'custom'
