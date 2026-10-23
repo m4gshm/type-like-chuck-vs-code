@@ -47,7 +47,7 @@ plain Node; `vscode` is stubbed in `src/test/unit/vscode-stub.ts`).
 | `prompt.ts` | FIM rendering and reserved-token masking in user code |
 | `forbidden_files.ts` | Glob matching (micromatch) of files where completions are disabled |
 | `connection_watchdog.ts` | Probes the server, pauses/re-enables completions |
-| `status_bar.ts` | Status item; **click toggles completions** (`tlc.toggleCompletions`) |
+| `status_bar.ts` | Status item; **click toggles completions** (`tlc.enableDisableCompletions`) |
 
 ## Launch and debug
 

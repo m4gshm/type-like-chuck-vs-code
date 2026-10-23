@@ -22,7 +22,7 @@ suite('TLC extension', () => {
     assert.ok(ext, 'extension not found');
     await ext.activate();
     const commands = await vscode.commands.getCommands(true);
-    for (const id of ['tlc.triggerCompletion', 'tlc.setApiKey', 'tlc.clearApiKey', 'tlc.toggleCompletions']) {
+    for (const id of ['tlc.triggerCompletion', 'tlc.setApiKey', 'tlc.clearApiKey', 'tlc.enableDisableCompletions']) {
       assert.ok(commands.includes(id), `missing command ${id}`);
     }
   });

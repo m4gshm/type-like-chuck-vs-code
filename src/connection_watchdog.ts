@@ -39,6 +39,11 @@ export class ConnectionWatchdog {
 
   constructor(private readonly deps: WatchdogDeps) {}
 
+  /** True while a failure is being watched (the error icon is shown). */
+  isFailing(): boolean {
+    return this.failing;
+  }
+
   reportFailure(message: string): void {
     if (this.failing) {
       return;

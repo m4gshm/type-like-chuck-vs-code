@@ -53,7 +53,7 @@ export class StatusBar {
       : enabled
         ? 'TLC completions enabled (click to toggle)'
         : 'TLC completions disabled (click to toggle)';
-    this.item.command = 'tlc.toggleCompletions';
+    this.item.command = 'tlc.enableDisableCompletions';
   }
 
   dispose(): void {

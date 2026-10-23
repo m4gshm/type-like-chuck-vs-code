@@ -10,7 +10,15 @@ export class CompletionState {
   constructor(private readonly globalState: vscode.Memento) {}
 
   isEnabled(): boolean {
-    return !this.connectionBlocked && this.globalState.get<boolean>(STATE_KEY, true);
+    if (this.connectionBlocked) {
+      return false;
+    }
+    let enabled = this.globalState.get<boolean>(STATE_KEY, true);
+    return enabled;
+  }
+
+  isConnectionBlocked(): boolean {
+    return this.connectionBlocked;
   }
 
   async setEnabled(enabled: boolean): Promise<void> {

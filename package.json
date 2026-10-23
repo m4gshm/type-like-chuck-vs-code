@@ -63,8 +63,8 @@
         "category": "TLC"
       },
       {
-        "command": "tlc.toggleCompletions",
-        "title": "Toggle Completions",
+        "command": "tlc.enableDisableCompletions",
+        "title": "Enable/Disable Completions",
         "category": "TLC"
       }
     ],
@@ -194,7 +194,7 @@
           "type": "boolean",
           "order": 16,
           "default": true,
-          "description": "Re-serve the last completion at the same cursor position without a new API request."
+          "description": "Re-serve the last completion without a new API request: at the exact cursor position, and when the typed text extends it along the same line as its prefix (the remainder is served)."
         },
         "tlc.cacheTtlMs": {
           "type": "integer",

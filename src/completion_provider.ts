@@ -307,15 +307,42 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       this.cache = undefined;
       return undefined;
     }
-    if (
-      cache.fileName !== document.fileName ||
-      cache.version !== document.version ||
-      cache.line !== position.line ||
-      cache.character !== position.character
-    ) {
+    if (cache.fileName !== document.fileName || cache.line !== position.line) {
       return undefined;
     }
-    return cache.text;
+    if (cache.version === document.version) {
+      return cache.character === position.character ? cache.text : undefined;
+    }
+    return this.partialCacheHit(document, position, cache);
+  }
+
+  /**
+   * Forward cache: the cursor advanced along the same line and the typed text
+   * is a prefix of the cached completion, so the remainder is served without a
+   * new API call. The cache anchor moves to the current position so repeated
+   * typing keeps consuming the same completion.
+   */
+  private partialCacheHit(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    cache: CachedCompletion,
+  ): string | undefined {
+    if (cache.version === document.version) {
+      return undefined;
+    }
+    const typed = document.lineAt(position.line).text.slice(cache.character, position.character);
+    if (typed.length === 0 || !cache.text.startsWith(typed) || typed.length >= cache.text.length) {
+      return undefined;
+    }
+    this.deps.trace(`provider served a partial cache hit: skipping ${typed.length} typed characters`);
+    this.cache = {
+      ...cache,
+      character: position.character,
+      version: document.version,
+      createdAt: performance.now(),
+      text: cache.text.slice(typed.length),
+    };
+    return this.cache.text;
   }
 
   private storeCache(document: vscode.TextDocument, position: vscode.Position, text: string): void {

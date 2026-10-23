@@ -243,7 +243,26 @@ export function activate(context: vscode.ExtensionContext): void {
         await modelConfig.setModel(chosen.id, chosen.contextLength);
       }
     }),
-    vscode.commands.registerCommand('tlc.toggleCompletions', async () => {
+    vscode.commands.registerCommand('tlc.enableDisableCompletions', async () => {
+      // Clicking the error icon retries the connection instead of toggling:
+      // the user's intent there is "fix it", not "disable".
+      if (watchdog.isFailing()) {
+        watchdog.reset();
+        status.setBusy(true);
+        try {
+          const models = await checkServerModels();
+          void vscode.window.showInformationMessage(
+            `TLC: ${config().baseUrl} is reachable again (${models.length} model${models.length === 1 ? '' : 's'}).`,
+          );
+        } catch (err) {
+          watchdog.reportFailure(
+            `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        } finally {
+          status.setBusy(false);
+        }
+        return;
+      }
       // Manual toggle wins: cancel any auto-disable/auto-re-enable watch.
       watchdog.reset();
       const enabled = !state.isEnabled();

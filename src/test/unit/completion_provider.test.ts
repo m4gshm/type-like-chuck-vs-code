@@ -152,6 +152,98 @@ describe('CompletionProvider', () => {
     expect(calls()).toBe(2);
   });
 
+  it('serves the completion remainder from the cache when the typed text matches its prefix', async () => {
+    const { deps, calls } = makeDeps(async () => ({ text: 'ourth = entity{4}' }));
+    const provider = new CompletionProvider(deps);
+    const token = new FakeToken();
+
+    const first = provider.provideInlineCompletionItems(
+      fakeDocument(['f'], 'main.ts', 1) as never,
+      new Position(0, 1) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await first)[0].insertText).toBe('ourth = entity{4}');
+    expect(calls()).toBe(1);
+
+    // The user typed "ou": the typed text is a prefix of the cached completion,
+    // so the remainder is served immediately, without debounce or an API call.
+    const second = await provider.provideInlineCompletionItems(
+      fakeDocument(['fou'], 'main.ts', 2) as never,
+      new Position(0, 3) as never,
+      {} as never,
+      token as never,
+    );
+    expect(second[0].insertText).toBe('rth = entity{4}');
+    expect(calls()).toBe(1);
+
+    // Continued typing keeps consuming the same completion.
+    const third = await provider.provideInlineCompletionItems(
+      fakeDocument(['four'], 'main.ts', 3) as never,
+      new Position(0, 4) as never,
+      {} as never,
+      token as never,
+    );
+    expect(third[0].insertText).toBe('th = entity{4}');
+    expect(calls()).toBe(1);
+  });
+
+  it('requests afresh when the typed text diverges from the cached completion', async () => {
+    const { deps, calls } = makeDeps(() => Promise.resolve({ text: 'ourth = entity{4}' }));
+    const provider = new CompletionProvider(deps);
+    const token = new FakeToken();
+
+    const first = provider.provideInlineCompletionItems(
+      fakeDocument(['f'], 'main.ts', 1) as never,
+      new Position(0, 1) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    await first;
+    expect(calls()).toBe(1);
+
+    // The user typed "ou " instead of "ou": not a prefix of the cache.
+    const second = provider.provideInlineCompletionItems(
+      fakeDocument(['fou '], 'main.ts', 2) as never,
+      new Position(0, 4) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    await second;
+    expect(calls()).toBe(2);
+  });
+
+  it('requests afresh when the cursor moves back to or before the cache anchor', async () => {
+    const { deps, calls } = makeDeps(() => Promise.resolve({ text: 'ourth = entity{4}' }));
+    const provider = new CompletionProvider(deps);
+    const token = new FakeToken();
+
+    const first = provider.provideInlineCompletionItems(
+      fakeDocument(['f'], 'main.ts', 1) as never,
+      new Position(0, 1) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    await first;
+    expect(calls()).toBe(1);
+
+    // The cursor moved left of the cache anchor (delete/undo): the anchor's
+    // context no longer matches, so a new request fires after the debounce.
+    const second = provider.provideInlineCompletionItems(
+      fakeDocument(['fou'], 'main.ts', 2) as never,
+      new Position(0, 0) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    await second;
+    expect(calls()).toBe(2);
+  });
+
   it('never serves the cached completion in a different document (same version/position)', async () => {
     const { deps, calls } = makeDeps(async () => ({ text: 'from main.ts' }));
     const provider = new CompletionProvider(deps);

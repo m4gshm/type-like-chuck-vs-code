@@ -32,7 +32,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `TLC: Clear API Key` | Remove the stored API key |
 | `TLC: Test Connection` | Check that `tlc.baseUrl` is reachable, fetch `/v1/models` and apply the model list (also updates the template to match the model family) |
 | `TLC: Select Model` | Pick a model from the server's `GET /v1/models` list (or enter an id manually); supported-family models are marked with a check |
-| `TLC: Toggle Completions` | Enable/disable completions for this workspace (persisted). Also available by clicking the TLC item in the status bar |
+| `TLC: Enable/Disable Completions` | Enable/disable completions for this workspace (persisted). Also available by clicking the TLC item in the status bar; while the server is unreachable, the click retries the connection instead |
 
 ## Settings
 
@@ -50,7 +50,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `tlc.autoTrigger` | `true` | Trigger completions automatically after a typing pause |
 | `tlc.debounceMs` | `250` (50–1000) | Pause before an automatic request is sent |
 | `tlc.pendingGraceMs` | `150` (0–1000) | How long typing past a pending request waits for its result before requesting afresh |
-| `tlc.cacheEnabled` | `true` | Re-serve the last completion at the same cursor position without a new API request |
+| `tlc.cacheEnabled` | `true` | Re-serve the last completion without a new API request: at the exact cursor position, and when the typed text extends it along the same line as its prefix (the remainder is served) |
 | `tlc.cacheTtlMs` | `10000` (≥1000) | Lifetime of the cached completion |
 | `tlc.forbiddenFileNames` | `[".env"]` | Globs of files where completions are disabled |
 
