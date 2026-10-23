@@ -73,17 +73,22 @@ All fields apply live. The fields and the selection stay in sync: selecting a bu
 ## Building and testing
 
 ```bash
-npm install
-npm run compile      # esbuild bundle → out/extension.js
+npm ci
+npm run compile      # esbuild bundle → dist/extension.js
+npm run check-types  # tsc --noEmit
 npm run unit         # unit tests (vitest)
-npm test             # unit + integration tests (@vscode/test-electron)
+npm run coverage     # unit tests + coverage report
+npm test             # unit + bundle + integration tests (@vscode/test-electron)
+npm run lint         # eslint src
+npm run build        # test + lint (what CI runs)
+npm run package      # compile + icon regen + vsce package → .vsix
 ```
+
+Debug with F5 (Run Extension) and smoke-test against a local OpenAI-compatible server such as LM Studio.
 
 ## Credits
 
 Extension icon: ["Cowboy" by Robin Lopez from the Noun Project](https://thenounproject.com/icon/cowboy-6661201/), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-
-Debug with F5 (Run Extension) and smoke-test against a local OpenAI-compatible server such as LM Studio.
 
 ## License
 

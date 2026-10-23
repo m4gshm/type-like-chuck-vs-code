@@ -72,7 +72,7 @@ describe('template registry', () => {
 
   it('rejects invalid custom templates with a warning', () => {
     const { registry, warnings } = buildTemplateRegistry('custom', {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       id: 'no-middle', prefix: '[P]', suffix: '[S]', middle: undefined as any,
     });
     expect(warnings).toHaveLength(1);

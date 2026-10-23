@@ -19,18 +19,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - name: static checks and unit tests
+      - name: static checks and coverage
         run: |
           npm ci
           npm run check-types
-          npm run unit
-      - name: coverage
-        run: npm run coverage
-      - name: integration tests and package
+          npm run coverage
+      - name: tests and package
         uses: coactions/setup-xvfb@v1
         with:
           run: |
-            npm run test
+            npm run build
             npm run package
       - name: upload coverage artifact
         uses: actions/upload-artifact@v4

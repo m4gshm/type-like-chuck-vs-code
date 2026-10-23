@@ -1,25 +1,33 @@
 {
-  "compilerOptions": {
-    "module": "Node16",
-    "target": "ES2022",
-    "lib": [
-      "ES2022"
-    ],
-    "moduleResolution": "Node16",
-    "sourceMap": true,
-    "rootDir": "src",
-    "strict": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true
-  },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "node_modules",
-    "out"
-  ]
+	"compilerOptions": {
+		"module": "Node16",
+		"moduleResolution": "Node16",
+		"target": "ES2022",
+		"lib": [
+			"ES2022"
+		],
+		"types": [
+			"node",
+			"mocha"
+		],
+		"rootDir": "src",
+		"outDir": "out",
+		"sourceMap": true,
+		"inlineSources": true,
+		"strict": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUnusedLocals": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true
+	},
+	"include": [
+		"src"
+	],
+	"exclude": [
+		"node_modules",
+		"out",
+		".vscode-test",
+		"vitest.config.ts"
+	]
 }

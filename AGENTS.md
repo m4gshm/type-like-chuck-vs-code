@@ -12,11 +12,14 @@ Single-line suggestions only; completions are streamed from the legacy
 ## Commands
 
 ```bash
-npm run compile       # esbuild bundle → out/extension.js (required before F5 / integration tests)
+npm run compile       # esbuild bundle → dist/extension.js (required before F5 / integration tests)
+npm run compile-tests # tsc -p tsconfig.test.json → out/test/
 npm run check-types   # tsc --noEmit
 npm run unit          # vitest unit tests (fast, no VS Code)
-npm run test          # unit + compile-tests + @vscode/test-electron integration tests
+npm run test          # unit + bundle + compile-tests + @vscode/test-electron integration tests
 npm run coverage      # vitest --coverage
+npm run lint          # eslint src
+npm run build         # test + lint (what CI runs)
 npm run package       # compile + icon regen + vsce package → .vsix
 ```
 
@@ -45,6 +48,14 @@ plain Node; `vscode` is stubbed in `src/test/unit/vscode-stub.ts`).
 | `forbidden_files.ts` | Glob matching (micromatch) of files where completions are disabled |
 | `connection_watchdog.ts` | Probes the server, pauses/re-enables completions |
 | `status_bar.ts` | Status item; **click toggles completions** (`tlc.toggleCompletions`) |
+
+## Launch and debug
+
+Debug with F5 (Run Extension): esbuild's watch is wired through
+`npm run watch`. Integration tests require `npm run compile` (the bundled
+`dist/extension.js`) plus the compiled tests (`npm run compile-tests`) and
+smoke-test against the stub server in `src/test/integration` — no real
+completion backend is needed.
 
 ## Behavioral rules (keep docs in sync!)
 
@@ -77,11 +88,18 @@ When changing behavior, update `README.md` **and** the setting descriptions in
 
 ## Conventions
 
-- **Comments**: do not write comments that restate what the code already says.
-  Comment only non-obvious rationale, invariants and gotchas; keep JSDoc on
-  exported APIs to one short line. When editing code, remove nearby comments
-  that became redundant.
-- TypeScript, ESM sources bundled by esbuild; no build step for unit tests.
+- **Comments**: default to **no comments**. Write code that explains itself;
+  add a comment only when the code cannot convey non-obvious *why* — invariants,
+  workarounds, platform quirks, external-command behavior. Never comment:
+  - what the next line obviously does ("//log", "// Trigger event", "// Create X");
+  - JSDoc restating parameter names/types on trivial functions;
+  - section markers, TODO-free narration, alternatives that were not chosen.
+  If a block needs an explaining comment, first try renaming or extracting a
+  well-named helper instead. When editing code, delete nearby comments that
+  became redundant. Tests follow the same rule: assertion names and structure
+  should make the intent clear without commentary.
+- TypeScript strict mode, CommonJS sources bundled by esbuild; unit tests run
+  directly on TS sources by vitest — no build step for them.
 - Constructors take a "host" interface (functions/ports) instead of importing
   `vscode` — follow this pattern for new logic that needs testing.
 - Tests live next to a mirror structure in `src/test/unit/*.test.ts` (vitest)
