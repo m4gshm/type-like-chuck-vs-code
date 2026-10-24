@@ -87,7 +87,6 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
 
   onDisabled(): void {
     this.cancelActiveRequests();
-    this.resetThrottle();
   }
 
   async provideInlineCompletionItems(
@@ -236,9 +235,13 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       try {
         await sleep(config.debounceMs, token);
       } catch (e) {
-        // Cancelled while waiting: keep the pending request and cache intact
-        // (a follow-up invocation may reuse either). Just stop this invocation.
-        this.deps.debug(`completion cancelled during debounce: ${fileName} @ ${pos}`);
+        if (token.isCancellationRequested) {
+          // Cancelled while waiting: keep the pending request and cache intact
+          // (a follow-up invocation may reuse either). Just stop this invocation.
+          this.deps.debug(`completion cancelled during debounce: ${fileName} @ ${pos}`);
+          return undefined;
+        }
+        this.handleRequestError(e, `completion debounce error: ${fileName} @ ${pos}`);
         return undefined;
       }
       this.deps.trace(`completion trace: debounce passed: ${fileName} @ ${pos}`);
