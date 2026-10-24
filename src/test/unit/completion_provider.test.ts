@@ -81,16 +81,19 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
     getConfig: () => config,
     resolveTemplates: () => buildTemplateRegistry('qwen2', undefined),
     forbidden: () => new ForbiddenFiles(config.forbiddenFileNames),
-    state: {
+    completionState: {
       isEnabled: () => enabled,
       setEnabled: async (v: boolean) => {
         enabled = v;
       },
     } as unknown as CompletionState,
-    status: { setBusy: () => undefined, setError: () => undefined, clearError: () => undefined } as unknown as StatusBar,
-    watchdog: { reportFailure: () => undefined, reportSuccess: () => undefined },
-    log: () => undefined,
+    statusBar: { setBusy: () => undefined, setError: () => undefined, clearError: () => undefined } as unknown as StatusBar,
+    connectionWatchdog: { reportFailure: () => undefined, reportSuccess: () => undefined },
+    toRelativePath: (p: string) => p,
+    warn: () => undefined,
+    debug: () => undefined,
     trace: () => undefined,
+    error: () => undefined,
   };
   return { deps, calls: () => callCount };
 }
@@ -129,6 +132,37 @@ describe('CompletionProvider', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(await second).toHaveLength(1);
     expect(calls()).toBe(2);
+  });
+
+  // Full lifecycle: the model suggested "ur" for the prefix "u".  The user
+  // hit Enter, the document changed, the cache missed, and a fresh API call
+  // was made with the final document state, returning "r".  The provider
+  // strips the trailing newline from the suffix, computes overlap("r", "\n")
+  // = 0, and inserts "r" at position 1 — right before "\n", so the final
+  // document reads "ur\n" ("r" placed before the newline).
+  it('full lifecycle: model "ur" + user types \\n → fresh API call returns "r" inserted before the newline', async () => {
+    const { deps } = makeDeps(async () => ({ text: 'r' }));
+    const provider = new CompletionProvider(deps);
+    const token = new FakeToken();
+
+    // The document is "u\n" (2 characters).  The cursor is at (0, 1), right
+    // after "u" and before "\n".  The model's fresh API call (triggered by
+    // the document change after Enter) returns "r".  The provider strips
+    // the trailing "\n" from the suffix, computes no overlap, and inserts
+    // "r" at position 1 — so the final document reads "ur\n".
+    const doc = fakeDocument(['u\n'], 'main.ts', 1);
+    const invocation = provider.provideInlineCompletionItems(
+      doc as never,
+      new Position(0, 1) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await invocation;
+    expect(result[0].insertText).toBe('r');
+    const range = result[0].range as { start: { character: number }; end: { character: number } };
+    expect(range.start.character).toBe(1);
+    expect(range.end.character).toBe(1); // insertion point before "\n"
   });
 
   it('re-serves the cached completion at the exact cursor position without new API calls', async () => {
@@ -341,6 +375,29 @@ describe('CompletionProvider', () => {
     expect(calls()).toBe(2);
   });
 
+  it('manual trigger bypasses the cache at the same position and requests afresh', async () => {
+    const responses = [{ text: 'stale' }, { text: 'fresh' }];
+    const { deps, calls } = makeDeps(async () => responses.shift() ?? { text: 'fresh' });
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['a = ']);
+    const token = new FakeToken();
+
+    const first = provider.provideInlineCompletionItems(doc as never, new Position(0, 4) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await first).toHaveLength(1);
+    expect(calls()).toBe(1);
+
+    // The document and the cursor are unchanged, so an automatic re-invocation
+    // would be served from the cache — but an explicit manual trigger asks for
+    // a fresh suggestion and must hit the API again.
+    provider.resetThrottle();
+    const second = await provider.provideInlineCompletionItems(doc as never, new Position(0, 4) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second).toHaveLength(1);
+    expect(second![0].insertText).toBe('fresh');
+    expect(calls()).toBe(2);
+  });
+
   it('drops a completion that fully duplicates the text after the cursor', async () => {
     const { deps, calls } = makeDeps(async () => ({ text: ' = 1;' }));
     const provider = new CompletionProvider(deps);
@@ -365,10 +422,13 @@ describe('CompletionProvider', () => {
     await vi.advanceTimersByTimeAsync(250);
     const items = await result;
     expect(items).toHaveLength(1);
+    // The old flow: overlapLength finds 6 chars (" = 1;"), so a replacement
+    // range [7, 13) is created — VS Code replaces " = 1;" with the full
+    // completion " = 1; // done", yielding "const x = 1; // done".
     expect(items[0].insertText).toBe(' = 1; // done');
     const range = items[0].range as { start: { character: number }; end: { character: number } };
     expect(range.start.character).toBe(7);
-    expect(range.end.character).toBe(12); // the " = 1;" part is replaced, not doubled
+    expect(range.end.character).toBe(12);
   });
 
   it('trims the completion tail that duplicates the start of the following text', async () => {
@@ -428,7 +488,7 @@ describe('CompletionProvider', () => {
     const { deps } = makeDeps(async () => {
       throw new CompletionError('other', 'server exploded');
     });
-    deps.status = {
+    deps.statusBar = {
       setBusy: (b: boolean) => busyLog.push(b),
       setError: () => errors.push('error'),
       clearError: () => undefined,
@@ -450,7 +510,7 @@ describe('CompletionProvider', () => {
     const { deps } = makeDeps(async () => {
       throw new CompletionError('connection', 'Cannot reach the completions API');
     });
-    deps.watchdog = {
+    deps.connectionWatchdog = {
       reportFailure: (m) => failures.push(m),
       reportSuccess: () => successes.push(1),
     };
@@ -471,10 +531,49 @@ describe('CompletionProvider', () => {
     expect(successes).toHaveLength(0);
   });
 
+  it('treats abort errors as silent cancellation without notifications', async () => {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const { deps } = makeDeps(async () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+    deps.warn = (m) => warnings.push(m);
+    deps.error = (m) => errors.push(m);
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['x']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 1) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(0);
+    expect(warnings).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it('notifies about unexpected non-abort errors', async () => {
+    const errors: Array<[string, unknown]> = [];
+    const { deps } = makeDeps(async () => {
+      throw new Error('boom');
+    });
+    deps.error = (m, e) => errors.push([m, e]);
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['x']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 1) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0][0]).toContain('completion request error');
+    expect(errors[0][1]).toBeInstanceOf(Error);
+  });
+
   it('reports request success to the watchdog', async () => {
     const successes: number[] = [];
     const { deps } = makeDeps(async () => ({ text: 'ok' }));
-    deps.watchdog = { reportFailure: () => undefined, reportSuccess: () => successes.push(1) };
+    deps.connectionWatchdog = { reportFailure: () => undefined, reportSuccess: () => successes.push(1) };
     const provider = new CompletionProvider(deps);
     const doc = fakeDocument(['']);
     const token = new FakeToken();
@@ -523,10 +622,11 @@ describe('CompletionProvider pending reuse', () => {
       {} as never,
       token2 as never,
     );
-    // The pending result arrives within the grace window → served, no new call.
-    first.resolve({ text: 'stale but fresh enough' });
+    // The pending result starts with 'd' (what the user typed) →
+    // the 'd' is sliced off, 'xyz' is served, no new call.
+    first.resolve({ text: 'dxyz' });
     await vi.advanceTimersByTimeAsync(0);
-    expect((await invocation2)[0].insertText).toBe('stale but fresh enough');
+    expect((await invocation2)[0].insertText).toBe('xyz');
     expect(harness.calls()).toBe(1);
 
     // One more keystroke: the pending request is consumed, the cache misses

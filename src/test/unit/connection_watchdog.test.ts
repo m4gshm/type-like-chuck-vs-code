@@ -11,7 +11,7 @@ function setup(probeImpl: () => Promise<unknown> = () => Promise.resolve()) {
     enable: () => calls.push('enable'),
     notifyFailure: (m) => notifications.push(m),
     clearFailure: () => calls.push('clear'),
-    log: (m) => logs.push(m),
+    warn: (m) => logs.push(m),
   });
   return { watchdog, calls, notifications, logs };
 }

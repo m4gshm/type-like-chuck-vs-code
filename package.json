@@ -71,7 +71,7 @@
     "keybindings": [
       {
         "command": "tlc.triggerCompletion",
-        "key": "ctrl+alt+space",
+        "key": "shift+alt+space",
         "when": "editorTextFocus"
       }
     ],

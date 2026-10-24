@@ -6,7 +6,8 @@ export interface ModelConfigHost {
   readConfig(): ExtensionConfig;
   /** Persists a tlc setting in user (global) settings. */
   updateSetting(key: string, value: unknown): Promise<void>;
-  log(message: string): void;
+  warn(message: string): void;
+  info(message: string): void;
   notify(message: string): void;
   /** Asks the user to pick a model; undefined = cancelled. */
   chooseModel(models: ModelInfo[]): Promise<{ id: string; contextLength?: number } | undefined>;
@@ -58,7 +59,7 @@ export class ModelConfig {
     }
     if (limitChanged || limitReset) {
       await settings('contextMaxLength', contextLength ?? 0);
-      this.host.log(
+      this.host.info(
         contextLength !== undefined
           ? `Context limit for "${modelId}" set to ${contextLength}.`
           : `Context limit reset to unlimited (no metadata for "${modelId}").`,
@@ -84,7 +85,7 @@ export class ModelConfig {
   async applyModelList(models: ModelInfo[]): Promise<void> {
     await this.clampContextSettings();
     if (models.length === 0) {
-      this.host.log(`Model list is empty; keeping "${this.config.model}".`);
+      this.host.warn(`Model list is empty; keeping "${this.config.model}".`);
       return;
     }
     if (models.length === 1) {
@@ -99,7 +100,7 @@ export class ModelConfig {
       await this.setModel(current.id, current.contextLength);
       return;
     }
-    this.host.log(`"${this.config.model}" is not in the model list; showing the picker.`);
+    this.host.warn(`"${this.config.model}" is not in the model list; showing the picker.`);
     const chosen = await this.host.chooseModel(models);
     if (chosen !== undefined) {
       await this.setModel(chosen.id, chosen.contextLength);
@@ -120,6 +121,6 @@ export class ModelConfig {
     await this.host.updateSetting('prefixContextMaxLength', prefix);
     await this.host.updateSetting('suffixContextMaxLength', suffix);
     this.reload();
-    this.host.log(`Context budgets clamped to ${prefix} + ${suffix} (limit ${limit}).`);
+    this.host.warn(`Context budgets clamped to ${prefix} + ${suffix} (limit ${limit}).`);
   }
 }

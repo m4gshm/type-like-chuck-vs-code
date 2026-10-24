@@ -14,13 +14,13 @@ import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('TLC', { log: true });
-  const log = (message: string): void => {
-    output.warn(message);
-    console.log(`[TLC:warn] ${message}`);
-  };
-  const trace = (message: string): void => {
-    output.debug(message);
-    console.log(`[TLC] ${message}`);
+  const warn = (message: string): void => output.warn(message);
+  const info = (message: string): void => output.info(message);
+  const debug = (message: string): void => output.debug(message);
+  const trace = (message: string): void => output.trace(message);
+  const error = (message: string, err: unknown): void => {
+    const stack = err instanceof Error ? err.stack ?? '' : String(err);
+    output.error(`${message}\n${stack}`);
   };
 
   let templates: ResolvedTemplates;
@@ -31,7 +31,8 @@ export function activate(context: vscode.ExtensionContext): void {
       updateSetting: async (key, value) => {
         await vscode.workspace.getConfiguration('tlc').update(key, value, vscode.ConfigurationTarget.Global);
       },
-      log,
+      warn: warn,
+      info: info,
       notify: (message) => void vscode.window.showInformationMessage(message),
       chooseModel: (models) => presentModelQuickPick(models),
       onModelChanged: (modelId) => applyTemplateSuggestion(modelId),
@@ -70,44 +71,47 @@ export function activate(context: vscode.ExtensionContext): void {
     (message) => console.log(`[TLC:cause] ${message}`),
   );
 
-  const state = new CompletionState(context.globalState);
-  const status = new StatusBar(state);
+  const complectionState = new CompletionState(context.globalState);
+  const statusBar = new StatusBar(complectionState);
 
-  const watchdog = new ConnectionWatchdog({
+  const connectionWatchdog = new ConnectionWatchdog({
     probe: () => client.listModels(),
     disable: (reason) => {
-      provider.cancelActiveRequests();
-      state.setConnectionBlocked(true);
-      status.setConnectionReason(reason);
-      status.refresh();
+      complectionProvider.cancelActiveRequests();
+      complectionState.setConnectionBlocked(true);
+      statusBar.setConnectionReason(reason);
+      statusBar.refresh();
     },
     enable: () => {
-      state.setConnectionBlocked(false);
-      status.setConnectionReason(undefined);
-      status.clearError();
-      status.refresh();
+      complectionState.setConnectionBlocked(false);
+      statusBar.setConnectionReason(undefined);
+      statusBar.clearError();
+      statusBar.refresh();
     },
     notifyFailure: (message) => {
-      status.setConnectionReason(message);
+      statusBar.setConnectionReason(message);
       void vscode.window.showWarningMessage(message);
     },
     clearFailure: () => {
-      status.setConnectionReason(undefined);
-      status.clearError();
+      statusBar.setConnectionReason(undefined);
+      statusBar.clearError();
     },
-    log,
+    warn: warn,
   });
 
-  const provider = new CompletionProvider({
+  const complectionProvider = new CompletionProvider({
     client,
     getConfig: config,
     resolveTemplates: () => templates,
     forbidden: () => forbidden,
-    state,
-    status,
-    watchdog,
-    log,
-    trace,
+    completionState: complectionState,
+    statusBar: statusBar,
+    connectionWatchdog: connectionWatchdog,
+    toRelativePath: (p: string) => vscode.workspace.asRelativePath(p),
+    warn: warn,
+    debug: debug,
+    trace: trace,
+    error: error,
   });
 
   /**
@@ -118,7 +122,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let lastModelIds: string | undefined;
   const checkServerModels = async (): Promise<ModelInfo[]> => {
     const models = await client.listModels();
-    watchdog.reportSuccess();
+    connectionWatchdog.reportSuccess();
     const ids = modelIdsKey(models);
     const changed = lastModelIds !== ids;
     lastModelIds = ids;
@@ -129,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const selector: vscode.DocumentSelector = { pattern: '**' };
-  const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, provider);
+  const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, complectionProvider);
 
   /**
    * Shows the model QuickPick (server models with supported-family marks
@@ -175,13 +179,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     output,
-    status,
+    statusBar,
     providerRegistration,
     vscode.commands.registerCommand('tlc.triggerCompletion', () => {
-      if (!state.isEnabled()) {
+      if (!complectionState.isEnabled()) {
         return;
       }
-      provider.resetThrottle();
+      complectionProvider.resetThrottle();
       void vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
     }),
     vscode.commands.registerCommand('tlc.setApiKey', async () => {
@@ -223,7 +227,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       } catch (err) {
         const message = `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`;
-        watchdog.reportFailure(message);
+        connectionWatchdog.reportFailure(message);
         void vscode.window.showWarningMessage(message);
       }
     }),
@@ -232,7 +236,7 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         models = await client.listModels();
       } catch (err) {
-        log(`Cannot list models from ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+        warn(`Cannot list models from ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
         void vscode.window.showWarningMessage(
           `Cannot fetch the model list from ${config().baseUrl}. You can still enter the model id manually.`,
         );
@@ -246,31 +250,31 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('tlc.enableDisableCompletions', async () => {
       // Clicking the error icon retries the connection instead of toggling:
       // the user's intent there is "fix it", not "disable".
-      if (watchdog.isFailing()) {
-        watchdog.reset();
-        status.setBusy(true);
+      if (connectionWatchdog.isFailing()) {
+        connectionWatchdog.reset();
+        statusBar.setBusy(true);
         try {
           const models = await checkServerModels();
           void vscode.window.showInformationMessage(
             `TLC: ${config().baseUrl} is reachable again (${models.length} model${models.length === 1 ? '' : 's'}).`,
           );
         } catch (err) {
-          watchdog.reportFailure(
+          connectionWatchdog.reportFailure(
             `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
           );
         } finally {
-          status.setBusy(false);
+          statusBar.setBusy(false);
         }
         return;
       }
       // Manual toggle wins: cancel any auto-disable/auto-re-enable watch.
-      watchdog.reset();
-      const enabled = !state.isEnabled();
-      await state.setEnabled(enabled);
+      connectionWatchdog.reset();
+      const enabled = !complectionState.isEnabled();
+      await complectionState.setEnabled(enabled);
       if (!enabled) {
-        provider.onDisabled();
+        complectionProvider.onDisabled();
       }
-      status.refresh();
+      statusBar.refresh();
       void vscode.window.showInformationMessage(enabled ? 'TLC completions enabled.' : 'TLC completions disabled.');
     }),
   );
@@ -291,15 +295,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeTextEditorSelection((event) => {
       if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse
         || event.kind === vscode.TextEditorSelectionChangeKind.Command) {
-        provider.cancelActiveRequests();
+        complectionProvider.cancelActiveRequests();
         return;
       }
       const positions = event.selections.map((s) => s.active);
       if (positions.length !== 1) {
-        provider.cancelActiveRequests();
+        complectionProvider.cancelActiveRequests();
       }
     }),
-    vscode.window.onDidChangeActiveTextEditor(() => provider.cancelActiveRequests()),
+    vscode.window.onDidChangeActiveTextEditor(() => complectionProvider.cancelActiveRequests()),
   );
 
   // Template field rules:
@@ -374,7 +378,7 @@ export function activate(context: vscode.ExtensionContext): void {
       templates = buildTemplateRegistry(config().promptTemplate, config().customTemplate);
       forbidden = new ForbiddenFiles(config().forbiddenFileNames);
       for (const warning of templates.warnings) {
-        log(warning);
+        warn(warning);
       }
 
       // Resolve the model against the new server's list. Editing the setting
@@ -391,7 +395,7 @@ export function activate(context: vscode.ExtensionContext): void {
           );
         } catch (err) {
           const message = `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`;
-          watchdog.reportFailure(message);
+          connectionWatchdog.reportFailure(message);
           void vscode.window.showWarningMessage(message);
         }
       }
@@ -402,7 +406,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // runs (the server may load another model) and double as a health probe.
   const pollTimer = setInterval(() => {
     void checkServerModels().catch((err: unknown) => {
-      watchdog.reportFailure(
+      connectionWatchdog.reportFailure(
         `Cannot reach the completions API (${config().baseUrl}): ${err instanceof Error ? err.message : String(err)}`,
       );
     });
@@ -435,7 +439,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    log(`Unknown prompt template "${selected ?? 'default'}" and no template matches model "${config().model}".`);
+    warn(`Unknown prompt template "${selected ?? 'default'}" and no template matches model "${config().model}".`);
     const choice = await vscode.window.showWarningMessage(
       `TLC: prompt template "${selected ?? 'default'}" is not recognized and no template matches model "${config().model}". Please pick a template.`,
       'Open Settings',

@@ -21,7 +21,7 @@ export interface WatchdogDeps {
   notifyFailure: (message: string) => void;
   /** Clears the failure indication (recovered or reset by the user). */
   clearFailure: () => void;
-  log: (message: string) => void;
+  warn: (message: string) => void;
 }
 
 /**
@@ -91,7 +91,7 @@ export class ConnectionWatchdog {
     }
     this.disabledByWatchdog = true;
     this.deps.disable(this.failureMessage ?? 'Connection error');
-    this.deps.log('Completions auto-disabled: the server is unreachable. Probing every 30 s.');
+    this.deps.warn('Completions auto-disabled: the server is unreachable. Probing every 30 s.');
     void this.probeLoop();
   }
 
@@ -108,7 +108,7 @@ export class ConnectionWatchdog {
           await sleep(WATCHDOG_INTERVAL_MS);
           continue;
         }
-        this.deps.log('Server is reachable again; completions re-enabled.');
+        this.deps.warn('Server is reachable again; completions re-enabled.');
         this.clear();
         return;
       }

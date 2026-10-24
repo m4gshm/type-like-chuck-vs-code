@@ -18,9 +18,13 @@ describe('overlapLength', () => {
     expect(overlapLength('const', 'consolidate')).toBe(4);
   });
 
-  it('does not count a mismatch behind a common prefix', () => {
-    // "abc" vs "abd": only "ab" matches, "c" ≠ "d" stops the scan.
-    expect(overlapLength('abc', 'abd')).toBe(2);
+  it('trailing newline in following is ignored (model generated "ur", user typed "u\\n")', () => {
+    expect(overlapLength('ur', 'u\n')).toBe(1);
+  });
+
+  it('strips Windows \\r\\n and bare \\r', () => {
+    expect(overlapLength('abc', 'abc\r\n')).toBe(3);
+    expect(overlapLength('ab', 'ab\r')).toBe(2);
   });
 });
 

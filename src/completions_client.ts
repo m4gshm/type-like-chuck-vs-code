@@ -191,10 +191,10 @@ export class CompletionsClient {
   }
 }
 
-function isAbortError(err: unknown): boolean {
+export function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError';
 }
 
-function messageOf(err: unknown): string {
+export function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

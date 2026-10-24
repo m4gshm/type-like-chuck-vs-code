@@ -47,7 +47,8 @@ function setup(initial: ExtensionConfig): Setup {
         : key === 'suffixContextMaxLength' ? 'suffixMaxLength' : key;
       (config as unknown as Record<string, unknown>)[field] = value;
     },
-    log: (m) => logs.push(m),
+    warn: (m) => logs.push(m),
+    info: () => undefined,
     notify: () => undefined,
     chooseModel: async (models) => {
       pickerCalls += 1;

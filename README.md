@@ -7,7 +7,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 ## Features
 
 - **Automatic trigger** — completions are requested after you stop typing (debounce, default 250 ms).
-- **Manual trigger** — run `TLC: Trigger Completion Now` (default `Ctrl+Alt+Space`) to request a completion immediately.
+- **Manual trigger** — run `TLC: Trigger Completion Now` (default `Ctrl+Alt+Space`) to request a completion immediately; the manual trigger always performs a fresh API request, ignoring the cache and any pending request.
 - **Built-in FIM templates** for Qwen2.5, Qwen3, LFM2 (Liquid AI) and Mellum (JetBrains), plus user-defined custom templates.
 - **Streaming** requests against the legacy OpenAI `POST /v1/completions` endpoint with stop sequences derived from the template's reserved tokens.
 - **Single-line suggestions** that accept with <kbd>Tab</kbd> and dismiss with <kbd>Esc</kbd> via VS Code's native inline suggestions.
@@ -27,7 +27,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 
 | Command | Description |
 | --- | --- |
-| `TLC: Trigger Completion Now` | Request a completion immediately, bypassing the debounce |
+| `TLC: Trigger Completion Now` | Request a completion immediately, bypassing the debounce, the cache, and pending-request reuse |
 | `TLC: Set API Key` | Store the API key in secret storage (empty input clears usage) |
 | `TLC: Clear API Key` | Remove the stored API key |
 | `TLC: Test Connection` | Check that `tlc.baseUrl` is reachable, fetch `/v1/models` and apply the model list (also updates the template to match the model family) |
