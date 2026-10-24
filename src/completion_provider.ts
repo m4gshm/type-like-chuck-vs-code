@@ -258,6 +258,8 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
           document.version,
           this.activeRequest.completion,
           controller,
+          1000,
+          () => this.deps.trace(`completion trace: pending request TTL expired, aborting: ${fileName} @ ${position.line}:${position.character}`),
         );
         this.activeRequest = undefined;
       } else {
@@ -316,7 +318,9 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     if (!cache) {
       return undefined;
     }
-    if (performance.now() - cache.createdAt >= config.cacheTtlMs) {
+    const age = performance.now() - cache.createdAt;
+    if (age >= config.cacheTtlMs) {
+      this.deps.trace(`completion trace: cached completion expired after ${Math.round(age)}ms (ttl ${config.cacheTtlMs}ms): ${this.deps.toRelativePath(document.fileName)} @ ${position.line}:${position.character}`);
       this.cache = undefined;
       return undefined;
     }
@@ -424,23 +428,25 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       return;
     }
     if (err instanceof CompletionError) {
-      this.deps.warn(err.message);
+      const text = `[${err.kind}] ${err.message}`;
+      this.deps.warn(text);
       this.deps.statusBar.setError();
       if (err.kind === 'auth') {
-        void vscode.window.showErrorMessage(err.message, 'Set API Key').then((choice) => {
+        void vscode.window.showErrorMessage(text, 'Set API Key').then((choice) => {
           if (choice === 'Set API Key') {
             void vscode.commands.executeCommand('tlc.setApiKey');
           }
         });
       } else if (err.kind === 'connection') {
         // Surfaced once per outage by the watchdog, not on every request.
-        this.deps.connectionWatchdog.reportFailure(err.message);
+        this.deps.connectionWatchdog.reportFailure(text);
       } else {
-        void vscode.window.showWarningMessage(err.message);
+        void vscode.window.showWarningMessage(text);
       }
     } else {
       this.deps.error(context, err);
-      const message = `Unexpected completion error: ${messageOf(err)}`;
+      const name = err instanceof Error ? err.name : typeof err;
+      const message = `Unexpected completion error (${name}): ${messageOf(err)}`;
       this.deps.statusBar.setError();
       void vscode.window.showErrorMessage(message);
     }

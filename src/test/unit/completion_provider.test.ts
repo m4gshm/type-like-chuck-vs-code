@@ -524,9 +524,9 @@ describe('CompletionProvider', () => {
       expect(await result).toHaveLength(0);
     }
     expect(failures).toEqual([
-      'Cannot reach the completions API',
-      'Cannot reach the completions API',
-      'Cannot reach the completions API',
+      '[connection] Cannot reach the completions API',
+      '[connection] Cannot reach the completions API',
+      '[connection] Cannot reach the completions API',
     ]);
     expect(successes).toHaveLength(0);
   });

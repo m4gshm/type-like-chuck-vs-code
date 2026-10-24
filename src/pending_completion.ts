@@ -25,8 +25,12 @@ export class PendingCompletion {
     readonly completion: Promise<string>,
     private readonly controller: { abort(): void },
     lifetimeMs = 1000,
+    private readonly onTtlExpire: () => void = () => undefined,
   ) {
-    this.timer = setTimeout(() => this.abort(), lifetimeMs);
+    this.timer = setTimeout(() => {
+      this.onTtlExpire();
+      this.abort();
+    }, lifetimeMs);
     if (typeof this.timer.unref === 'function') {
       this.timer.unref();
     }

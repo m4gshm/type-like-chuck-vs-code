@@ -173,7 +173,9 @@ export class CompletionsClient {
       return { text: text.trim().length === 0 ? '' : text };
     } catch (err) {
       if (signal.aborted || isAbortError(err)) {
-        throw err; // cancellation, handled by the provider
+        // Cancellation, handled silently by the provider. Normalize the error
+        // name: e.g. the OpenAI SDK throws APIUserAbortError on abort.
+        throw isAbortError(err) ? err : new DOMException(messageOf(err), 'AbortError');
       }
       if (err instanceof OpenAI.APIConnectionError) {
         const cause = (err as unknown as { cause?: unknown }).cause;
