@@ -59,6 +59,7 @@ export class CompletionsClient {
     private readonly getModel: () => string,
     private readonly getMaxTokens: () => number,
     private readonly logCause?: (message: string) => void,
+    private readonly logResponse?: (message: string) => void,
     private readonly createSdk: (options: {
       baseURL: string;
       apiKey: string;
@@ -170,6 +171,7 @@ export class CompletionsClient {
           text = text.split(token).join('');
         }
       }
+      this.logResponse?.(`api response (${text.length} chars): ${text}`);
       return { text: text.trim().length === 0 ? '' : text };
     } catch (err) {
       if (signal.aborted || isAbortError(err)) {

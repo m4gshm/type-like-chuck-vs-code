@@ -69,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     () => config().model,
     () => config().maxTokens,
     (message) => console.log(`[TLC:cause] ${message}`),
+    (message) => trace(message),
   );
 
   const complectionState = new CompletionState(context.globalState);

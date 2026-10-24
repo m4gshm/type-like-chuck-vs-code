@@ -566,7 +566,7 @@ describe('CompletionProvider', () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(await result).toHaveLength(0);
     expect(errors).toHaveLength(1);
-    expect(errors[0][0]).toContain('completion request error');
+    expect(errors[0][0]).toContain('r1 completion request error');
     expect(errors[0][1]).toBeInstanceOf(Error);
   });
 

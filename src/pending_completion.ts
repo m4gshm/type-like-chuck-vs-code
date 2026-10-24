@@ -22,6 +22,7 @@ export class PendingCompletion {
     readonly positionCharacter: number,
     /** Document version at request time; detects undo/redo back to the same position. */
     readonly version: number,
+    readonly requestId: string,
     readonly completion: Promise<string>,
     private readonly controller: { abort(): void },
     lifetimeMs = 1000,

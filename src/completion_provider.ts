@@ -65,6 +65,7 @@ const sleep = (ms: number, token: vscode.CancellationToken) =>
  */
 export class CompletionProvider implements vscode.InlineCompletionItemProvider {
   private skipDebounceOnce = false;
+  private requestCounter = 0;
   private activeRequest:
     | { controller: AbortController; completion: Promise<string> }
     | undefined;
@@ -139,27 +140,28 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     const fileName = this.deps.toRelativePath(document.fileName);
     const prefix = this.prefixWord(document, position);
     const pos = `${position.line}:${position.character}${prefix ? ' "' + prefix + '"' : ''}`;
-    this.deps.debug(`completion invoking: ${fileName} @ ${pos}`);
+    const requestId = `r${++this.requestCounter}`;
+    this.deps.debug(`${requestId} completion invoking: ${fileName} @ ${pos}`);
 
     const manual = this.skipDebounceOnce;
     this.skipDebounceOnce = false;
     if (manual) {
-      this.deps.debug(`completion manual trigger: bypassing cache and pending: ${fileName} @ ${pos}`);
+      this.deps.debug(`${requestId} completion manual trigger: bypassing cache and pending: ${fileName} @ ${pos}`);
     } else {
       const cached = this.cachedValue(document, position);
       if (cached !== undefined) {
-        this.deps.debug(`completion cached result: ${fileName} @ ${pos} -> ${cached}`);
+        this.deps.debug(`${requestId} completion cached result: ${fileName} @ ${pos} -> ${cached}`);
         return { text: cached };
       }
-      this.deps.trace(`completion trace: cache miss: ${fileName} @ ${pos}`);
+      this.deps.trace(`${requestId} completion trace: cache miss: ${fileName} @ ${pos}`);
     }
 
     // Undo/redo back to the request's exact position (same character,
     // different version) means the request's context no longer exists.
     const pendingHere = manual ? undefined : this.pending;
     this.deps.trace(pendingHere
-      ? `completion trace: pending request found @ ${pendingHere.line}:${pendingHere.positionCharacter} (v${pendingHere.version})`
-      : `completion trace: no pending request: ${fileName} @ ${pos}`);
+      ? `${requestId} completion trace: pending ${pendingHere.requestId} found @ ${pendingHere.line}:${pendingHere.positionCharacter} (v${pendingHere.version})`
+      : `${requestId} completion trace: no pending request: ${fileName} @ ${pos}`);
     if (
       pendingHere &&
       pendingHere.fileName === document.fileName &&
@@ -177,7 +179,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       const config = this.deps.getConfig();
       const typedOn = position.character > pendingHere.positionCharacter;
       if (typedOn && config.pendingGraceMs <= 0) {
-        this.deps.trace(`completion trace: typed past the pending position with grace disabled, aborting: ${fileName} @ ${pos}`);
+        this.deps.trace(`${requestId} completion trace: typed past pending ${pendingHere.requestId} position with grace disabled, aborting: ${fileName} @ ${pos}`);
         pendingHere.abort();
       } else {
         this.deps.statusBar.setBusy(true);
@@ -187,25 +189,25 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
             sleep(config.pendingGraceMs, token).then(() => GRACE_EXPIRED),
           ]) : await this.awaitRequest(pendingHere.completion, token);
           if (result === GRACE_EXPIRED) {
-            this.deps.trace(`completion trace: pending grace expired after ${config.pendingGraceMs}ms, aborting: ${fileName} @ ${pos}`);
+            this.deps.trace(`${requestId} completion trace: pending ${pendingHere.requestId} grace expired after ${config.pendingGraceMs}ms, aborting: ${fileName} @ ${pos}`);
             pendingHere.abort();
           } else {
             const completion = result as { text?: string; failed?: boolean };
             const text = completion.text;
             if (token.isCancellationRequested) {
-              this.deps.debug(`completion cancelled while waiting for pending result: ${fileName} @ ${pos}`);
+              this.deps.debug(`${requestId} completion cancelled while waiting for pending ${pendingHere.requestId} result: ${fileName} @ ${pos}`);
               return undefined;
             } else if (text !== undefined && text.length > 0) {
               const sliced = this.sliceByTyped(document, position, pendingHere.positionCharacter, text);
               if (sliced !== undefined) {
                 this.storeCache(document, position, sliced.result);
                 const pendingPrefix = this.prefixWord(document, new vscode.Position(pendingHere.line, pendingHere.positionCharacter));
-                this.deps.debug(`completion pending completions: ${fileName} @ ${pendingHere.line}:${pendingHere.positionCharacter}${pendingPrefix ? ' "' + pendingPrefix + '"' : ''} -> ${sliced.result}`);
+                this.deps.debug(`${requestId} completion pending completions ${pendingHere.requestId}: ${fileName} @ ${pendingHere.line}:${pendingHere.positionCharacter}${pendingPrefix ? ' "' + pendingPrefix + '"' : ''} -> ${sliced.result}`);
                 return { text: sliced.result };
               }
-              this.deps.trace(`completion trace: typed text diverged from the pending completion, requesting afresh: ${fileName} @ ${pos}`);
+              this.deps.trace(`${requestId} completion trace: typed text diverged from pending ${pendingHere.requestId} completion, requesting afresh: ${fileName} @ ${pos}`);
             } else if (completion.failed) {
-              this.deps.debug(`completion pending request returned failure: ${fileName} @ ${pos}`);
+              this.deps.debug(`${requestId} completion pending ${pendingHere.requestId} returned failure: ${fileName} @ ${pos}`);
               return undefined;
             }
           }
@@ -219,7 +221,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
 
     if (token.isCancellationRequested) {
       this.cancelActiveRequests();
-      this.deps.debug(`completion cancelled: ${fileName} @ ${pos}`);
+      this.deps.debug(`${requestId} completion cancelled: ${fileName} @ ${pos}`);
       return undefined;
     }
 
@@ -228,41 +230,44 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     const config = this.deps.getConfig();
     if (!manual) {
       if (!config.autoTrigger) {
-        this.deps.debug('completion skipped: auto-trigger is disabled');
+        this.deps.debug(`${requestId} completion skipped: auto-trigger is disabled`);
         return undefined;
       }
-      this.deps.trace(`completion trace: debouncing for ${config.debounceMs}ms: ${fileName} @ ${pos}`);
+      this.deps.trace(`${requestId} completion trace: debouncing for ${config.debounceMs}ms: ${fileName} @ ${pos}`);
       try {
         await sleep(config.debounceMs, token);
       } catch (e) {
         if (token.isCancellationRequested) {
           // Cancelled while waiting: keep the pending request and cache intact
           // (a follow-up invocation may reuse either). Just stop this invocation.
-          this.deps.debug(`completion cancelled during debounce: ${fileName} @ ${pos}`);
+          this.deps.debug(`${requestId} completion cancelled during debounce: ${fileName} @ ${pos}`);
           return undefined;
         }
-        this.handleRequestError(e, `completion debounce error: ${fileName} @ ${pos}`);
+        this.handleRequestError(e, `${requestId} completion debounce error: ${fileName} @ ${pos}`);
         return undefined;
       }
-      this.deps.trace(`completion trace: debounce passed: ${fileName} @ ${pos}`);
+      this.deps.trace(`${requestId} completion trace: debounce passed: ${fileName} @ ${pos}`);
     }
 
     const controller = new AbortController();
     const cancelSubscription = token.onCancellationRequested(() => {
       // Keep the request briefly pending so fast typing can re-use it.
       if (this.activeRequest && this.activeRequest.controller === controller) {
+        this.deps.trace(`${requestId} completion trace: request moved to pending: ${fileName} @ ${pos}`);
         this.pending = new PendingCompletion(
           document.fileName,
           position.line,
           position.character,
           document.version,
+          requestId,
           this.activeRequest.completion,
           controller,
           1000,
-          () => this.deps.trace(`completion trace: pending request TTL expired, aborting: ${fileName} @ ${position.line}:${position.character}`),
+          () => this.deps.trace(`${requestId} completion trace: pending TTL expired, aborting: ${fileName} @ ${position.line}:${position.character}`),
         );
         this.activeRequest = undefined;
       } else {
+        this.deps.trace(`${requestId} completion trace: request aborted on cancellation`);
         controller.abort();
       }
     });
@@ -285,7 +290,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     }).then((r) => r.text);
     this.activeRequest = { controller, completion: request };
     this.deps.statusBar.setBusy(true);
-    this.deps.trace(`completion trace: sending completion request to ${config.baseUrl} (model ${config.model}, template ${template.id}): ${fileName} @ ${pos}`);
+    this.deps.trace(`${requestId} completion trace: sending request to ${config.baseUrl} (model ${config.model}, template ${template.id}): ${fileName} @ ${pos}`);
 
     try {
       const text = await request;
@@ -294,11 +299,17 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
         //todo only not empty text updates cache
         this.storeCache(document, position, text);
       }
+      if (token.isCancellationRequested) {
+        // The invocation was superseded (its request moved to pending or was
+        // dropped): the result is cached above but nobody will display it.
+        this.deps.debug(`${requestId} completion result discarded (the invocation was cancelled while in flight): ${fileName} @ ${pos} -> ${text}`);
+        return undefined;
+      }
       this.deps.statusBar.clearError();
-      this.deps.debug(`completion result: ${fileName} @ ${pos} -> ${text}`);
+      this.deps.debug(`${requestId} completion result: ${fileName} @ ${pos} -> ${text}`);
       return { text };
     } catch (err) {
-      this.handleRequestError(err, `completion request error: ${fileName} @ ${pos}`);
+      this.handleRequestError(err, `${requestId} completion request error: ${fileName} @ ${pos}`);
       return undefined;
     } finally {
       cancelSubscription.dispose();

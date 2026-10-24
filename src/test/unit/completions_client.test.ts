@@ -19,6 +19,7 @@ function clientWith(sdk: ReturnType<typeof fakeSdk>): CompletionsClient {
     () => 'stub-model',
     () => 256,
     undefined,
+    undefined,
     () => sdk as unknown as Pick<OpenAI, 'completions' | 'models'>,
   );
 }
