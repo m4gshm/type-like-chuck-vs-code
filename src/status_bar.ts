@@ -6,12 +6,10 @@ const DISABLED_TEXT = '$(circle-slash)';
 const BUSY_TEXT = '$(loading~spin)';
 const ERROR_TEXT = '$(error)';
 
-/** Status bar indicator: enabled/disabled, request in flight, last error. */
 export class StatusBar {
   private readonly item: vscode.StatusBarItem;
   private busy = false;
   private hasError = false;
-  /** Connection failure text shown in the tooltip while the watchdog is active. */
   private connectionReason: string | undefined;
 
   constructor(state: CompletionState) {

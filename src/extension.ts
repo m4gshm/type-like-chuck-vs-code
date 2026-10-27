@@ -11,6 +11,7 @@ import { ConnectionWatchdog } from './connection_watchdog';
 import { buildTemplateRegistry, ResolvedTemplates } from './templates';
 import { pickSupportedModel, pickTemplateForModel } from './model_selection';
 import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
+import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('TLC', { log: true });
@@ -75,6 +76,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const complectionState = new CompletionState(context.globalState);
   const statusBar = new StatusBar(complectionState);
 
+  // Drives the alt+\ keybinding: true only when TLC actually answers, so the
+  // key falls through to the default inline-suggestion trigger (e.g. Copilot).
+  const syncActiveContext = (): void => {
+    void vscode.commands.executeCommand('setContext', 'tlcActive', complectionState.isEnabled());
+  };
+  syncActiveContext();
+
   const connectionWatchdog = new ConnectionWatchdog({
     probe: () => client.listModels(),
     disable: (reason) => {
@@ -82,12 +90,14 @@ export function activate(context: vscode.ExtensionContext): void {
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason(reason);
       statusBar.refresh();
+      syncActiveContext();
     },
     enable: () => {
       complectionState.setConnectionBlocked(false);
       statusBar.setConnectionReason(undefined);
       statusBar.clearError();
       statusBar.refresh();
+      syncActiveContext();
     },
     notifyFailure: (message) => {
       statusBar.setConnectionReason(message);
@@ -270,8 +280,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       // Manual toggle wins: cancel any auto-disable/auto-re-enable watch.
       connectionWatchdog.reset();
+      // A manual toggle is the user's choice: Copilot must not undo it later.
+      copilotAutoDisabled = false;
       const enabled = !complectionState.isEnabled();
       await complectionState.setEnabled(enabled);
+      syncActiveContext();
       if (!enabled) {
         complectionProvider.onDisabled();
       }
@@ -288,10 +301,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     return apiKeyStorage.get();
   };
-  const syncApiKey = async (): Promise<void> => {
-    await client.setApiKey(await effectiveApiKey());
-  };
+  const syncApiKey = async () => client.setApiKey(await effectiveApiKey());
 
+  let copilotAutoDisabled = false;
   context.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection((event) => {
       if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse
@@ -305,6 +317,55 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.window.onDidChangeActiveTextEditor(() => complectionProvider.cancelActiveRequests()),
+  );
+
+  let copilotPrev: boolean | undefined;
+  const updateCopilotPause = async (): Promise<void> => {
+    if (!modelConfig.current.yieldToCopilot) {
+      copilotPrev = undefined;
+      return;
+    }
+    const copilotConfig = vscode.workspace.getConfiguration('github.copilot');
+    const languageId = vscode.window.activeTextEditor?.document.languageId ?? 'plaintext';
+    // getExtension misses the built-in Copilot core on newer VS Code builds,
+    // so any github.copilot* extension (core or chat) counts as installed.
+    const installed = vscode.extensions.getExtension('GitHub.copilot') !== undefined
+      || vscode.extensions.all.some((e) => /^github\.copilot(-chat)?$/i.test(e.id));
+    const active = copilotActive(
+      installed,
+      copilotConfig.get<CopilotEnableSetting>('enable'),
+      copilotConfig.get<boolean>('inlineSuggest.enable'),
+      languageId,
+    );
+    if (active === copilotPrev) {
+      return;
+    }
+    const firstCheck = copilotPrev === undefined;
+    copilotPrev = active;
+    if (active && complectionState.isEnabled()) {
+      copilotAutoDisabled = true;
+      await complectionState.setEnabled(false);
+      complectionProvider.onDisabled();
+      statusBar.refresh();
+      syncActiveContext();
+      warn('GitHub Copilot detected: TLC completions disabled.');
+      void vscode.window.showInformationMessage(
+        'TLC completions are disabled because GitHub Copilot is enabled. TLC re-enables automatically when Copilot turns off.',
+      );
+    } else if (!active && copilotAutoDisabled) {
+      copilotAutoDisabled = false;
+      if (!firstCheck) {
+        await complectionState.setEnabled(true);
+        statusBar.refresh();
+        syncActiveContext();
+        void vscode.window.showInformationMessage('GitHub Copilot is off: TLC completions re-enabled.');
+      }
+    }
+  };
+  void updateCopilotPause();
+  context.subscriptions.push(
+    vscode.extensions.onDidChange(() => void updateCopilotPause()),
+    vscode.window.onDidChangeActiveTextEditor(() => void updateCopilotPause()),
   );
 
   // Template field rules:
@@ -347,6 +408,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
+      if (
+        event.affectsConfiguration('github.copilot.enable')
+        || event.affectsConfiguration('github.copilot.inlineSuggest.enable')
+        || event.affectsConfiguration('github.copilot.nextEditSuggestions.enabled')
+        || event.affectsConfiguration('tlc.yieldToCopilot')
+      ) {
+        updateCopilotPause();
+      }
       if (!event.affectsConfiguration('tlc')) {
         return;
       }
@@ -451,6 +520,4 @@ export function activate(context: vscode.ExtensionContext): void {
   })();
 }
 
-export function deactivate(): void {
-  // Nothing to clean up: all disposables are registered on the context.
-}
+export function deactivate(): void {}

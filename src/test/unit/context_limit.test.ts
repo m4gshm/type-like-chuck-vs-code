@@ -18,6 +18,7 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     autoTrigger: true,
     cacheEnabled: true,
     cacheTtlMs: 10_000,
+    yieldToCopilot: true,
     forbiddenFileNames: ['.env'],
     ...overrides,
   };

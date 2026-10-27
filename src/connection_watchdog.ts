@@ -11,15 +11,10 @@ const sleep = (ms: number) =>
   });
 
 export interface WatchdogDeps {
-  /** Resolves when the server is reachable, rejects otherwise. */
   probe: () => Promise<unknown>;
-  /** Gates completions off (auto-disable); receives the failure message. */
   disable: (reason: string) => void;
-  /** Gates completions back on (connection restored). */
   enable: () => void;
-  /** Shows the connection error; called once per outage. */
   notifyFailure: (message: string) => void;
-  /** Clears the failure indication (recovered or reset by the user). */
   clearFailure: () => void;
   warn: (message: string) => void;
 }
@@ -39,7 +34,6 @@ export class ConnectionWatchdog {
 
   constructor(private readonly deps: WatchdogDeps) {}
 
-  /** True while a failure is being watched (the error icon is shown). */
   isFailing(): boolean {
     return this.failing;
   }
@@ -63,7 +57,6 @@ export class ConnectionWatchdog {
     }
   }
 
-  /** Cancels the watch; the user controls the state from now on. */
   reset(): void {
     this.clear();
   }

@@ -1,4 +1,4 @@
-# TLC — Type like Chuck
+# Type like Chuck (TLC)
 
 *Type like Chuck — one more AI autocomplete tool.*
 
@@ -7,11 +7,14 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 ## Features
 
 - **Automatic trigger** — completions are requested after you stop typing (debounce, default 250 ms).
-- **Manual trigger** — run `TLC: Trigger Completion Now` (default `Ctrl+Alt+Space`) to request a completion immediately; the manual trigger always performs a fresh API request, ignoring the cache and any pending request.
-- **Built-in FIM templates** for Qwen2.5, Qwen3, LFM2 (Liquid AI) and Mellum (JetBrains), plus user-defined custom templates.
+- **Manual trigger** — run `TLC: Trigger Completion Now` (default `Shift+Alt+Space`, or `Alt+\` when Type like Chuck is active) to request a completion immediately; it always performs a fresh API request, ignoring the cache and any pending request. When Type like Chuck is disabled or yielding to Copilot, `Alt+\` falls through to the default inline-suggestion trigger.
+- **Built-in FIM templates** for Qwen2.5-Coder and Mellum (JetBrains), plus user-defined custom templates.
 - **Streaming** requests against the legacy OpenAI `POST /v1/completions` endpoint with stop sequences derived from the template's reserved tokens.
 - **Single-line suggestions** that accept with <kbd>Tab</kbd> and dismiss with <kbd>Esc</kbd> via VS Code's native inline suggestions.
-- **Automatic model tracking** — the server's `/v1/models` list is polled every 30 s: a changed model is picked up automatically and the prompt template follows its family (unless `custom`). Run `TLC: Test Connection` to check the server and load the model list immediately.
+- **No duplicated text** — suggestions that repeat the code right after the cursor are not shown.
+- **Coexists with GitHub Copilot** — with `tlc.yieldToCopilot` (default), Type like Chuck disables itself and notifies when Copilot's ghost text turns on, and re-enables itself when it turns off.
+- **Connection watchdog** — if the server goes unreachable, completions are auto-disabled with a warning and come back automatically when the server responds.
+- **Automatic model tracking** — the server's `/v1/models` list is checked regularly: a changed model is picked up automatically and the prompt template follows its family (unless `custom`). Run `TLC: Test Connection` to check the server and load the model list immediately.
 - **Safe by default** — the recommended key storage is VS Code secret storage (`TLC: Set API Key`); the optional `tlc.apiKey` setting (plaintext, for synced settings) takes precedence when set, and completions are disabled in files such as `.env`.
 
 ## Setup
@@ -20,7 +23,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 2. Set `tlc.baseUrl` to your OpenAI-compatible server (default `http://127.0.0.1:1234/v1`, e.g. LM Studio, llama.cpp, vLLM, Ollama).
 3. Set `tlc.model` to the model you have loaded.
 4. Pick `tlc.promptTemplate` matching your model family (`qwen2`, `qwen3`, `lfm2`, `mellum`, or `custom`).
-5. Choose the model: run `TLC: Select Model` to pick from the models your server exposes via `GET /v1/models` — a model from a supported family (Qwen2/Qwen2.5-Coder, Qwen3-Coder, LFM2, Mellum) is preselected by default. Manual entry of any model id remains available (via the picker or the `tlc.model` setting).
+5. Choose the model: run `TLC: Select Model` to pick from the models your server exposes via `GET /v1/models` — a model from a supported family (Qwen2.5-Coder, Mellum) is preselected by default. Manual entry of any model id remains available (via the picker or the `tlc.model` setting).
 6. If your server needs authentication, run `TLC: Set API Key`. Local servers typically need none.
 
 ## Commands
@@ -32,7 +35,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `TLC: Clear API Key` | Remove the stored API key |
 | `TLC: Test Connection` | Check that `tlc.baseUrl` is reachable, fetch `/v1/models` and apply the model list (also updates the template to match the model family) |
 | `TLC: Select Model` | Pick a model from the server's `GET /v1/models` list (or enter an id manually); supported-family models are marked with a check |
-| `TLC: Enable/Disable Completions` | Enable/disable completions for this workspace (persisted). Also available by clicking the TLC item in the status bar; while the server is unreachable, the click retries the connection instead |
+| `TLC: Enable/Disable Completions` | Enable/disable completions for this workspace (persisted). Also available by clicking the Type like Chuck item in the status bar; while the server is unreachable, the click retries the connection instead |
 
 ## Settings
 
@@ -52,9 +55,10 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 | `tlc.pendingGraceMs` | `150` (0–1000) | How long typing past a pending request waits for its result before requesting afresh |
 | `tlc.cacheEnabled` | `true` | Re-serve the last completion without a new API request: at the exact cursor position, and when the typed text extends it along the same line as its prefix (the remainder is served) |
 | `tlc.cacheTtlMs` | `10000` (≥1000) | Lifetime of the cached completion |
+| `tlc.yieldToCopilot` | `true` | When GitHub Copilot inline completions turn on (detected via the installed `GitHub.copilot` extension, its `github.copilot.enable` per-language setting and `github.copilot.inlineSuggest.enable` ghost-text switch), TLC disables itself and notifies; when Copilot turns off, TLC re-enables itself — but only if it was disabled by this auto-reaction, not by the user. A manual toggle always wins |
 | `tlc.forbiddenFileNames` | `[".env"]` | Globs of files where completions are disabled |
 
-All settings apply live. On startup and whenever `tlc.baseUrl` changes, the configured model is validated against the server's `/v1/models` list: a single-model server applies that model automatically; on multi-model servers the configured model is kept when present, otherwise the picker is shown (a model from a supported family — partial match: qwen, mellum, lfm, ... — is marked with a check). While the extension runs, the list is re-checked every 30 s, so server-side model changes are picked up automatically too. Manual selection via `TLC: Select Model` or `tlc.model` always wins afterwards.
+All settings apply live. On startup and whenever `tlc.baseUrl` changes, the configured model is validated against the server's `/v1/models` list: a single-model server applies that model automatically; on multi-model servers the configured model is kept when present, otherwise the picker is shown (a model from a supported family — partial match: qwen, mellum, ... — is marked with a check). While the extension runs, the list is re-checked regularly, so server-side model changes are picked up automatically too. Manual selection via `TLC: Select Model` or `tlc.model` always wins afterwards.
 
 ## Custom FIM templates
 

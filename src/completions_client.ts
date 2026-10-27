@@ -17,7 +17,6 @@ export interface CompletionResult {
 
 export interface ModelInfo {
   id: string;
-  /** Maximum context length (tokens) reported by the server, if known. */
   contextLength?: number;
 }
 
@@ -93,7 +92,6 @@ export class CompletionsClient {
     this.client = this.createClient();
   }
 
-  /** Lists models available on the server via GET /v1/models. */
   async listModels(): Promise<ModelInfo[]> {
     const page = await this.client.models.list();
     const models: ModelInfo[] = [];
@@ -104,10 +102,6 @@ export class CompletionsClient {
     return models;
   }
 
-  /**
-   * Requests a single-line completion: streams chunks (abort-aware),
-   * accumulates them and truncates at the first newline.
-   */
   async complete({ prefix, suffix, template, signal }: CompletionRequestParams): Promise<CompletionResult> {
     const prompt = template.render(
       maskReservedTokens(prefix, template.reservedTokens),

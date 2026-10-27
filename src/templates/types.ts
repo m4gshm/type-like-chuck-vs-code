@@ -5,7 +5,6 @@ export interface FimMarkers {
 }
 
 export interface FimTemplate {
-  /** Selectable via `tlc.promptTemplate`. */
   readonly id: string;
   /** Reserved tokens sent as API stop sequences and masked inside user code. */
   readonly reservedTokens: readonly string[];
@@ -14,7 +13,6 @@ export interface FimTemplate {
   render(prefix: string, suffix: string): string;
 }
 
-/** A user-defined template as it appears in the `tlc.customTemplates` setting. */
 export interface CustomTemplateDefinition {
   id: string;
   prefix: string;

@@ -1,17 +1,14 @@
 import { ExtensionConfig, effectiveContextLengths } from './config';
 import { ModelInfo } from './completions_client';
 
-/** Host services the model configuration needs from the VS Code layer. */
 export interface ModelConfigHost {
   readConfig(): ExtensionConfig;
-  /** Persists a tlc setting in user (global) settings. */
   updateSetting(key: string, value: unknown): Promise<void>;
   warn(message: string): void;
   info(message: string): void;
   notify(message: string): void;
   /** Asks the user to pick a model; undefined = cancelled. */
   chooseModel(models: ModelInfo[]): Promise<{ id: string; contextLength?: number } | undefined>;
-  /** Notified whenever the model setting actually changes. */
   onModelChanged?(modelId: string): Promise<void> | void;
 }
 
@@ -59,11 +56,9 @@ export class ModelConfig {
     }
     if (limitChanged || limitReset) {
       await settings('contextMaxLength', contextLength ?? 0);
-      this.host.info(
-        contextLength !== undefined
+      this.host.info(contextLength !== undefined
           ? `Context limit for "${modelId}" set to ${contextLength}.`
-          : `Context limit reset to unlimited (no metadata for "${modelId}").`,
-      );
+          : `Context limit reset to unlimited (no metadata for "${modelId}").` );
     }
     this.reload();
     if (modelChanged) {

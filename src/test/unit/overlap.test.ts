@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overlapLength, trailingOverlapLength } from '../../overlap';
+import { overlapLength, seamOverlap, trailingOverlapLength } from '../../overlap';
 
 describe('overlapLength', () => {
   it('returns 0 when nothing matches', () => {
@@ -48,5 +48,32 @@ describe('trailingOverlapLength', () => {
   it('returns the full length when the whole completion duplicates the following text', () => {
     expect(trailingOverlapLength('ab', 'ab')).toBe(2);
     expect(trailingOverlapLength(' = 1;', ' = 1; more')).toBe(5);
+  });
+});
+
+describe('seamOverlap', () => {
+  it('drops a completion differing from the document only by a space at the seam', () => {
+    expect(seamOverlap(');', ' );')).toEqual({ replaceCount: 3, insert: ');', duplicate: true });
+    expect(seamOverlap(';', '  ;')).toEqual({ replaceCount: 3, insert: ';', duplicate: true });
+  });
+
+  it('replaces the whitespace-shifted text when the completion extends the match', () => {
+    expect(seamOverlap('); // done', ' );')).toEqual({ replaceCount: 3, insert: '); // done', duplicate: false });
+  });
+
+  it('preserves indentation when there is no whitespace-shifted match', () => {
+    expect(seamOverlap('  x', 'y')).toEqual({ replaceCount: 0, insert: '  x', duplicate: false });
+    // The spaces at the seam match each other: replacing one space with " x"
+    // still yields a single space before "y".
+    expect(seamOverlap(' x', ' y')).toEqual({ replaceCount: 1, insert: ' x', duplicate: false });
+  });
+
+  it('absorbs the completion\'s leading whitespace when the document already has the text', () => {
+    expect(seamOverlap(' x', 'x')).toEqual({ replaceCount: 1, insert: 'x', duplicate: true });
+  });
+
+  it('keeps the strict result when whitespace absorption does not help', () => {
+    expect(seamOverlap(' = 1; // done', ' = 1;')).toEqual({ replaceCount: 5, insert: ' = 1; // done', duplicate: false });
+    expect(seamOverlap('foo', 'bar')).toEqual({ replaceCount: 0, insert: 'foo', duplicate: false });
   });
 });

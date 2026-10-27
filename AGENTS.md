@@ -28,9 +28,11 @@ Run `check-types` and `unit` after every change; they are quick. On Windows
 
 ## Architecture
 
-Entry point: `src/extension.ts` (wires everything; the only file importing `vscode`
-besides `config.ts`, `status_bar.ts`, `api_key_storage.ts` and the integration
-tests). Core logic lives in dependency-injected classes that do **not** import
+Entry point: `src/extension.ts` (wires everything; `vscode` is imported only
+by it, `config.ts`, `status_bar.ts`, `api_key_storage.ts`, the type-only
+imports in `completion_provider.ts`/`completion_state.ts`, the unit-test stub
+and the integration tests). Core logic lives in dependency-injected classes
+that do **not** import
 `vscode` — this is what keeps them unit-testable with vitest (unit tests run in
 plain Node; `vscode` is stubbed in `src/test/unit/vscode-stub.ts`).
 
@@ -98,6 +100,9 @@ When changing behavior, update `README.md` **and** the setting descriptions in
   well-named helper instead. When editing code, delete nearby comments that
   became redundant. Tests follow the same rule: assertion names and structure
   should make the intent clear without commentary.
+- **Arrow functions**: when a function body fits on one line, write it without
+  braces and `return` (expression body): `const double = (n: number) => n * 2;`
+  Braces + `return` are only for multi-line bodies.
 - TypeScript strict mode, CommonJS sources bundled by esbuild; unit tests run
   directly on TS sources by vitest — no build step for them.
 - Constructors take a "host" interface (functions/ports) instead of importing

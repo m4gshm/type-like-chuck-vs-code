@@ -37,7 +37,6 @@ export class PendingCompletion {
     }
   }
 
-  /** Marks the request as consumed and cancels the TTL abort. */
   consume(): void {
     this.clearTimer();
     this.disposed = true;

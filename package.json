@@ -73,6 +73,11 @@
         "command": "tlc.triggerCompletion",
         "key": "shift+alt+space",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "tlc.triggerCompletion",
+        "key": "alt+\\",
+        "when": "tlcActive && editorTextFocus"
       }
     ],
     "configuration": {
@@ -203,9 +208,15 @@
           "minimum": 1000,
           "description": "Lifetime of the cached completion in milliseconds."
         },
+        "tlc.yieldToCopilot": {
+          "type": "boolean",
+          "order": 18,
+          "default": true,
+          "description": "When GitHub Copilot inline completions turn on, TLC disables itself and notifies; when Copilot turns off, TLC re-enables only if it was disabled by this auto-reaction (a manual toggle is never overridden)."
+        },
         "tlc.forbiddenFileNames": {
           "type": "array",
-          "order": 18,
+          "order": 19,
           "default": [
             ".env"
           ],

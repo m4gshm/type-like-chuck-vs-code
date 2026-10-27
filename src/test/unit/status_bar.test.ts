@@ -24,7 +24,7 @@ function itemTooltip(): string {
 }
 
 describe('StatusBar', () => {
-  it('reflects enabled/busy/error/disabled states in priority order', () => {
+  it('reflects enabled/busy/error/disabled states in priority order', async () => {
     const state = new CompletionState(new FakeMemento() as never);
     expect(state.isEnabled()).toBe(true);
 

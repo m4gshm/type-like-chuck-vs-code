@@ -410,6 +410,36 @@ describe('CompletionProvider', () => {
     expect(calls()).toBe(1); // the request was made, the suggestion is just useless
   });
 
+  it('drops a completion that duplicates the following text with a shifted space', async () => {
+    // Cursor before ` );`: the model suggests `);` — the space at the seam must
+    // not make the overlap check miss the duplication.
+    const { deps, calls } = makeDeps(async () => ({ text: ');' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['info("m" );']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 9) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(0);
+    expect(calls()).toBe(1);
+  });
+
+  it('replaces the whitespace-shifted seam when the completion extends the match', async () => {
+    const { deps } = makeDeps(async () => ({ text: '); // done' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['info("m" );']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 8) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    const items = await result;
+    expect(items).toHaveLength(1);
+    expect(items[0].insertText).toBe('); // done');
+    const range = items[0].range as { start: { character: number }; end: { character: number } };
+    expect(range.start.character).toBe(8);
+    expect(range.end.character).toBe(11); // ` );` replaced, not doubled
+  });
+
   it('replaces the overlapping suffix part when the completion extends it', async () => {
     // Completion " = 1; // done" overlaps " = 1;" and adds a tail: the overlap
     // must be replaced (not duplicated), yielding "const x = 1; // done".

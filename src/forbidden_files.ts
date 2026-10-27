@@ -1,6 +1,5 @@
 import micromatch from 'micromatch';
 
-/** Glob-based gate that disables completions in matching files (e.g. .env). */
 export class ForbiddenFiles {
   constructor(private readonly patterns: readonly string[]) {}
 

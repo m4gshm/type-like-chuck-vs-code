@@ -7,7 +7,7 @@ import { PendingCompletion } from './pending_completion';
 import { CompletionState } from './completion_state';
 import { StatusBar } from './status_bar';
 import { ResolvedTemplates } from './templates';
-import { overlapLength, trailingOverlapLength } from './overlap';
+import { seamOverlap, trailingOverlapLength } from './overlap';
 
 /** Connection-failure coalescing the provider reports to (see ConnectionWatchdog). */
 export interface ConnectionWatchdogLike {
@@ -38,7 +38,6 @@ interface CachedCompletion {
   text: string;
 }
 
-/** Sentinel: the pending-request grace window expired. */
 const GRACE_EXPIRED: unique symbol = Symbol('graceExpired');
 
 const sleep = (ms: number, token: vscode.CancellationToken) =>
@@ -58,11 +57,6 @@ const sleep = (ms: number, token: vscode.CancellationToken) =>
     });
   });
 
-/**
- * Inline completion provider: trailing debounce (typing pause), manual
- * trigger bypass, cancellation, pending-request reuse, and an exact-position
- * completion cache served without a new API call.
- */
 export class CompletionProvider implements vscode.InlineCompletionItemProvider {
   private skipDebounceOnce = false;
   private requestCounter = 0;
@@ -123,13 +117,18 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       this.deps.debug('completion skipped: completion duplicates the existing text after the cursor');
       return [];
     }
-    const overlap = overlapLength(text, following);
-    if (overlap >= text.length) {
+    // The seam comparison tolerates a whitespace-only difference: the model
+    // may suggest `);` while the document already has ` );`.
+    const seam = seamOverlap(text, following);
+    if (seam.duplicate) {
       this.deps.debug('completion skipped: completion duplicates the existing text after the cursor');
       return [];
     }
-    const range = overlap > 0 ? new vscode.Range(position, document.positionAt(offset + overlap)) : new vscode.Range(position, position);
-    return [new vscode.InlineCompletionItem(text, range)];
+    const range =
+      seam.replaceCount > 0
+        ? new vscode.Range(position, document.positionAt(offset + seam.replaceCount))
+        : new vscode.Range(position, position);
+    return [new vscode.InlineCompletionItem(seam.insert, range)];
   }
 
   private async getOrCreateCompletion(
@@ -296,7 +295,6 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       const text = await request;
       this.deps.connectionWatchdog.reportSuccess();
       if (text.length > 0) {
-        //todo only not empty text updates cache
         this.storeCache(document, position, text);
       }
       if (token.isCancellationRequested) {
@@ -396,7 +394,6 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     return { typed, result: completion.slice(typed.length) };
   }
 
-  /** Returns the last word on the cursor's line (empty string if none). */
   private prefixWord(document: vscode.TextDocument, position: vscode.Position): string {
     const line = document.lineAt(position.line);
     const text = line.text.slice(0, position.character);

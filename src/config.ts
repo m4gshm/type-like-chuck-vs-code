@@ -4,22 +4,19 @@ import { CustomTemplateDefinition } from './templates/types';
 export interface ExtensionConfig {
   baseUrl: string;
   model: string;
-  /** Plaintext API key from the tlc.apiKey setting; takes precedence over secret storage when non-empty. */
   apiKey: string;
   promptTemplate: string | undefined;
-  /** The custom template compiled from the tlc.prefix / tlc.suffix / tlc.middle / tlc.stop fields, if usable. */
   customTemplate: CustomTemplateDefinition | undefined;
   prefixMaxLength: number;
   suffixMaxLength: number;
-  /** Maximum combined prefix+suffix context; 0 = unlimited. Filled from /v1/models on model update. */
   contextMaxLength: number;
   maxTokens: number;
   debounceMs: number;
-  /** How long a typing invocation waits for an in-flight pending request; 0 disables the wait. */
   pendingGraceMs: number;
   autoTrigger: boolean;
   cacheEnabled: boolean;
   cacheTtlMs: number;
+  yieldToCopilot: boolean;
   forbiddenFileNames: string[];
 }
 
@@ -54,6 +51,7 @@ export function readConfig(): ExtensionConfig {
     autoTrigger: c.get<boolean>('autoTrigger', true),
     cacheEnabled: c.get<boolean>('cacheEnabled', true),
     cacheTtlMs: c.get<number>('cacheTtlMs', 10_000),
+    yieldToCopilot: c.get<boolean>('yieldToCopilot', true),
     forbiddenFileNames: c.get<string[]>('forbiddenFileNames', ['.env']),
   };
 }

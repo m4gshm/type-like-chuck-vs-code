@@ -7,19 +7,15 @@
  * when the count reaches the threshold for that length.
  */
 
-/** Longest repeating block considered. */
 const MAX_BLOCK_LENGTH = 64;
 
-/** Repeats required for a single-character block (long runs like `aaaa...`); pure-whitespace runs are exempt. */
+/** Single-character blocks need more repeats: `aaaa...` runs are common in real code. */
 const SINGLE_CHAR_THRESHOLD = 24;
 
-/** Repeats required for multi-character blocks. */
 const BLOCK_THRESHOLD = 6;
 
 export interface LoopDetection {
-  /** True when a repetition loop was detected. */
   looped: boolean;
-  /** Length the text should be cut to, removing the looping tail. */
   cutIndex: number;
 }
 
