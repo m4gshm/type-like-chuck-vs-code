@@ -7,7 +7,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 ## Features
 
 - **Automatic trigger** — completions are requested after you stop typing (debounce, default 250 ms).
-- **Manual trigger** — run `TLC: Trigger Completion Now` (default `Shift+Alt+Space`, or `Alt+\` when Type like Chuck is active) to request a completion immediately; it always performs a fresh API request, ignoring the cache and any pending request. When Type like Chuck is disabled or yielding to Copilot, `Alt+\` falls through to the default inline-suggestion trigger.
+- **Manual trigger** — run `TLC: Trigger Completion Now` (default `Ctrl+Alt+Space` or `Alt+\`) to request a completion immediately; it always performs a fresh API request, ignoring the cache and any pending request. When Type like Chuck is disabled or yielding to Copilot, the same keys trigger the suggestion (e.g. Copilot's) directly.
 - **Built-in FIM templates** for Qwen2.5-Coder and Mellum (JetBrains), plus user-defined custom templates.
 - **Streaming** requests against the legacy OpenAI `POST /v1/completions` endpoint with stop sequences derived from the template's reserved tokens.
 - **Single-line suggestions** that accept with <kbd>Tab</kbd> and dismiss with <kbd>Esc</kbd> via VS Code's native inline suggestions.

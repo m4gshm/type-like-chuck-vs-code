@@ -76,13 +76,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const complectionState = new CompletionState(context.globalState);
   const statusBar = new StatusBar(complectionState);
 
-  // Drives the alt+\ keybinding: true only when TLC actually answers, so the
-  // key falls through to the default inline-suggestion trigger (e.g. Copilot).
-  const syncActiveContext = (): void => {
-    void vscode.commands.executeCommand('setContext', 'tlcActive', complectionState.isEnabled());
-  };
-  syncActiveContext();
-
   const connectionWatchdog = new ConnectionWatchdog({
     probe: () => client.listModels(),
     disable: (reason) => {
@@ -90,14 +83,12 @@ export function activate(context: vscode.ExtensionContext): void {
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason(reason);
       statusBar.refresh();
-      syncActiveContext();
     },
     enable: () => {
       complectionState.setConnectionBlocked(false);
       statusBar.setConnectionReason(undefined);
       statusBar.clearError();
       statusBar.refresh();
-      syncActiveContext();
     },
     notifyFailure: (message) => {
       statusBar.setConnectionReason(message);
@@ -193,10 +184,11 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     providerRegistration,
     vscode.commands.registerCommand('tlc.triggerCompletion', () => {
-      if (!complectionState.isEnabled()) {
-        return;
+      if (complectionState.isEnabled()) {
+        complectionProvider.resetThrottle();
       }
-      complectionProvider.resetThrottle();
+      // When TLC is disabled the generic trigger lets another provider (e.g.
+      // Copilot) answer on the same keys.
       void vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
     }),
     vscode.commands.registerCommand('tlc.setApiKey', async () => {
@@ -284,7 +276,6 @@ export function activate(context: vscode.ExtensionContext): void {
       copilotAutoDisabled = false;
       const enabled = !complectionState.isEnabled();
       await complectionState.setEnabled(enabled);
-      syncActiveContext();
       if (!enabled) {
         complectionProvider.onDisabled();
       }
@@ -347,7 +338,6 @@ export function activate(context: vscode.ExtensionContext): void {
       await complectionState.setEnabled(false);
       complectionProvider.onDisabled();
       statusBar.refresh();
-      syncActiveContext();
       warn('GitHub Copilot detected: TLC completions disabled.');
       void vscode.window.showInformationMessage(
         'TLC completions are disabled because GitHub Copilot is enabled. TLC re-enables automatically when Copilot turns off.',
@@ -357,7 +347,6 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!firstCheck) {
         await complectionState.setEnabled(true);
         statusBar.refresh();
-        syncActiveContext();
         void vscode.window.showInformationMessage('GitHub Copilot is off: TLC completions re-enabled.');
       }
     }

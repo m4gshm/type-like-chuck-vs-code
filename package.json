@@ -71,13 +71,13 @@
     "keybindings": [
       {
         "command": "tlc.triggerCompletion",
-        "key": "shift+alt+space",
+        "key": "ctrl+alt+space",
         "when": "editorTextFocus"
       },
       {
         "command": "tlc.triggerCompletion",
         "key": "alt+\\",
-        "when": "tlcActive && editorTextFocus"
+        "when": "editorTextFocus"
       }
     ],
     "configuration": {
