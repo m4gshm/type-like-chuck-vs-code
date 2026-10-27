@@ -11,19 +11,19 @@ jobs:
         node-version: [22.x]
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: init Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - name: tests and package
-        uses: coactions/setup-xvfb@v1
-        with:
-          run: |
-            npm ci
-            npm run build
-            npm run package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          xvfb-run -a npm ci
+          xvfb-run -a npm run build
+          xvfb-run -a npm run package
       - name: upload the artifacts
         uses: skx/github-action-publish-binaries@master
         env:
