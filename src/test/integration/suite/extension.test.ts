@@ -8,13 +8,21 @@ import { ForbiddenFiles } from '../../../forbidden_files';
 suite('TLC extension', () => {
   let stub: StubServer;
 
+  suiteSetup(async () => {
+    // The default mode is local (engine download); the remote-mode tests must
+    // not trigger a real engine download during activation.
+    await vscode.workspace.getConfiguration('tlc').update('mode', 'remote', vscode.ConfigurationTarget.Global);
+  });
+
   teardown(async () => {
     if (stub) {
       await stub.close();
       stub = undefined as unknown as StubServer;
     }
-    await vscode.workspace.getConfiguration('tlc').update('baseUrl', undefined, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('openai.baseUrl', undefined, vscode.ConfigurationTarget.Global);
     await vscode.workspace.getConfiguration('tlc').update('forbiddenFileNames', undefined, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('mode', undefined, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('local.llamaCppRelease', undefined, vscode.ConfigurationTarget.Global);
   });
 
   test('activates and registers commands', async () => {
@@ -37,7 +45,7 @@ suite('TLC extension', () => {
   test('provider returns a single-line completion from the streaming API', async function () {
     this.timeout(30000);
     stub = await startStubServer({ chunks: ['  console.log', '("hi")\nEXTRA'] });
-    await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('openai.baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
     const { registry } = buildTemplateRegistry('qwen2', undefined);
     const { template } = registry.resolve('qwen2');
@@ -52,10 +60,25 @@ suite('TLC extension', () => {
     assert.deepEqual(stub.lastBody()?.stop, template.reservedTokens);
   });
 
+  test('completion requests work against the ovms /v3 endpoint analog', async function () {
+    this.timeout(30000);
+    stub = await startStubServer({ chunks: ['let x = 1\nMORE'] });
+    const { template } = buildTemplateRegistry('qwen2', undefined).registry.resolve('qwen2');
+
+    const controller = new AbortController();
+    const ovmsBase = stub.url.replace(/\/v1$/, '/v3');
+    const client = new CompletionsClient(() => ovmsBase, () => 'stub', () => 64);
+    const { text } = await client.complete({ prefix: 'const ', suffix: '', template, signal: controller.signal });
+
+    assert.strictEqual(text, 'let x = 1');
+    assert.ok(stub.lastPath()?.includes('/v3/completions'), `expected the /v3/completions target, got ${stub.lastPath()}`);
+    assert.ok(stub.lastBody()?.prompt?.includes('<|fim_prefix|>const'), 'prompt must contain FIM markers');
+  });
+
   test('provider cancellation on cursor move discards the in-flight request', async function () {
     this.timeout(30000);
     stub = await startStubServer({ chunks: ['slow result'], delayMs: 500 });
-    await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('openai.baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
     const { template } = buildTemplateRegistry('qwen2', undefined).registry.resolve('qwen2');
 
@@ -72,7 +95,8 @@ suite('TLC extension', () => {
   test('manual trigger leads to an API request against the configured server', async function () {
     this.timeout(30000);
     stub = await startStubServer({ chunks: ['result'] });
-    await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('mode', 'remote', vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('openai.baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
     const doc = await vscode.workspace.openTextDocument({ content: 'const answer = ' });
     const editor = await vscode.window.showTextDocument(doc);
@@ -88,7 +112,7 @@ suite('TLC extension', () => {
   test('401 authentication failure surfaces an auth error', async function () {
     this.timeout(30000);
     stub = await startStubServer({ status: 401 });
-    await vscode.workspace.getConfiguration('tlc').update('baseUrl', stub.url, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('openai.baseUrl', stub.url, vscode.ConfigurationTarget.Global);
 
     const { template } = buildTemplateRegistry('qwen2', undefined).registry.resolve('qwen2');
 
@@ -119,6 +143,27 @@ suite('TLC extension', () => {
     } catch (err) {
       assert.ok(err instanceof CompletionError && err.kind === 'connection', `expected connection error, got ${String(err)}`);
     }
+  });
+
+  test('local mode never sends requests to the configured remote server', async function () {
+    this.timeout(30000);
+    // A nonexistent release tag makes the engine setup fail fast (404) instead
+    // of downloading hundreds of megabytes.
+    await vscode.workspace.getConfiguration('tlc').update('local.llamaCppRelease', 'test-nonexistent-tag', vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration('tlc').update('mode', 'local', vscode.ConfigurationTarget.Global);
+    stub = await startStubServer({ chunks: ['result'] });
+    await vscode.workspace.getConfiguration('tlc').update('openai.baseUrl', stub.url, vscode.ConfigurationTarget.Global);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const doc = await vscode.workspace.openTextDocument({ content: 'const answer = ' });
+    const editor = await vscode.window.showTextDocument(doc);
+    await vscode.commands.executeCommand('tlc.triggerCompletion');
+    const cursor = editor.selection.active;
+    editor.selection = new vscode.Selection(cursor, cursor);
+    // Longer than the model-list poll interval: any remote poll would show up.
+    await new Promise((r) => setTimeout(r, 2000));
+
+    assert.strictEqual(stub.requestCount(), 0, 'the remote server must not be contacted in local mode');
   });
 
   test('forbidden file names gate completions in matching files', () => {

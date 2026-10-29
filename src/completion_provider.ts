@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { ExtensionConfig, effectiveContextLengths } from './config';
-import { CompletionsClient, CompletionError, isAbortError, messageOf } from './completions_client';
+import { ExtensionConfig, fitContext } from './config';import { CompletionsClient, CompletionError, isAbortError, messageOf } from './completions_client';
 import { extractContext } from './prompt';
 import { ForbiddenFiles } from './forbidden_files';
 import { PendingCompletion } from './pending_completion';
@@ -273,23 +272,25 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
 
     const { registry } = this.deps.resolveTemplates();
     const { template } = registry.resolve(config.promptTemplate);
-    const lengths = effectiveContextLengths(config);
-    const context = extractContext(
-      document.getText(),
-      document.offsetAt(position),
-      lengths.prefix,
-      lengths.suffix,
-    );
+    const text = document.getText();
+    const offset = document.offsetAt(position);
+    const lengths = fitContext(offset, text.length - offset, config);
+    const context = extractContext(text, offset, lengths.prefix, lengths.suffix);
 
+    let timings = '';
+    const startedAt = Date.now();
     const request = this.deps.client.complete({
       prefix: context.prefix,
       suffix: context.suffix,
       template,
       signal: controller.signal,
-    }).then((r) => r.text);
+    }).then((r) => {
+      timings = r.timings ?? '';
+      return r.text;
+    });
     this.activeRequest = { controller, completion: request };
     this.deps.statusBar.setBusy(true);
-    this.deps.trace(`${requestId} completion trace: sending request to ${config.baseUrl} (model ${config.model}, template ${template.id}): ${fileName} @ ${pos}`);
+    this.deps.trace(`${requestId} completion trace: sending request to ${this.deps.client.endpoint} (model ${this.deps.client.model}, template ${template.id}): ${fileName} @ ${pos}`);
 
     try {
       const text = await request;
@@ -304,7 +305,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
         return undefined;
       }
       this.deps.statusBar.clearError();
-      this.deps.debug(`${requestId} completion result: ${fileName} @ ${pos} -> ${text}`);
+      this.deps.debug(`${requestId} completion result: ${fileName} @ ${pos} -> ${text} (${text.length} chars, ${Date.now() - startedAt} ms${timings ? `; ${timings}` : ''})`);
       return { text };
     } catch (err) {
       this.handleRequestError(err, `${requestId} completion request error: ${fileName} @ ${pos}`);

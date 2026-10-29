@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ExtensionConfig, effectiveContextLengths } from '../../config';
+import { ExtensionConfig, fitContext } from '../../config';
 import { extractModelContextLength } from '../../completions_client';
 
 function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
@@ -7,11 +7,25 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     baseUrl: 'http://stub/v1',
     model: 'm',
     apiKey: '',
+    mode: 'local',
+    localModel: '1.5b',
+    localDevice: 'npu',
+    localNpuContextMaxLength: 8192,
+    localLlamaCppRelease: 'b11935',
+    localEngineDir: '',
+    localEngineBinary: '',
+    localModelDir: '',
+    localModelCacheDir: '',
+    localHuggingfaceUrl: 'https://huggingface.co',
+    localGithubUrl: 'https://github.com',
+    localModelPath: '',
+    localModelUrls: {},
+    localApiKeyEnabled: true,
     promptTemplate: undefined,
     customTemplate: undefined,
     prefixMaxLength: 8000,
     suffixMaxLength: 2000,
-    contextMaxLength: 0,
+    contextMaxLength: 8192,
     maxTokens: 256,
     debounceMs: 250,
     pendingGraceMs: 150,
@@ -24,35 +38,35 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
   };
 }
 
-describe('effectiveContextLengths', () => {
-  it('passes the budgets through when no limit is set', () => {
-    const r = effectiveContextLengths(config({ prefixMaxLength: 8000, suffixMaxLength: 2000, contextMaxLength: 0 }));
+describe('fitContext', () => {
+  it('keeps both sides in full for a small file', () => {
+    const r = fitContext(256, 100, config());
+    expect(r).toEqual({ prefix: 256, suffix: 100 });
+  });
+
+  it('caps each side by its own budget', () => {
+    const r = fitContext(50_000, 50_000, config({ contextMaxLength: 0 }));
     expect(r).toEqual({ prefix: 8000, suffix: 2000 });
   });
 
-  it('passes the budgets through when the total fits the limit', () => {
-    const r = effectiveContextLengths(config({ prefixMaxLength: 600, suffixMaxLength: 400, contextMaxLength: 1000 }));
-    expect(r).toEqual({ prefix: 600, suffix: 400 });
+  it('keeps the full prefix and gives the suffix the remainder (prefix priority)', () => {
+    const r = fitContext(50_000, 50_000, config());
+    expect(r).toEqual({ prefix: 8000, suffix: 192 });
   });
 
-  it('scales proportionally when the total exceeds the limit', () => {
-    const r = effectiveContextLengths(config({ prefixMaxLength: 8000, suffixMaxLength: 2000, contextMaxLength: 5000 }));
-    expect(r.prefix + r.suffix).toBeLessThanOrEqual(5000);
-    // 8000:2000 → 4:1 split of 5000
-    expect(r.prefix).toBe(4000);
-    expect(r.suffix).toBe(1000);
+  it('shrinks the prefix when it alone exceeds the limit', () => {
+    const r = fitContext(50_000, 50_000, config({ contextMaxLength: 500 }));
+    expect(r).toEqual({ prefix: 500, suffix: 0 });
   });
 
-  it('favors the prefix in rounding', () => {
-    const r = effectiveContextLengths(config({ prefixMaxLength: 1000, suffixMaxLength: 1000, contextMaxLength: 999 }));
-    expect(r.prefix).toBe(500);
-    expect(r.suffix).toBe(499);
+  it('keeps a small suffix together with a big prefix when they fit', () => {
+    const r = fitContext(8000, 100, config());
+    expect(r).toEqual({ prefix: 8000, suffix: 100 });
   });
 
-  it('keeps the prefix dominant when the limit is tiny', () => {
-    const r = effectiveContextLengths(config({ prefixMaxLength: 8000, suffixMaxLength: 2000, contextMaxLength: 500 }));
-    expect(r.prefix + r.suffix).toBe(500);
-    expect(r.prefix).toBeGreaterThan(r.suffix);
+  it('no caps at all when every limit is zero', () => {
+    const r = fitContext(10_000, 10_000, config({ contextMaxLength: 0, prefixMaxLength: 0, suffixMaxLength: 0 }));
+    expect(r).toEqual({ prefix: 10_000, suffix: 10_000 });
   });
 });
 

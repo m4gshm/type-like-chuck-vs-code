@@ -13,6 +13,8 @@ export interface StubServer {
   url: string;
   requestCount(): number;
   lastBody(): { prompt?: string; stop?: string[] } | undefined;
+  /** Request target of the latest HTTP request (undefined without requests). */
+  lastPath(): string | undefined;
   close(): Promise<void>;
 }
 
@@ -24,9 +26,11 @@ export async function startStubServer(options: StubServerOptions = {}): Promise<
   const { status = 200, chunks = ['hello'], delayMs = 0 } = options;
   let requestCount = 0;
   let lastBody: { prompt?: string; stop?: string[] } | undefined;
+  let lastPath: string | undefined;
 
   const server = http.createServer((req, res) => {
     res.on('close', () => server.emit('request-complete'));
+    lastPath = req.url;
     let body = '';
     req.on('data', (d) => (body += d));
     req.on('end', () => {
@@ -67,6 +71,7 @@ export async function startStubServer(options: StubServerOptions = {}): Promise<
     url: `http://127.0.0.1:${port}/v1`,
     requestCount: () => requestCount,
     lastBody: () => lastBody,
+    lastPath: () => lastPath,
     close: () =>
       new Promise((resolve, reject) => {
         // Keep-alive sockets (e.g. from the SDK's model listing) would keep

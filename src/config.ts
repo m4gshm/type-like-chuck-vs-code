@@ -1,10 +1,27 @@
 import * as vscode from 'vscode';
 import { CustomTemplateDefinition } from './templates/types';
 
+export type TlcMode = 'remote' | 'local';
+export type LocalDevice = 'auto' | 'cpu' | 'gpu' | 'npu';
+
 export interface ExtensionConfig {
   baseUrl: string;
   model: string;
   apiKey: string;
+  mode: TlcMode;
+  localModel: string;
+  localDevice: LocalDevice;
+  localNpuContextMaxLength: number;
+  localLlamaCppRelease: string;
+  localEngineDir: string;
+  localEngineBinary: string;
+  localModelDir: string;
+  localModelCacheDir: string;
+  localHuggingfaceUrl: string;
+  localGithubUrl: string;
+  localModelPath: string;
+  localModelUrls: Record<string, string>;
+  localApiKeyEnabled: boolean;
   promptTemplate: string | undefined;
   customTemplate: CustomTemplateDefinition | undefined;
   prefixMaxLength: number;
@@ -34,17 +51,44 @@ export function readConfig(): ExtensionConfig {
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
 
+  const rawMode = c.get<string>('mode', 'local');
+  const rawDevice = c.get<string>('local.device', 'auto');
+  // On the NPU the compiled graph is built for the context window: a smaller
+  // window compiles faster and generates faster. The NPU limit caps the
+  // prompt budgets in local mode when the NPU is explicitly selected.
+  const mode = rawMode === 'remote' ? 'remote' : 'local';
+  const device = rawDevice === 'gpu' || rawDevice === 'npu' || rawDevice === 'cpu' ? rawDevice : 'auto';
+  const npuLimitRaw = c.get<number>('local.npuContextMaxLength', 8192);
+  const npuEligible = mode === 'local' && npuLimitRaw > 0 && device === 'npu';
+  let contextMaxLength = c.get<number>('contextMaxLength', 0);
+  if (npuEligible && (contextMaxLength <= 0 || contextMaxLength > npuLimitRaw)) {
+    contextMaxLength = npuLimitRaw;
+  }
   return {
-    baseUrl: c.get<string>('baseUrl', 'http://127.0.0.1:1234/v1'),
-    model: c.get<string>('model', 'Qwen2.5-Coder-1.5B'),
-    apiKey: c.get<string>('apiKey', ''),
+    baseUrl: c.get<string>('openai.baseUrl', c.get<string>('baseUrl', 'http://127.0.0.1:1234/v1')),
+    model: c.get<string>('openai.model', c.get<string>('model', 'Qwen2.5-Coder-1.5B')),
+    apiKey: c.get<string>('openai.apiKey', c.get<string>('apiKey', '')),
+    mode,
+    localModel: c.get<string>('local.model', '1.5b'),
+    localDevice: device,
+    localNpuContextMaxLength: npuLimitRaw,
+    localLlamaCppRelease: c.get<string>('local.llamaCppRelease', 'b11935'),
+    localEngineDir: c.get<string>('local.engineDir', ''),
+    localEngineBinary: c.get<string>('local.engineBinary', ''),
+    localModelDir: c.get<string>('local.modelDir', ''),
+    localModelCacheDir: c.get<string>('local.modelCacheDir', ''),
+    localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', 'https://huggingface.co'),
+    localGithubUrl: c.get<string>('local.githubUrl', 'https://github.com'),
+    localModelPath: c.get<string>('local.modelPath', ''),
+    localModelUrls: c.get<Record<string, string>>('local.modelUrls', {}),
+    localApiKeyEnabled: c.get<boolean>('local.apiKeyEnabled', true),
     promptTemplate: c.get<string>('promptTemplate'),
     customTemplate: hasMarkers
       ? { id: 'custom', prefix, suffix, middle, stop }
       : undefined,
     prefixMaxLength: c.get<number>('prefixContextMaxLength', 8000),
     suffixMaxLength: c.get<number>('suffixContextMaxLength', 2000),
-    contextMaxLength: c.get<number>('contextMaxLength', 0),
+    contextMaxLength,
     maxTokens: c.get<number>('maxTokens', 256),
     debounceMs: c.get<number>('debounceMs', 250),
     pendingGraceMs: c.get<number>('pendingGraceMs', 150),
@@ -57,17 +101,18 @@ export function readConfig(): ExtensionConfig {
 }
 
 /**
- * Clamps the prefix/suffix budgets to contextMaxLength (when set): the total
- * is scaled proportionally to the current sizes, with the rounding (and thus
- * the priority) in favor of tlc.prefixContextMaxLength.
+ * Fits the actually available prefix/suffix text into the configured caps
+ * (prefixMaxLength / suffixMaxLength) and the combined contextMaxLength: the
+ * prefix keeps as much as fits (priority), the suffix gets the remainder.
+ * Small files keep both sides in full.
  */
-export function effectiveContextLengths(config: ExtensionConfig): { prefix: number; suffix: number } {
-  const p = config.prefixMaxLength;
-  const s = config.suffixMaxLength;
+export function fitContext(prefixAvailable: number, suffixAvailable: number, config: ExtensionConfig): { prefix: number; suffix: number } {
+  let prefix = config.prefixMaxLength > 0 ? Math.min(prefixAvailable, config.prefixMaxLength) : prefixAvailable;
+  let suffix = config.suffixMaxLength > 0 ? Math.min(suffixAvailable, config.suffixMaxLength) : suffixAvailable;
   const max = config.contextMaxLength;
-  if (max <= 0 || p + s <= max) {
-    return { prefix: p, suffix: s };
+  if (max > 0 && prefix + suffix > max) {
+    suffix = Math.min(suffix, Math.max(0, max - prefix));
+    prefix = Math.min(prefix, Math.max(0, max - suffix));
   }
-  const prefix = Math.min(max, Math.max(0, Math.ceil((max * p) / (p + s))));
-  return { prefix, suffix: Math.max(0, max - prefix) };
+  return { prefix, suffix };
 }

@@ -8,6 +8,20 @@ function mkConfig(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     baseUrl: 'http://stub/v1',
     model: 'qwen2.5-coder-1.5b',
     apiKey: '',
+    mode: 'remote',
+    localModel: '1.5b',
+    localDevice: 'cpu',
+    localNpuContextMaxLength: 8192,
+    localLlamaCppRelease: 'b11935',
+    localEngineDir: '',
+    localEngineBinary: '',
+    localModelDir: '',
+    localModelCacheDir: '',
+    localHuggingfaceUrl: 'https://huggingface.co',
+    localGithubUrl: 'https://github.com',
+    localModelPath: '',
+    localModelUrls: {},
+    localApiKeyEnabled: true,
     promptTemplate: 'qwen2',
     customTemplate: undefined,
     prefixMaxLength: 8000,
@@ -60,16 +74,13 @@ function setup(initial: ExtensionConfig): Setup {
 }
 
 describe('ModelConfig.applyModelList', () => {
-  it('applies a single model automatically together with its context length and clamps the budgets', async () => {
+  it('applies a single model automatically together with its context length', async () => {
     const setup1 = setup(mkConfig({ contextMaxLength: 8192 }));
     await setup1.modelConfig.applyModelList([{ id: 'qwen2.5-coder-1.5b', contextLength: 8192 }]);
 
-    // Model unchanged, context unchanged → only the clamp had to run.
-    const keys = setup1.updates.map((u) => u.key);
-    expect(keys).toContain('prefixContextMaxLength');
-    expect(keys).toContain('suffixContextMaxLength');
-    expect(setup1.config.prefixMaxLength).toBe(6554);
-    expect(setup1.config.suffixMaxLength).toBe(1638);
+    // Model and context unchanged → no settings written back.
+    expect(setup1.updates).toHaveLength(0);
+    expect(setup1.config.contextMaxLength).toBe(8192);
   });
 
   it('switches to a single different model', async () => {
@@ -116,14 +127,11 @@ describe('ModelConfig.applyModelList', () => {
 
 describe('ModelConfig.setModel', () => {
   it('resets the context limit when a new model reports no metadata', async () => {
-    const setup1 = setup(mkConfig({ contextMaxLength: 8192, prefixMaxLength: 6554, suffixMaxLength: 1638 }));
+    const setup1 = setup(mkConfig({ contextMaxLength: 8192 }));
     await setup1.modelConfig.setModel('mystery-model');
 
     expect(setup1.config.contextMaxLength).toBe(0);
     expect(setup1.updates.map((u) => u.key)).toContain('contextMaxLength');
-    // Unlimited → the budgets must not be clamped.
-    expect(setup1.config.prefixMaxLength).toBe(6554);
-    expect(setup1.config.suffixMaxLength).toBe(1638);
   });
 
   it('is a no-op when the model and the limit are unchanged', async () => {
@@ -145,11 +153,12 @@ describe('ModelConfig.setModel', () => {
     expect(setup1.updates).toHaveLength(0);
   });
 
-  it('clamps the budgets so their sum fits the limit, prefix first', async () => {
+  it('does not rewrite the budgets on model change (they are fitted per request)', async () => {
     const setup1 = setup(mkConfig({ model: 'small' }));
     await setup1.modelConfig.setModel('small', 1000);
-    expect(setup1.config.prefixMaxLength).toBe(800);
-    expect(setup1.config.suffixMaxLength).toBe(200);
+    expect(setup1.config.prefixMaxLength).toBe(8000);
+    expect(setup1.config.suffixMaxLength).toBe(2000);
+    expect(setup1.updates.map((u) => u.key)).toEqual(['contextMaxLength']);
   });
 
   it('notifies onModelChanged when the model changes and stays silent otherwise', async () => {

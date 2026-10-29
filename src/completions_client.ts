@@ -13,6 +13,8 @@ export interface CompletionRequestParams {
 
 export interface CompletionResult {
   text: string;
+  /** Server-reported phases, e.g. "prompt 1554 tok in 655 ms, gen 24 tok in 1172 ms (20.5 t/s)". */
+  timings?: string;
 }
 
 export interface ModelInfo {
@@ -55,8 +57,7 @@ export class CompletionsClient {
 
   constructor(
     private readonly getBaseUrl: () => string,
-    private readonly getModel: () => string,
-    private readonly getMaxTokens: () => number,
+    private readonly getModel: () => string,    private readonly getMaxTokens: () => number,
     private readonly logCause?: (message: string) => void,
     private readonly logResponse?: (message: string) => void,
     private readonly createSdk: (options: {
@@ -67,6 +68,14 @@ export class CompletionsClient {
     }) => Pick<OpenAI, 'completions' | 'models'> = (options) => new OpenAI(options),
   ) {
     this.client = this.createClient();
+  }
+
+  get endpoint(): string {
+    return this.getBaseUrl();
+  }
+
+  get model(): string {
+    return this.getModel();
   }
 
   private createClient(): Pick<OpenAI, 'completions' | 'models'> {
@@ -108,20 +117,36 @@ export class CompletionsClient {
       maskReservedTokens(suffix, template.reservedTokens),
     );
     try {
-      const stream = await this.client.completions.create(
+      const startedAt = Date.now();
+      // `timings_per_token` is a llama.cpp extension; other servers ignore the
+      // unknown field. Raw param types: the SDK's would reject the extra key.
+      const create = this.client.completions.create.bind(this.client.completions) as unknown as (
+        params: Record<string, unknown>,
+        options: { signal: AbortSignal },
+      ) => Promise<AsyncIterable<{ choices: Array<{ text?: string }>; timings?: Record<string, unknown> }>>;
+      const stream = await create(
         {
           model: this.getModel(),
           prompt,
           max_tokens: this.getMaxTokens(),
           stop: [...template.reservedTokens],
           stream: true,
+          // llama.cpp: emit timings in every stream chunk, so the phases are
+          // known even when the consumer stops at the first newline.
+          timings_per_token: true,
         },
         { signal },
       );
       let text = '';
       let done = false;
       let loopDetected = false;
+      // llama-server reports per-phase timings (prompt eval / generation) in
+      // the stream chunks — surfaced in the response log line.
+      let timings: Record<string, unknown> | undefined;
       for await (const chunk of stream) {
+        if (chunk.timings !== undefined) {
+          timings = chunk.timings;
+        }
         const chunkText = chunk.choices[0]?.text ?? '';
         if (chunkText.length > 0) {
           text += chunkText;
@@ -165,8 +190,11 @@ export class CompletionsClient {
           text = text.split(token).join('');
         }
       }
-      this.logResponse?.(`api response (${text.length} chars): ${text}`);
-      return { text: text.trim().length === 0 ? '' : text };
+      const timingsText = timings !== undefined
+        ? `prompt ${timings.prompt_n} tok in ${Math.round(Number(timings.prompt_ms))} ms, gen ${timings.predicted_n} tok in ${Math.round(Number(timings.predicted_ms))} ms (${Number(timings.predicted_per_second).toFixed(1)} t/s)`
+        : '';
+      this.logResponse?.(`api response (${text.length} chars, ${Date.now() - startedAt} ms${timingsText ? ` | ${timingsText}` : ''}): ${text}`);
+      return { text: text.trim().length === 0 ? '' : text, timings: timingsText || undefined };
     } catch (err) {
       if (signal.aborted || isAbortError(err)) {
         // Cancellation, handled silently by the provider. Normalize the error

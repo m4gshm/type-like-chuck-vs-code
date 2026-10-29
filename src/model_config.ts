@@ -1,4 +1,4 @@
-import { ExtensionConfig, effectiveContextLengths } from './config';
+import { ExtensionConfig } from './config';
 import { ModelInfo } from './completions_client';
 
 export interface ModelConfigHost {
@@ -65,7 +65,6 @@ export class ModelConfig {
       await this.host.onModelChanged?.(modelId);
       this.host.notify(`TLC model set to ${modelId}.`);
     }
-    await this.clampContextSettings();
   }
 
   /**
@@ -78,7 +77,6 @@ export class ModelConfig {
    * metadata reported by the server.
    */
   async applyModelList(models: ModelInfo[]): Promise<void> {
-    await this.clampContextSettings();
     if (models.length === 0) {
       this.host.warn(`Model list is empty; keeping "${this.config.model}".`);
       return;
@@ -100,22 +98,5 @@ export class ModelConfig {
     if (chosen !== undefined) {
       await this.setModel(chosen.id, chosen.contextLength);
     }
-  }
-
-  /** Rewrites prefixContextMaxLength/suffixContextMaxLength so their sum fits
-   * tlc.contextMaxLength (proportional, priority to the prefix). */
-  private async clampContextSettings(): Promise<void> {
-    const limit = this.config.contextMaxLength;
-    if (limit <= 0) {
-      return;
-    }
-    const { prefix, suffix } = effectiveContextLengths(this.config);
-    if (prefix === this.config.prefixMaxLength && suffix === this.config.suffixMaxLength) {
-      return;
-    }
-    await this.host.updateSetting('prefixContextMaxLength', prefix);
-    await this.host.updateSetting('suffixContextMaxLength', suffix);
-    this.reload();
-    this.host.warn(`Context budgets clamped to ${prefix} + ${suffix} (limit ${limit}).`);
   }
 }

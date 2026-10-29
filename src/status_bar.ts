@@ -11,6 +11,7 @@ export class StatusBar {
   private busy = false;
   private hasError = false;
   private connectionReason: string | undefined;
+  private engine: string | undefined;
 
   constructor(state: CompletionState) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -41,9 +42,22 @@ export class StatusBar {
     this.refresh();
   }
 
+  setEngine(engine: string | undefined): void {
+    this.engine = engine;
+    this.refresh();
+  }
+
   refresh(): void {
     const enabled = this.state.isEnabled();
-    this.item.text = !enabled ? DISABLED_TEXT : this.hasError ? ERROR_TEXT : this.busy ? BUSY_TEXT : ENABLED_TEXT;
+    this.item.text = !enabled
+      ? DISABLED_TEXT
+      : this.hasError
+        ? ERROR_TEXT
+        : this.engine !== undefined
+          ? this.engine
+          : this.busy
+            ? BUSY_TEXT
+            : ENABLED_TEXT;
     this.item.tooltip = this.connectionReason !== undefined
       ? `${this.connectionReason}\n\n${enabled
         ? 'TLC keeps retrying; completions pause if the server stays unreachable. Click to toggle.'
