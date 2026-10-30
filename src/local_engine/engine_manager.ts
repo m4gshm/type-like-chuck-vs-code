@@ -6,9 +6,13 @@ import { deviceChain, NPU_CONTEXT_LENGTH } from './device';
 import { downloadFile, DownloadProgress } from './downloader';
 import { extractArchive } from './extract';
 import { llamaArgs, startEngine, RunningEngine, RunnerDeps, withModelPlaceholder } from './engine_runner';
+import { irModel, irModelFileUrl } from './ir_model_catalog';
 import { isLocalModelId, localModel, localModelUrl } from './model_catalog';
+import { mlxModel, mlxModelFileUrl } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
+import { OV_GENAI_VERSION, ovGenaiLibDir, resolveOvGenaiAsset } from './ov_runtime';
 import { resolveEngineAsset, EngineVariant } from './release_assets';
+import { RunningStdioRunner, startStdioRunner } from './stdio_runner';
 
 export type EngineStatus =
   | { status: 'not-installed' }
@@ -18,20 +22,31 @@ export type EngineStatus =
   | { status: 'ready'; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device: LocalDevice }
   | { status: 'error'; message: string };
 
+/** The running ovgenai stdio runner exposed for the completions transport. */
+export type RunningLocalEngine = RunningEngine | RunningStdioRunner;
+
+export const isStdioRunner = (engine: RunningLocalEngine): engine is RunningStdioRunner =>
+  typeof (engine as RunningStdioRunner).stream === 'function';
+
 export type ResetTarget = 'engine' | 'model' | 'cache';
 
 export interface EngineManagerSettings {
   modelId: string;
   device: LocalDevice;
-  /** Context used on the NPU (0 = the built-in NPU_CONTEXT_LENGTH). */
+  engineKind: 'llama.cpp' | 'ovgenai' | 'mlx';
   npuContextLength: number;
   releaseTag: string;
   /** Local engine binary to use instead of downloading (llama-server). */
   engineBinary: string;
   huggingfaceUrl: string;
   githubUrl: string;
+  openvinoUrl: string;
   modelPath: string;
   modelUrls: Record<string, string>;
+  /** Path of the bundled ovgenai runner binary; undefined when the platform is unsupported. */
+  ovgenaiRunnerPath?: string;
+  /** Path of the bundled mlx runner binary; undefined outside macOS arm64. */
+  mlxRunnerPath?: string;
   /** When false the engine runs without key authentication (engine debugging). */
   apiKeyEnabled: boolean;
 }
@@ -50,7 +65,7 @@ export interface EngineManagerHost extends RunnerDeps {
 }
 
 export class EngineManager {
-  private engine: RunningEngine | undefined;
+  private engine: RunningLocalEngine | undefined;
   private runningModel: string | undefined;
   private runningDevice: LocalDevice | undefined;
   private startPromise: Promise<EngineStatus> | undefined;
@@ -80,6 +95,16 @@ export class EngineManager {
 
   current(): EngineStatus {
     if (this.engine !== undefined && this.runningModel !== undefined && this.runningDevice !== undefined) {
+      if (isStdioRunner(this.engine)) {
+        return {
+          status: 'ready',
+          baseUrl: '',
+          apiKey: undefined,
+          model: this.runningModel,
+          modelPath: this.engine.modelPath,
+          device: this.runningDevice,
+        };
+      }
       return {
         status: 'ready',
         baseUrl: this.engine.baseUrl,
@@ -128,7 +153,13 @@ export class EngineManager {
     if (target === 'engine') {
       await rm(paths.engineRoot, { recursive: true, force: true });
     } else if (target === 'model') {
-      await rm(modelFilePath(paths, this.host.settings().modelId), { force: true });
+      if (this.host.settings().engineKind === 'ovgenai') {
+        await rm(irModelDir(paths, this.host.settings().modelId), { recursive: true, force: true });
+      } else if (this.host.settings().engineKind === 'mlx') {
+        await rm(mlxModelDir(paths, this.host.settings().modelId), { recursive: true, force: true });
+      } else {
+        await rm(modelFilePath(paths, this.host.settings().modelId), { force: true });
+      }
     } else {
       await rm(paths.modelCacheDir, { recursive: true, force: true });
       await mkdir(paths.modelCacheDir, { recursive: true });
@@ -141,6 +172,12 @@ export class EngineManager {
       await this.stop();
       const paths = this.host.paths();
       const settings = this.host.settings();
+      if (settings.engineKind === 'ovgenai') {
+        return await this.startOvgenai(paths, settings);
+      }
+      if (settings.engineKind === 'mlx') {
+        return await this.startMlx(paths, settings);
+      }
       if (!isLocalModelId(settings.modelId)) {
         throw new Error(`Unknown local model "${settings.modelId}".`);
       }
@@ -231,6 +268,206 @@ export class EngineManager {
     }
   }
 
+  private async startOvgenai(paths: EnginePaths, settings: EngineManagerSettings): Promise<EngineStatus> {
+    const runnerPath = settings.ovgenaiRunnerPath;
+    if (runnerPath === undefined || runnerPath.length === 0) {
+      throw new Error(`The OpenVINO GenAI runner is not bundled for ${this.host.platform}/${this.host.arch}.`);
+    }
+    if (!isLocalModelId(settings.modelId)) {
+      throw new Error(`Unknown local model "${settings.modelId}".`);
+    }
+    const model = irModel(settings.modelId);
+    const devices = deviceChain(settings.device);
+    const libraryDir = await this.ensureOvGenaiRuntime(paths, settings);
+    const modelPath = await this.ensureIrModel(paths, model, settings);
+    this.host.onStatus({ status: 'starting' });
+
+    const contextLength = devices[0] === 'npu' || settings.device === 'npu'
+      ? Math.min(model.contextLength, settings.npuContextLength > 0 ? settings.npuContextLength : NPU_CONTEXT_LENGTH)
+      : model.contextLength;
+
+    let runner: RunningStdioRunner | undefined;
+    let activeDevice = devices[0];
+    const fallbacks: string[] = [];
+    for (;;) {
+      try {
+        runner = await startStdioRunner(
+          {
+            runnerPath,
+            modelPath,
+            device: activeDevice.toUpperCase(),
+            contextLength,
+            libraryDir,
+            onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
+            onStderr: (line) => this.host.log(`ovgenai: ${line}`),
+          },
+          this.host,
+        );
+        break;
+      } catch (err) {
+        const next = devices[devices.indexOf(activeDevice) + 1];
+        if (next === undefined) {
+          throw err;
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        this.host.warn(`TLC local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
+        fallbacks.push(`${activeDevice.toUpperCase()}: ${message}`);
+        activeDevice = next;
+      }
+    }
+    if (fallbacks.length > 0) {
+      const failed = fallbacks.map((f) => f.split(':')[0]).join(', ');
+      const reasons = fallbacks.map((f) => f.replace(': ', ' — ')).join('; ');
+      this.host.notify(`TLC: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
+    }
+    this.engine = runner;
+    this.runningModel = settings.modelId;
+    this.runningDevice = activeDevice;
+    const status: EngineStatus = {
+      status: 'ready',
+      // The stdio runner has no HTTP endpoint; completions go through
+      // `EngineManager.stdioRunner` instead of a base URL.
+      baseUrl: '',
+      apiKey: undefined,
+      model: settings.modelId,
+      modelPath,
+      device: activeDevice,
+    };
+    this.host.onStatus(status);
+    return status;
+  }
+
+  /** The running stdio runner, for the completions transport (ovgenai kind). */
+  stdioRunner(): RunningStdioRunner | undefined {
+    return this.engine !== undefined && isStdioRunner(this.engine) ? this.engine : undefined;
+  }
+
+  private async startMlx(paths: EnginePaths, settings: EngineManagerSettings): Promise<EngineStatus> {
+    const runnerPath = settings.mlxRunnerPath;
+    if (runnerPath === undefined || runnerPath.length === 0) {
+      throw new Error(`The MLX runner is not bundled for ${this.host.platform}/${this.host.arch} (macOS arm64 only).`);
+    }
+    if (!isLocalModelId(settings.modelId)) {
+      throw new Error(`Unknown local model "${settings.modelId}".`);
+    }
+    const model = mlxModel(settings.modelId);
+    const modelPath = await this.ensureMlxModel(paths, model, settings);
+    this.host.onStatus({ status: 'starting' });
+    // Metal is the only MLX backend; no device fallback chain.
+    const runner = await startStdioRunner(
+      {
+        runnerPath,
+        modelPath,
+        contextLength: model.contextLength,
+        label: 'mlx',
+        onUnexpectedExit: (message) => this.handleUnexpectedExit(`mlx ${message}`),
+        onStderr: (line) => this.host.log(`mlx: ${line}`),
+      },
+      this.host,
+    );
+    this.engine = runner;
+    this.runningModel = settings.modelId;
+    this.runningDevice = 'gpu';
+    const status: EngineStatus = {
+      status: 'ready',
+      baseUrl: '',
+      apiKey: undefined,
+      model: settings.modelId,
+      modelPath,
+      device: 'gpu',
+    };
+    this.host.onStatus(status);
+    return status;
+  }
+
+  private async ensureMlxModel(paths: EnginePaths, model: ReturnType<typeof mlxModel>, settings: EngineManagerSettings): Promise<string> {
+    if (settings.modelPath.length > 0) {
+      if (!existsSync(settings.modelPath)) {
+        throw new Error(`Local model file or directory not found: ${settings.modelPath}`);
+      }
+      return settings.modelPath;
+    }
+    const modelDir = mlxModelDir(paths, model.id);
+    const missing = model.files.filter((file) => !existsSync(join(modelDir, file)));
+    if (missing.length === 0) {
+      return modelDir;
+    }
+    this.host.onStatus({ status: 'preparing-model' });
+    await mkdir(modelDir, { recursive: true });
+    for (const file of missing) {
+      const overrideKey = `${model.id}/${file}`;
+      const override = settings.modelUrls[overrideKey];
+      const url = override !== undefined && override.length > 0
+        ? override
+        : mlxModelFileUrl(model, file, settings.huggingfaceUrl);
+      await (this.host.download ?? downloadFile)({
+        url,
+        destination: join(modelDir, file),
+        signal: this.activeSignal,
+        onProgress: (p) => this.host.onProgress?.('model', p),
+      });
+    }
+    return modelDir;
+  }
+
+  private async ensureOvGenaiRuntime(paths: EnginePaths, settings: EngineManagerSettings): Promise<string> {
+    const asset = resolveOvGenaiAsset(this.host.platform, this.host.arch, OV_GENAI_VERSION, settings.openvinoUrl);
+    if (asset === undefined) {
+      throw new Error(`No OpenVINO GenAI runtime archive for ${this.host.platform}/${this.host.arch}.`);
+    }
+    const topDir = asset.fileName.replace(/\.(zip|tar\.gz)$/, '');
+    const unpackedRoot = join(paths.engineRoot, `ov-genai-${OV_GENAI_VERSION}`, topDir);
+    const libDir = ovGenaiLibDir(this.host.platform, unpackedRoot);
+    if (existsSync(libDir)) {
+      return libDir;
+    }
+    this.host.onStatus({ status: 'preparing-engine' });
+    await mkdir(paths.engineRoot, { recursive: true });
+    const archivePath = join(paths.engineRoot, asset.fileName);
+    await (this.host.download ?? downloadFile)({
+      url: asset.url,
+      destination: archivePath,
+      signal: this.activeSignal,
+      onProgress: (p) => this.host.onProgress?.('engine', p),
+    });
+    await (this.host.extract ?? extractArchive)({ archivePath, destDir: join(paths.engineRoot, `ov-genai-${OV_GENAI_VERSION}`), signal: this.activeSignal });
+    await rm(archivePath, { force: true });
+    if (!existsSync(libDir)) {
+      throw new Error(`OpenVINO runtime libraries not found after unpacking (${libDir}).`);
+    }
+    return libDir;
+  }
+
+  private async ensureIrModel(paths: EnginePaths, model: ReturnType<typeof irModel>, settings: EngineManagerSettings): Promise<string> {
+    if (settings.modelPath.length > 0) {
+      if (!existsSync(settings.modelPath)) {
+        throw new Error(`Local model file or directory not found: ${settings.modelPath}`);
+      }
+      return settings.modelPath;
+    }
+    const modelDir = irModelDir(paths, model.id);
+    const missing = model.files.filter((file) => !existsSync(join(modelDir, file)));
+    if (missing.length === 0) {
+      return modelDir;
+    }
+    this.host.onStatus({ status: 'preparing-model' });
+    await mkdir(modelDir, { recursive: true });
+    for (const file of missing) {
+      const overrideKey = `${model.id}/${file}`;
+      const override = settings.modelUrls[overrideKey];
+      const url = override !== undefined && override.length > 0
+        ? override
+        : irModelFileUrl(model, file, settings.huggingfaceUrl);
+      await (this.host.download ?? downloadFile)({
+        url,
+        destination: join(modelDir, file),
+        signal: this.activeSignal,
+        onProgress: (p) => this.host.onProgress?.('model', p),
+      });
+    }
+    return modelDir;
+  }
+
   private async ensureLlamaEngine(paths: EnginePaths, settings: EngineManagerSettings, variant: EngineVariant): Promise<string> {
     if (settings.engineBinary.length > 0) {
       return localEngineBinary(settings.engineBinary);
@@ -293,6 +530,14 @@ export class EngineManager {
 function modelFilePath(paths: EnginePaths, modelId: string): string {
   const model = isLocalModelId(modelId) ? localModel(modelId) : undefined;
   return model !== undefined ? join(paths.modelDir, model.fileName) : join(paths.modelDir, modelId);
+}
+
+function irModelDir(paths: EnginePaths, modelId: string): string {
+  return join(paths.modelDir, `${modelId}-int4-ov`);
+}
+
+function mlxModelDir(paths: EnginePaths, modelId: string): string {
+  return join(paths.modelDir, `${modelId}-mlx`);
 }
 
 function findBinary(dir: string, platform: NodeJS.Platform, kind: 'llama-server'): string | undefined {

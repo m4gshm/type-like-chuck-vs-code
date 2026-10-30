@@ -51,9 +51,17 @@ export class CompletionError extends Error {
   }
 }
 
+export type StdioCompletionSource = (
+  prompt: string,
+  maxTokens: number,
+  stop: string[],
+  signal: AbortSignal,
+) => AsyncIterable<string>;
+
 export class CompletionsClient {
   private client: Pick<OpenAI, 'completions' | 'models'>;
   private apiKey: string | undefined;
+  private stdioSource: StdioCompletionSource | undefined;
 
   constructor(
     private readonly getBaseUrl: () => string,
@@ -101,6 +109,14 @@ export class CompletionsClient {
     this.client = this.createClient();
   }
 
+  /**
+   * Routes completions through the local stdio runner instead of HTTP (ovgenai
+   * engine kind). Passing undefined returns to the HTTP transport.
+   */
+  setStdioSource(source: StdioCompletionSource | undefined): void {
+    this.stdioSource = source;
+  }
+
   async listModels(): Promise<ModelInfo[]> {
     const page = await this.client.models.list();
     const models: ModelInfo[] = [];
@@ -116,8 +132,22 @@ export class CompletionsClient {
       maskReservedTokens(prefix, template.reservedTokens),
       maskReservedTokens(suffix, template.reservedTokens),
     );
+    const startedAt = Date.now();
+    if (this.stdioSource !== undefined) {
+      const source = this.stdioSource;
+      const chunks = source(prompt, this.getMaxTokens(), [...template.reservedTokens, '\n'], signal);
+      return this.consumeChunks(
+        (async function* (): AsyncIterable<{ choices: Array<{ text?: string }> }> {
+          for await (const token of chunks) {
+            yield { choices: [{ text: token }] };
+          }
+        })(),
+        template,
+        startedAt,
+        signal,
+      );
+    }
     try {
-      const startedAt = Date.now();
       // `timings_per_token` is a llama.cpp extension; other servers ignore the
       // unknown field. Raw param types: the SDK's would reject the extra key.
       const create = this.client.completions.create.bind(this.client.completions) as unknown as (
@@ -137,64 +167,16 @@ export class CompletionsClient {
         },
         { signal },
       );
-      let text = '';
-      let done = false;
-      let loopDetected = false;
-      // llama-server reports per-phase timings (prompt eval / generation) in
-      // the stream chunks — surfaced in the response log line.
-      let timings: Record<string, unknown> | undefined;
-      for await (const chunk of stream) {
-        if (chunk.timings !== undefined) {
-          timings = chunk.timings;
-        }
-        const chunkText = chunk.choices[0]?.text ?? '';
-        if (chunkText.length > 0) {
-          text += chunkText;
-          // Servers may ignore the `stop` parameter: any reserved token that
-          // shows up in the stream acts as an implicit stop, cut there.
-          let cutAt = -1;
-          for (const token of template.reservedTokens) {
-            if (token.length > 0) {
-              const at = text.indexOf(token);
-              if (at !== -1 && (cutAt === -1 || at < cutAt)) {
-                cutAt = at;
-              }
-            }
+      return await this.consumeChunks(
+        (async function* (): AsyncIterable<{ choices: Array<{ text?: string }> }> {
+          for await (const chunk of stream) {
+            yield chunk;
           }
-          if (cutAt !== -1) {
-            text = text.slice(0, cutAt);
-            done = true;
-            break;
-          }
-          // Degenerate repetition (e.g. <|fim_pad|> repeated): stop early.
-          const loop = detectLoop(text);
-          if (loop.looped) {
-            loopDetected = true;
-            text = text.slice(0, loop.cutIndex);
-            break;
-          }
-          const newlineAt = text.match(/[\r\n]/);
-          if (newlineAt && newlineAt.index !== undefined) {
-            text = text.slice(0, newlineAt.index);
-            done = true;
-            break;
-          }
-        }
-      }
-      if (!done && !loopDetected && !signal.aborted) {
-        text = truncateToLine(text).text;
-      }
-      // Template tags must never leak into the insertion.
-      for (const token of template.reservedTokens) {
-        if (token) {
-          text = text.split(token).join('');
-        }
-      }
-      const timingsText = timings !== undefined
-        ? `prompt ${timings.prompt_n} tok in ${Math.round(Number(timings.prompt_ms))} ms, gen ${timings.predicted_n} tok in ${Math.round(Number(timings.predicted_ms))} ms (${Number(timings.predicted_per_second).toFixed(1)} t/s)`
-        : '';
-      this.logResponse?.(`api response (${text.length} chars, ${Date.now() - startedAt} ms${timingsText ? ` | ${timingsText}` : ''}): ${text}`);
-      return { text: text.trim().length === 0 ? '' : text, timings: timingsText || undefined };
+        })(),
+        template,
+        startedAt,
+        signal,
+      );
     } catch (err) {
       if (signal.aborted || isAbortError(err)) {
         // Cancellation, handled silently by the provider. Normalize the error
@@ -214,6 +196,64 @@ export class CompletionsClient {
       }
       throw new CompletionError('connection', `Cannot reach the completions API (${this.getBaseUrl()}): ${messageOf(err)}`, err);
     }
+  }
+
+  /** Shared streaming tail for the HTTP and stdio transports: stop-token cut, loop detection, single-line truncation. */
+  private async consumeChunks(
+    chunks: AsyncIterable<{ choices: Array<{ text?: string }> }>,
+    template: FimTemplate,
+    startedAt: number,
+    signal: AbortSignal,
+  ): Promise<CompletionResult> {
+    let text = '';
+    let done = false;
+    let loopDetected = false;
+    for await (const chunk of chunks) {
+      const chunkText = chunk.choices[0]?.text ?? '';
+      if (chunkText.length > 0) {
+        text += chunkText;
+        // Servers may ignore the `stop` parameter: any reserved token that
+        // shows up in the stream acts as an implicit stop, cut there.
+        let cutAt = -1;
+        for (const token of template.reservedTokens) {
+          if (token.length > 0) {
+            const at = text.indexOf(token);
+            if (at !== -1 && (cutAt === -1 || at < cutAt)) {
+              cutAt = at;
+            }
+          }
+        }
+        if (cutAt !== -1) {
+          text = text.slice(0, cutAt);
+          done = true;
+          break;
+        }
+        // Degenerate repetition (e.g. <|fim_pad|> repeated): stop early.
+        const loop = detectLoop(text);
+        if (loop.looped) {
+          loopDetected = true;
+          text = text.slice(0, loop.cutIndex);
+          break;
+        }
+        const newlineAt = text.match(/[\r\n]/);
+        if (newlineAt && newlineAt.index !== undefined) {
+          text = text.slice(0, newlineAt.index);
+          done = true;
+          break;
+        }
+      }
+    }
+    if (!done && !loopDetected && !signal.aborted) {
+      text = truncateToLine(text).text;
+    }
+    // Template tags must never leak into the insertion.
+    for (const token of template.reservedTokens) {
+      if (token) {
+        text = text.split(token).join('');
+      }
+    }
+    this.logResponse?.(`api response (${text.length} chars, ${Date.now() - startedAt} ms): ${text}`);
+    return { text: text.trim().length === 0 ? '' : text };
   }
 }
 

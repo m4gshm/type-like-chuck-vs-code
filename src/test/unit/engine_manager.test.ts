@@ -37,11 +37,13 @@ interface Fixture {
 const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManagerSettings => ({
   modelId: '1.5b',
   device: 'auto',
+  engineKind: 'llama.cpp',
   npuContextLength: 8192,
   releaseTag: 'b1',
   engineBinary: '',
   huggingfaceUrl: 'https://huggingface.co',
   githubUrl: 'https://github.com',
+  openvinoUrl: 'https://storage.openvinotoolkit.org',
   modelPath: '',
   modelUrls: {},
   apiKeyEnabled: true,

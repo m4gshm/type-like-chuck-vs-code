@@ -144,3 +144,46 @@ describe('CompletionsClient.listModels', () => {
     ]);
   });
 });
+
+describe('CompletionsClient stdio transport', () => {
+  it('routes completions through the stdio source and keeps single-line truncation', async () => {
+    const client = clientWith(fakeSdk(async () => {
+      throw new Error('HTTP must not be used when a stdio source is set');
+    }));
+    client.setStdioSource(async function* (prompt, maxTokens, stop) {
+      expect(prompt).toContain('<|fim_prefix|>');
+      expect(maxTokens).toBe(256);
+      expect(stop).toContain('\n');
+      yield 'const x = 1';
+      yield '\nlet y';
+    });
+    const result = await complete(client, 'const x = ', '');
+    expect(result.text).toBe('const x = 1');
+  });
+
+  it('cuts at reserved tokens produced by the runner', async () => {
+    const client = clientWith(fakeSdk(async () => stream([])));
+    client.setStdioSource(async function* () {
+      yield 'good';
+      yield '<|fim_pad|>leak';
+    });
+    const result = await complete(client);
+    expect(result.text).toBe('good');
+  });
+
+  it('returns to the HTTP transport when the source is cleared', async () => {
+    let httpUsed = false;
+    const sdk = fakeSdk(async () => {
+      httpUsed = true;
+      return stream(['from http']);
+    });
+    const client = clientWith(sdk);
+    client.setStdioSource(async function* () {
+      yield 'from stdio';
+    });
+    client.setStdioSource(undefined);
+    const result = await complete(client);
+    expect(httpUsed).toBe(true);
+    expect(result.text).toBe('from http');
+  });
+});

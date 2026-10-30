@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readConfig, ExtensionConfig } from './config';
+import { readConfig, ExtensionConfig, LocalDevice } from './config';
 import { ApiKeyStorage } from './api_key_storage';
 import { CompletionsClient, ModelInfo } from './completions_client';
 import { CompletionProvider } from './completion_provider';
@@ -15,10 +15,41 @@ import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 import { EngineManager, EngineStatus, ResetTarget } from './local_engine/engine_manager';
 import { DownloadProgress } from './local_engine/downloader';
 import { LOCAL_MODEL_IDS, localModel } from './local_engine/model_catalog';
+import { irModel } from './local_engine/ir_model_catalog';
+import { mlxModel } from './local_engine/mlx_model_catalog';
+import { LocalModelId } from './local_engine/model_catalog';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { probeCapability } from './local_engine/capability';
 
 const LOCAL_ENDPOINT_NOT_READY = 'http://127.0.0.1:0/v1';
+
+/** Platform label under binaries/ovgenai; undefined when no runner is bundled. */
+function ovgenaiPlatformDir(platform: NodeJS.Platform, arch: string): string | undefined {
+  if (platform === 'win32' && arch === 'x64') {
+    return 'win32-x64';
+  }
+  if (platform === 'linux' && arch === 'x64') {
+    return 'linux-x64';
+  }
+  return undefined;
+}
+
+function bundledOvgenaiRunnerPath(extensionPath: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | undefined {
+  const dir = ovgenaiPlatformDir(platform, arch);
+  if (dir === undefined) {
+    return undefined;
+  }
+  const binary = platform === 'win32' ? 'tlc-ovgenai-runner.exe' : 'tlc-ovgenai-runner';
+  return `${extensionPath}/binaries/ovgenai/${dir}/${binary}`;
+}
+
+/** Path of the bundled mlx runner; defined on macOS arm64 only. */
+function bundledMlxRunnerPath(extensionPath: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | undefined {
+  if (platform !== 'darwin' || arch !== 'arm64') {
+    return undefined;
+  }
+  return `${extensionPath}/binaries/mlx/darwin-arm64/tlc-mlx-runner`;
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('TLC', { log: true });
@@ -126,13 +157,17 @@ export function activate(context: vscode.ExtensionContext): void {
     settings: () => ({
       modelId: config().localModel,
       device: config().localDevice,
+      engineKind: config().localEngineKind,
       npuContextLength: config().localNpuContextMaxLength,
       releaseTag: config().localLlamaCppRelease,
       engineBinary: config().localEngineBinary,
       huggingfaceUrl: config().localHuggingfaceUrl,
       githubUrl: config().localGithubUrl,
+      openvinoUrl: config().localOpenvinoUrl,
       modelPath: config().localModelPath,
       modelUrls: config().localModelUrls,
+      ovgenaiRunnerPath: bundledOvgenaiRunnerPath(context.extensionPath),
+      mlxRunnerPath: bundledMlxRunnerPath(context.extensionPath),
       apiKeyEnabled: config().localApiKeyEnabled,
     }),
     onStatus: (status) => handleEngineStatus(status),
@@ -153,23 +188,35 @@ export function activate(context: vscode.ExtensionContext): void {
    */
   const handleEngineStatus = (status: EngineStatus): void => {
     if (status.status === 'ready') {
-      localEndpoint = status.baseUrl;
-      client.refresh();
-      void client.setApiKey(status.apiKey);
-      connectionWatchdog.reportSuccess();
-      statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
-      info(`TLC local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
+      const runner = engineManager.stdioRunner();
+      if (runner !== undefined) {
+        // ovgenai/mlx: completions flow through the stdio pipe, not an endpoint.
+        client.setStdioSource((prompt, maxTokens, stop, signal) => runner.stream(prompt, maxTokens, stop, signal));
+        statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
+        info(`TLC local engine ready: ${config().localEngineKind} runner model=${status.modelPath} device=${status.device}`);
+        connectionWatchdog.reportSuccess();
+      } else {
+        localEndpoint = status.baseUrl;
+        client.refresh();
+        void client.setApiKey(status.apiKey);
+        connectionWatchdog.reportSuccess();
+        statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
+        info(`TLC local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
+      }
     } else if (status.status === 'error') {
+      client.setStdioSource(undefined);
       localEndpoint = LOCAL_ENDPOINT_NOT_READY;
       client.refresh();
       statusBar.setEngine(`$(error) engine: ${status.message}`);
       warn(`TLC local engine error: ${status.message}`);
     } else {
+      const kind = config().localEngineKind;
+      const kindLabel = kind === 'ovgenai' ? 'ovgenai runner' : kind === 'mlx' ? 'mlx runner' : 'llama-server';
       const label = status.status === 'preparing-engine'
         ? 'downloading engine…'
         : status.status === 'preparing-model'
           ? 'downloading model…'
-          : `starting llama-server… (the first NPU start compiles the model — several minutes)`;
+          : `starting ${kindLabel}… (the first NPU start compiles the model — several minutes)`;
       engineStageLabel = label;
       statusBar.setEngine(`$(loading~spin) ${label}`);
     }
@@ -264,6 +311,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await runEngineTask('TLC: preparing the local engine', (signal) => managerEnsureReady(signal));
     } else {
       await engineManager.stop();
+      client.setStdioSource(undefined);
       localEndpoint = undefined;
       client.refresh();
       statusBar.setEngine(undefined);
@@ -460,9 +508,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('tlc.selectLocalModel', async () => {
+      const kind = config().localEngineKind;
+      const modelOf = (id: LocalModelId) =>
+        kind === 'ovgenai' ? irModel(id) : kind === 'mlx' ? mlxModel(id) : localModel(id);
       const chosen = await vscode.window.showQuickPick(
         LOCAL_MODEL_IDS.map((id) => {
-          const model = localModel(id);
+          const model = modelOf(id);
           return {
             label: model.label,
             description: config().localModel === id ? '$(check) current' : undefined,
@@ -477,25 +528,33 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('tlc.selectLocalDevice', async () => {
-      const items = [
-        { label: '$(zap) Auto (NPU → GPU → CPU)', value: 'auto' },
-        { label: 'NPU (Intel Core Ultra, openvino build)', value: 'npu' },
-        { label: 'GPU (vulkan build)', value: 'gpu' },
-        { label: 'CPU', value: 'cpu' },
-      ].map((i) => ({
-        label: i.label,
-        description: config().localDevice === i.value ? '$(check) current' : undefined,
-        value: i.value,
-      }));
-      const chosen = await vscode.window.showQuickPick(items, { title: 'TLC: Select Local Device' });
+      const kind = config().localEngineKind;
+      const items = kind === 'mlx'
+        ? [
+            { label: '$(zap) GPU (MLX, Metal)', value: 'gpu' as LocalDevice },
+          ]
+        : [
+            { label: '$(zap) Auto (NPU → GPU → CPU)', value: 'auto' as LocalDevice },
+            { label: kind === 'ovgenai' ? 'NPU (Intel Core Ultra, OpenVINO GenAI runner)' : 'NPU (Intel Core Ultra, openvino build)', value: 'npu' as LocalDevice },
+            { label: kind === 'ovgenai' ? 'GPU (OpenVINO GenAI runner)' : 'GPU (vulkan build)', value: 'gpu' as LocalDevice },
+            { label: 'CPU', value: 'cpu' as LocalDevice },
+          ];
+      const chosen = await vscode.window.showQuickPick(
+        items.map((i) => ({
+          label: i.label,
+          description: config().localDevice === i.value ? '$(check) current' : undefined,
+          value: i.value,
+        })),
+        { title: 'TLC: Select Local Device' },
+      );
       if (chosen !== undefined) {
         await vscode.workspace.getConfiguration('tlc').update('local.device', chosen.value, vscode.ConfigurationTarget.Global);
       }
     }),
     vscode.commands.registerCommand('tlc.resetLocalEngine', async () => {
       const targets: Array<{ label: string; detail: string; target: ResetTarget }> = [
-        { label: 'Re-download engine', detail: 'Deletes the llama.cpp build and downloads it again', target: 'engine' },
-        { label: 'Re-download model', detail: 'Deletes the selected GGUF model and downloads it again', target: 'model' },
+        { label: 'Re-download engine', detail: 'Deletes the downloaded engine (llama.cpp build or OpenVINO runtime) and downloads it again', target: 'engine' },
+        { label: 'Re-download model', detail: 'Deletes the selected model (GGUF or OpenVINO IR) and downloads it again', target: 'model' },
         { label: 'Clear model cache', detail: 'Deletes the model cache; it is rebuilt on the next start', target: 'cache' },
       ];
       const chosen = await vscode.window.showQuickPick(targets, { title: 'TLC: Reset Local Engine' });
@@ -772,6 +831,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     new vscode.Disposable(() => {
       void engineManager.stop();
+      client.setStdioSource(undefined);
     }),
   );
 

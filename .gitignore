@@ -5,3 +5,7 @@ out/
 coverage
 node_modules
 dist/
+.cache/
+build/
+binaries/
+.task/

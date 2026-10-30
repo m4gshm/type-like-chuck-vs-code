@@ -10,6 +10,8 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 - **Manual trigger** — run `TLC: Trigger Completion Now` (default `Ctrl+Alt+Space` or `Alt+\`) to request a completion immediately; it always performs a fresh API request, ignoring the cache and any pending request. When Type like Chuck is disabled or yielding to Copilot, the same keys trigger the suggestion (e.g. Copilot's) directly.
 - **Built-in FIM templates** for Qwen2.5-Coder and Mellum (JetBrains), plus user-defined custom templates.
 - **Local engine mode** — no external server needed: TLC downloads a llama.cpp build and a Qwen2.5-Coder GGUF model (0.5B / 1.5B / 3B) on first use and starts its own local server. Two build flavors, chosen by the requested device: a **vulkan build** (GPU via NVIDIA/AMD/Intel + CPU fallback) and an **openvino build** (Windows/Linux x64) that runs the same GGUF on the **Intel NPU** via the NPUW backend — no separate IR model download. A platform probe picks the best device at startup (NPU when present, GPU when a CUDA device answers, CPU otherwise); failed accelerated starts fall back to CPU.
+- **OpenVINO GenAI runner (`ovgenai` engine kind)** — an alternative local engine for Windows/Linux x64: a small runner binary bundled with the extension (no engine download) speaking NDJSON over stdin/stdout (no ports, no HTTP, no keys), loading native **OpenVINO IR** models (Qwen2.5-Coder int4-ov, ~0.35/0.95/1.85 GB) with NNCF int4 weights, and running on CPU, Intel Arc (GPU) or the Intel NPU. The OpenVINO runtime libraries (~130–250 MB per platform) are downloaded on first use into the engine directory. Select it with `tlc.local.engineKind: "ovgenai"`.
+- **MLX runner (`mlx` engine kind)** — the local engine for **macOS arm64**: a small Swift runner binary bundled with the extension speaking the same NDJSON stdio protocol, loading **MLX 4-bit** models (`mlx-community` Qwen2.5-Coder, ~0.4/1.0/1.9 GB) on Metal. The binary is self-contained (MLX statically linked, Metal is a system framework) — no engine or runtime downloads at all. Select it with `tlc.local.engineKind: "mlx"`.
 - **Streaming** requests against the legacy OpenAI `POST /v1/completions` endpoint with stop sequences derived from the template's reserved tokens.
 - **Single-line suggestions** that accept with <kbd>Tab</kbd> and dismiss with <kbd>Esc</kbd> via VS Code's native inline suggestions.
 - **No duplicated text** — suggestions that repeat the code right after the cursor are not shown.
@@ -52,19 +54,21 @@ In local mode the local engine is reached only via the loopback interface with a
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `tlc.mode` | `local` | Completion source: `local` (TLC-managed llama.cpp engine) or `remote` (OpenAI-compatible server at `tlc.openai.baseUrl`) |
-| `tlc.local.model` | `1.5b` | Local engine model (local mode): `0.5b`, `1.5b` or `3b` (Qwen2.5-Coder Q4_K_M GGUF) |
-| `tlc.local.device` | `auto` | Local engine inference device: `auto` (GPU → CPU), or `cpu`, `gpu`, `npu` (opt-in NPU, uses the llama.cpp openvino build, Windows/Linux x64; a failed accelerated start falls back to CPU) |
+| `tlc.mode` | `local` | Completion source: `local` (TLC-managed engine: llama.cpp or OpenVINO GenAI) or `remote` (OpenAI-compatible server at `tlc.openai.baseUrl`) |
+| `tlc.local.engineKind` | `mlx` on macOS arm64, `llama.cpp` elsewhere | Local engine implementation (local mode): `llama.cpp` (llama-server + GGUF, all platforms), `ovgenai` (bundled OpenVINO GenAI runner + IR models, Windows/Linux x64, NPU/GPU/CPU) or `mlx` (bundled MLX runner + 4-bit models, macOS arm64, Metal) |
+| `tlc.local.model` | `1.5b` | Local engine model (local mode): `0.5b`, `1.5b` or `3b` (Qwen2.5-Coder; GGUF for llama.cpp, OpenVINO IR int4 for ovgenai, MLX 4-bit for mlx) |
+| `tlc.local.device` | `auto` | Local engine inference device: `auto` (NPU → GPU → CPU), or `cpu`, `gpu`, `npu`; a failed accelerated start falls back to CPU |
 | `tlc.local.npuContextMaxLength` | `8192` | Context window used on the NPU (local mode only). The NPU graph is compiled for this window: a smaller window compiles faster, generates faster and needs less memory; it also caps the prefix/suffix prompt budgets when the NPU is used. `0` uses the model's full context |
 | `tlc.local.llamaCppRelease` | `b11935` | llama.cpp release tag used for the engine download (vulkan build for GPU/CPU, openvino build for NPU) |
 | `tlc.local.engineBinary` | `""` | Path to a locally unpacked llama-server binary used instead of downloading (empty = download) |
 | `tlc.local.engineDir` | `""` | Directory for the downloaded engine (empty = extension storage; changing it moves the engine) |
 | `tlc.local.modelDir` | `""` | Directory for the downloaded models (empty = extension storage; changing it moves the models) |
 | `tlc.local.modelCacheDir` | `""` | Directory for the NPU compiled-blob cache (`GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`) — NPU starts after the first one are much faster (empty = extension storage) |
-| `tlc.local.modelPath` | `""` | Path to a local GGUF file to use instead of downloading (empty = download) |
-| `tlc.local.modelUrls` | `{}` | Per-model download URL overrides, keyed by model id: `{ "1.5b": "https://mirror/.../model.gguf" }` |
+| `tlc.local.modelPath` | `""` | Path to a local model file to use instead of downloading (empty = download): a GGUF file for llama.cpp, an IR `.xml` (with its `.bin` alongside) or model directory for ovgenai, an mlx model directory for mlx |
+| `tlc.local.modelUrls` | `{}` | Per-model download URL overrides, keyed by model id (`{ "1.5b": "https://mirror/.../model.gguf" }`); for the ovgenai kind, key individual IR files as `1.5b/openvino_model.bin` |
 | `tlc.local.huggingfaceUrl` | `https://huggingface.co` | Base URL for model downloads (local mode only; change to a mirror) |
 | `tlc.local.githubUrl` | `https://github.com` | Base URL for llama.cpp release downloads (local mode only; change to a mirror) |
+| `tlc.local.openvinoUrl` | `https://storage.openvinotoolkit.org` | Base URL for the OpenVINO GenAI runtime download used by the ovgenai engine (local mode only; change to a mirror) |
 | `tlc.local.apiKeyEnabled` | `true` | Require the per-session key from engine clients. Turn off only to debug the engine directly with curl |
 
 ### Remote server
@@ -124,6 +128,34 @@ npm run lint         # eslint src
 npm run build        # test + lint (what CI runs)
 npm run package      # compile + icon regen + vsce package → .vsix
 ```
+
+### Building the OpenVINO GenAI runner (backend)
+
+The C++ `ovgenai` runner lives in its own repository:
+[`type-like-chuck-backed-openvino`](https://github.com/m4gshm/type-like-chuck-backed-openvino).
+It is built with [go-task](https://taskfile.dev) and produces release-named
+binaries in its `build/` directory; its CI (`.github/workflows/runner.yml`
+there) smoke-tests the binaries on windows-latest/ubuntu-latest and publishes
+them as GitHub release assets on `v*` tags.
+
+The plugin does not build the backend — it only imports the binaries:
+
+```bash
+task -t tasks.yaml runner:import  # local: build & copy from ../type-like-chuck-backed-openvino/build
+task -t tasks.yaml runner:fetch   # CI: download from the backend repo's latest release
+                                  # (pin a version via RUNNER_VERSION=<tag> or the RUNNER_VERSION var in tasks.yaml)
+task -t tasks.yaml package        # full .vsix, importing the binaries if missing
+```
+
+They land in `binaries/ovgenai/<platform>/` (plus `binaries/mlx/darwin-arm64/`
+for the MLX runner, imported from
+[`type-like-chuck-backed-mlx`](https://github.com/m4gshm/type-like-chuck-backed-mlx))
+— the layout the installed
+extension resolves via `${extensionPath}/binaries/ovgenai/…` — and
+`.github/workflows/package.yml` re-verifies that the binaries launch from the
+unpacked `.vsix`. Mac is not an ovgenai target: the ovgenai runner binary is
+only produced for Windows x64 and Linux x64 (the mlx runner covers macOS
+arm64).
 
 Debug with F5 (Run Extension); in local mode the extension manages its own engine, in remote mode smoke-test against a local OpenAI-compatible server such as LM Studio.
 

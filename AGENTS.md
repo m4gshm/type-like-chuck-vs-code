@@ -23,6 +23,15 @@ npm run build         # test + lint (what CI runs)
 npm run package       # compile + icon regen + vsce package → .vsix
 ```
 
+Cross-platform build automation lives in `tasks.yaml`, run with
+[go-task](https://taskfile.dev) (`brew install go-task` /
+`choco install go-task`): `task -t tasks.yaml --list`. Key tasks:
+`build` (extension CI loop), `runner:import` (local import of runner binaries
+from the backend repo `m4gshm/type-like-chuck-backed-openvino` `build/` dir),
+`runner:fetch` (import from the backend repo's GitHub release;
+`RUNNER_VERSION` pins a tag), `package` (full .vsix). The runner backend is a
+separate repository — the plugin only imports its binaries.
+
 Run `check-types` and `unit` after every change; they are quick. On Windows
 (PowerShell) do not chain commands with `&&`.
 

@@ -11,5 +11,7 @@ tests/**
 **/*.map
 **/*.ts
 openspec/**
+.cache/**
+build/**
 .gitignore
 coverage

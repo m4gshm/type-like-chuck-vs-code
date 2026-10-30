@@ -3,12 +3,14 @@ import { CustomTemplateDefinition } from './templates/types';
 
 export type TlcMode = 'remote' | 'local';
 export type LocalDevice = 'auto' | 'cpu' | 'gpu' | 'npu';
+export type LocalEngineKind = 'llama.cpp' | 'ovgenai' | 'mlx';
 
 export interface ExtensionConfig {
   baseUrl: string;
   model: string;
   apiKey: string;
   mode: TlcMode;
+  localEngineKind: LocalEngineKind;
   localModel: string;
   localDevice: LocalDevice;
   localNpuContextMaxLength: number;
@@ -19,6 +21,7 @@ export interface ExtensionConfig {
   localModelCacheDir: string;
   localHuggingfaceUrl: string;
   localGithubUrl: string;
+  localOpenvinoUrl: string;
   localModelPath: string;
   localModelUrls: Record<string, string>;
   localApiKeyEnabled: boolean;
@@ -58,6 +61,18 @@ export function readConfig(): ExtensionConfig {
   // prompt budgets in local mode when the NPU is explicitly selected.
   const mode = rawMode === 'remote' ? 'remote' : 'local';
   const device = rawDevice === 'gpu' || rawDevice === 'npu' || rawDevice === 'cpu' ? rawDevice : 'auto';
+  const rawKind = c.get<string>('local.engineKind', 'llama.cpp');
+  const engineKind: LocalEngineKind = rawKind === 'ovgenai' ? 'ovgenai' : rawKind === 'mlx' ? 'mlx' : 'llama.cpp';
+  // Platform default: the user has not chosen an engine kind explicitly —
+  // macOS arm64 gets the self-contained mlx runner, everything else llama.cpp.
+  const kindTouched = c.inspect<string>('local.engineKind')?.globalValue !== undefined
+    || c.inspect<string>('local.engineKind')?.workspaceValue !== undefined;
+  const effectiveKind: LocalEngineKind = !kindTouched
+    && engineKind === 'llama.cpp'
+    && process.platform === 'darwin'
+    && process.arch === 'arm64'
+    ? 'mlx'
+    : engineKind;
   const npuLimitRaw = c.get<number>('local.npuContextMaxLength', 8192);
   const npuEligible = mode === 'local' && npuLimitRaw > 0 && device === 'npu';
   let contextMaxLength = c.get<number>('contextMaxLength', 0);
@@ -69,6 +84,7 @@ export function readConfig(): ExtensionConfig {
     model: c.get<string>('openai.model', c.get<string>('model', 'Qwen2.5-Coder-1.5B')),
     apiKey: c.get<string>('openai.apiKey', c.get<string>('apiKey', '')),
     mode,
+    localEngineKind: effectiveKind,
     localModel: c.get<string>('local.model', '1.5b'),
     localDevice: device,
     localNpuContextMaxLength: npuLimitRaw,
@@ -79,6 +95,7 @@ export function readConfig(): ExtensionConfig {
     localModelCacheDir: c.get<string>('local.modelCacheDir', ''),
     localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', 'https://huggingface.co'),
     localGithubUrl: c.get<string>('local.githubUrl', 'https://github.com'),
+    localOpenvinoUrl: c.get<string>('local.openvinoUrl', 'https://storage.openvinotoolkit.org'),
     localModelPath: c.get<string>('local.modelPath', ''),
     localModelUrls: c.get<Record<string, string>>('local.modelUrls', {}),
     localApiKeyEnabled: c.get<boolean>('local.apiKeyEnabled', true),
