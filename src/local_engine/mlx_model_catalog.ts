@@ -7,6 +7,10 @@ export interface MlxModelSpec {
   repo: string;
   /** Files that must be present in the model directory for the runner to load. */
   files: string[];
+  /** Download directory name under the models dir (unique per model+format). */
+  dirName: string;
+  /** Built-in FIM template id matching the model family. */
+  template: string;
   approximateBytes: number;
   contextLength: number;
 }
@@ -25,6 +29,8 @@ const MLX_CATALOG: Record<LocalModelId, MlxModelSpec> = {
     label: 'Qwen2.5-Coder 0.5B (MLX 4-bit)',
     repo: 'mlx-community/Qwen2.5-Coder-0.5B-Instruct-4bit',
     files: MLX_FILES,
+    dirName: '0.5b-mlx',
+    template: 'qwen2',
     approximateBytes: 400_000_000,
     contextLength: 32_768,
   },
@@ -33,6 +39,8 @@ const MLX_CATALOG: Record<LocalModelId, MlxModelSpec> = {
     label: 'Qwen2.5-Coder 1.5B (MLX 4-bit)',
     repo: 'mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit',
     files: MLX_FILES,
+    dirName: '1.5b-mlx',
+    template: 'qwen2',
     approximateBytes: 1_000_000_000,
     contextLength: 32_768,
   },
@@ -41,6 +49,8 @@ const MLX_CATALOG: Record<LocalModelId, MlxModelSpec> = {
     label: 'Qwen2.5-Coder 3B (MLX 4-bit)',
     repo: 'mlx-community/Qwen2.5-Coder-3B-Instruct-4bit',
     files: MLX_FILES,
+    dirName: '3b-mlx',
+    template: 'qwen2',
     approximateBytes: 1_900_000_000,
     contextLength: 32_768,
   },

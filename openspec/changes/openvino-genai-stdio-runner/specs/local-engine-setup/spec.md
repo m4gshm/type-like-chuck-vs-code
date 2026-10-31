@@ -41,7 +41,7 @@ The extension SHALL offer the Qwen2.5-Coder GGUF models 0.5B, 1.5B and 3B via `T
 - **THEN** the `ovgenai` runner starts with that model and no download happens
 
 ### Requirement: Local distribution folder
-The user SHALL be able to point the extension at a locally unpacked engine distribution via `tlc.local.distroDir` (empty by default). For the `ovgenai` kind the folder is an OpenVINO GenAI runtime archive directory; for llama.cpp it is an unpacked llama.cpp build. When set, the engine/runtime download for that kind SHALL be skipped and the folder used in place; the resolved path SHALL be written to the TLC output channel. A folder that does not match the expected layout SHALL fail engine start with a non-blocking error naming the missing layout; clearing the setting restores the standard download path.
+The user SHALL be able to point the extension at a locally unpacked engine distribution via `tlc.local.distroDir` (empty by default). For the `ovgenai` kind the folder is an OpenVINO GenAI runtime archive directory; for llama.cpp it is an unpacked llama.cpp build. When set, the engine/runtime download for that kind SHALL be skipped and the folder used in place; the resolved path SHALL be written to the TLC output channel. A folder that does not match the expected layout SHALL fail engine start with a non-blocking error naming the missing layout; clearing the setting restores the standard download path. Before the first engine/runtime download, when the distribution is missing on disk and `tlc.local.distroDir` is unset, the extension SHALL offer a choice between downloading and picking an existing unpacked distribution folder (saved to `tlc.local.distroDir`); dismissing the choice cancels the preparation without a partial download.
 
 #### Scenario: Local distribution folder used
 - **WHEN** `tlc.local.distroDir` is set and local mode starts with the matching engine kind
@@ -50,6 +50,10 @@ The user SHALL be able to point the extension at a locally unpacked engine distr
 #### Scenario: Local distribution folder mismatched
 - **WHEN** `tlc.local.distroDir` is set but the folder does not contain the expected engine layout
 - **THEN** engine start fails with a non-blocking error naming the missing layout
+
+#### Scenario: Distribution question dismissed
+- **WHEN** the engine/runtime distribution is missing and the user dismisses the download-or-folder question
+- **THEN** the preparation is canceled silently (same semantics as a canceled download) and no partial state is left
 
 #### Scenario: Model picked from disk
 - **WHEN** the user picks the "From disk…" entry in `TLC: Select Local Model` and chooses a model file

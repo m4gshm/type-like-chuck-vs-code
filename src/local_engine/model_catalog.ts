@@ -5,6 +5,8 @@ export interface LocalModelSpec {
   label: string;
   repo: string;
   fileName: string;
+  /** Built-in FIM template id matching the model family. */
+  template: string;
   approximateBytes: number;
   contextLength: number;
 }
@@ -18,6 +20,7 @@ const CATALOG: Record<LocalModelId, LocalModelSpec> = {
     label: 'Qwen2.5-Coder 0.5B',
     repo: 'bartowski/Qwen2.5-Coder-0.5B-GGUF',
     fileName: 'Qwen2.5-Coder-0.5B-Q4_K_M.gguf',
+    template: 'qwen2',
     approximateBytes: 400_000_000,
     contextLength: 32_768,
   },
@@ -26,6 +29,7 @@ const CATALOG: Record<LocalModelId, LocalModelSpec> = {
     label: 'Qwen2.5-Coder 1.5B',
     repo: 'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF',
     fileName: 'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
+    template: 'qwen2',
     approximateBytes: 1_100_000_000,
     contextLength: 32_768,
   },
@@ -34,6 +38,7 @@ const CATALOG: Record<LocalModelId, LocalModelSpec> = {
     label: 'Qwen2.5-Coder 3B',
     repo: 'bartowski/Qwen2.5-Coder-3B-GGUF',
     fileName: 'Qwen2.5-Coder-3B-Q4_K_M.gguf',
+    template: 'qwen2',
     approximateBytes: 1_950_000_000,
     contextLength: 32_768,
   },

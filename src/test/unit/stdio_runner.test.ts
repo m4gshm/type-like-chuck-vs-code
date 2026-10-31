@@ -1,9 +1,13 @@
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startStdioRunner, StdioRunnerStartOptions } from '../../local_engine/stdio_runner';
-import { OV_GENAI_VERSION, ovGenaiLibDir, ovPackageVersion, resolveOvGenaiAsset } from '../../local_engine/ov_runtime';
+import { probeRunnerVersion, startStdioRunner, StdioRunnerStartOptions } from '../../local_engine/stdio_runner';
+import { OV_GENAI_VERSION, ovGenaiLibDir, ovGenaiTbbDir, ovPackageVersion, resolveOvGenaiAsset, runnerOvGenaiVersion } from '../../local_engine/ov_runtime';
 import { irModel, irModelFileUrl } from '../../local_engine/ir_model_catalog';
+import { localModelSpec } from '../../local_engine/model_picker';
 
 class FakeChild extends EventEmitter {
   stdin = {
@@ -147,7 +151,7 @@ describe('startStdioRunner', () => {
 
   it('prepends the library dir to LD_LIBRARY_PATH on linux', async () => {
     const children: FakeChild[] = [];
-    const runner = await startStdioRunner(baseOptions({ libraryDir: '/engine/ov-genai/runtime/lib/intel64' }), {
+    const runner = await startStdioRunner(baseOptions({ libraryDirs: ['/engine/ov-genai/runtime/lib/intel64'] }), {
       spawnImpl: spawnFake(children),
       platform: 'linux',
     });
@@ -155,13 +159,15 @@ describe('startStdioRunner', () => {
     await runner.stop();
   });
 
-  it('prepends the library dir to PATH on windows', async () => {
+  it('prepends the library dirs to PATH on windows', async () => {
     const children: FakeChild[] = [];
-    const runner = await startStdioRunner(baseOptions({ libraryDir: 'C:\\engine\\ov-genai\\runtime\\bin\\intel64' }), {
+    const runner = await startStdioRunner(baseOptions({
+      libraryDirs: ['C:\\engine\\ov\\runtime\\bin\\intel64\\Release', 'C:\\engine\\ov\\runtime\\3rdparty\\tbb\\bin'],
+    }), {
       spawnImpl: spawnFake(children),
       platform: 'win32',
     });
-    expect(children[0].env.PATH).toContain('C:\\engine\\ov-genai\\runtime\\bin\\intel64');
+    expect(children[0].env.PATH).toContain('C:\\engine\\ov\\runtime\\bin\\intel64\\Release;C:\\engine\\ov\\runtime\\3rdparty\\tbb\\bin');
     await runner.stop();
   });
 });
@@ -170,7 +176,7 @@ describe('resolveOvGenaiAsset', () => {
   it('resolves the windows x64 archive', () => {
     const asset = resolveOvGenaiAsset('win32', 'x64');
     expect(asset?.fileName).toBe(`openvino_genai_windows_${OV_GENAI_VERSION}_x86_64.zip`);
-    expect(asset?.url).toBe(`https://storage.openvinotoolkit.org/repositories/openvino_genai/packages/2026.4/windows/${asset?.fileName}`);
+    expect(asset?.url).toBe(`https://storage.openvinotoolkit.org/repositories/openvino_genai/packages/2026.4.1/windows/${asset?.fileName}`);
   });
 
   it('resolves the ubuntu22 archive for linux x64', () => {
@@ -186,12 +192,81 @@ describe('resolveOvGenaiAsset', () => {
   it('honors a custom base url and rc package dirs', () => {
     const asset = resolveOvGenaiAsset('linux', 'x64', '2026.4.1.0rc2', 'https://mirror.example.org/');
     expect(asset?.url).toBe('https://mirror.example.org/repositories/openvino_genai/packages/pre-release/2026.4.1.0rc2/linux/openvino_genai_ubuntu22_2026.4.1.0rc2_x86_64.tar.gz');
+    // Patch-level 0 releases live under X.Y, patched ones under X.Y.Z.
     expect(ovPackageVersion('2026.4.0.0')).toBe('2026.4');
+    expect(ovPackageVersion('2026.4.1.0')).toBe('2026.4.1');
   });
 
   it('points at the bundled lib dir inside the unpacked archive', () => {
     expect(ovGenaiLibDir('linux', '/engine/ov')).toBe('/engine/ov/runtime/lib/intel64');
     expect(ovGenaiLibDir('win32', '/engine/ov')).toBe('/engine/ov/runtime/bin/intel64/Release');
+  });
+
+  it('derives the windows TBB dll dir from the runtime root', () => {
+    expect(ovGenaiTbbDir('win32', 'C:\\ov')).toContain('runtime/3rdparty/tbb/bin');
+    expect(ovGenaiTbbDir('linux', '/ov')).toBeUndefined();
+  });
+});
+
+describe('runnerOvGenaiVersion', () => {
+  const writeRunner = async (content: Buffer | string): Promise<string> => {
+    const file = join(await mkdtemp(join(tmpdir(), 'tlc-ovver-')), 'tlc-ovgenai-runner');
+    await writeFile(file, content);
+    return file;
+  };
+
+  it('reads the embedded runtime version marker from the binary', async () => {
+    const file = await writeRunner(Buffer.concat([Buffer.alloc(100, 0x42), Buffer.from('ovgenai-runtime-version: 2026.4.1.0\0more-bytes')]));
+    expect(runnerOvGenaiVersion(file)).toBe('2026.4.1.0');
+  });
+
+  it('returns undefined for a runner without a marker', async () => {
+    expect(runnerOvGenaiVersion(await writeRunner('no marker here'))).toBeUndefined();
+    expect(runnerOvGenaiVersion(await writeRunner('ovgenai-runtime-version: unknown\0'))).toBeUndefined();
+    expect(runnerOvGenaiVersion(join('nowhere', 'runner'))).toBeUndefined();
+  });
+});
+
+describe('probeRunnerVersion', () => {
+  const probeFake = (emit: (child: FakeChild) => void) => ((_cmd: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+    const child = new FakeChild(args, opts.env);
+    setTimeout(() => emit(child), 0);
+    return child;
+  }) as never;
+
+  it('parses the version event and puts the library dirs on PATH', async () => {
+    const children: FakeChild[] = [];
+    const versions = await probeRunnerVersion('/ext/runner', ['/libs', '/tbb'], {
+      spawnImpl: probeFake((child) => {
+        children.push(child);
+        child.stdout.write(`${JSON.stringify({ type: 'version', app: 'v1.2.3-dirty', ovGenai: '2026.4.1.0' })}\n`);
+        child.emit('close', 0);
+      }),
+      platform: 'win32',
+    });
+    expect(versions).toEqual({ app: 'v1.2.3-dirty', ovGenai: '2026.4.1.0' });
+    expect(children[0].args).toEqual(['--version']);
+    expect(children[0].env.PATH).toContain('/libs;/tbb');
+  });
+
+  it('returns undefined when the runner predates --version', async () => {
+    const versions = await probeRunnerVersion('/ext/runner', [], {
+      spawnImpl: probeFake((child) => {
+        child.stdout.write(`${JSON.stringify({ type: 'error', id: null, message: 'no --model given' })}\n`);
+        child.emit('close', 2);
+      }),
+      platform: 'linux',
+    });
+    expect(versions).toBeUndefined();
+  });
+
+  it('returns undefined when the runner cannot start', async () => {
+    const spawnErr = ((_cmd: string, _args: string[], _opts: unknown) => {
+      const child = new FakeChild([], {});
+      setTimeout(() => child.emit('error', new Error('spawn ENOENT')), 0);
+      return child;
+    }) as never;
+    await expect(probeRunnerVersion('/ext/runner', [], { spawnImpl: spawnErr })).resolves.toBeUndefined();
   });
 });
 
@@ -203,9 +278,23 @@ describe('ir model catalog', () => {
     expect(spec.files).toContain('openvino_model.bin');
     expect(spec.files).toContain('openvino_tokenizer.xml');
     expect(spec.files).toContain('openvino_detokenizer.bin');
+    // dirName is unique per model+format so families never collide; template
+    // drives the FIM template suggestion.
+    expect(spec.dirName).toBe('1.5b-int8-ov');
+    expect(spec.template).toBe('qwen2');
   });
 
   it('builds resolve urls from the hf base', () => {
     expect(irModelFileUrl(irModel('0.5b'), 'openvino_model.bin')).toBe('https://huggingface.co/OpenVINO/Qwen2.5-Coder-0.5B-Instruct-int8-ov/resolve/main/openvino_model.bin');
+  });
+});
+
+describe('localModelSpec', () => {
+  it('returns the catalog spec per engine kind', () => {
+    expect(localModelSpec('ovgenai', '1.5b')?.label).toContain('1.5B');
+    expect(localModelSpec('ovgenai', '1.5b')?.template).toBe('qwen2');
+    expect(localModelSpec('llama.cpp', '1.5b')?.label).toContain('1.5B');
+    expect(localModelSpec('mlx', '1.5b')?.template).toBe('qwen2');
+    expect(localModelSpec('ovgenai', 'made-up')).toBeUndefined();
   });
 });

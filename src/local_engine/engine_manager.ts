@@ -10,9 +10,9 @@ import { irModel, irModelFileUrl } from './ir_model_catalog';
 import { isLocalModelId, localModel, localModelUrl } from './model_catalog';
 import { mlxModel, mlxModelFileUrl } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
-import { OV_GENAI_VERSION, ovGenaiLibDir, resolveOvGenaiAsset } from './ov_runtime';
+import { OV_GENAI_VERSION, ovGenaiLibDir, ovGenaiTbbDir, resolveOvGenaiAsset, runnerOvGenaiVersion } from './ov_runtime';
 import { resolveEngineAsset, EngineVariant } from './release_assets';
-import { RunningStdioRunner, startStdioRunner } from './stdio_runner';
+import { probeRunnerVersion, RunningStdioRunner, startStdioRunner } from './stdio_runner';
 
 export type EngineStatus =
   | { status: 'not-installed' }
@@ -64,6 +64,10 @@ export interface EngineManagerHost extends RunnerDeps {
   warn: (message: string) => void;
   download?: typeof downloadFile;
   extract?: typeof extractArchive;
+  /** Injectable runner `--version` probe (defaults to the real spawn). */
+  probeRunnerVersion?: typeof probeRunnerVersion;
+  /** Returns a picked distro folder, 'download', or undefined when dismissed. */
+  askDistroOrDownload?: (kind: 'ovgenai' | 'llama.cpp') => Promise<string | 'download' | undefined>;
 }
 
 export class EngineManager {
@@ -284,9 +288,18 @@ export class EngineManager {
     }
     const model = irModel(settings.modelId);
     const devices = deviceChain(settings.device);
-    const libraryDir = await this.ensureOvGenaiRuntime(paths, settings);
+    const runtimeRoot = await this.ensureOvGenaiRuntime(paths, settings);
+    const libDir = ovGenaiLibDir(this.host.platform, runtimeRoot);
+    // The Windows runner links TBB directly; its dlls sit outside the OpenVINO bin dir.
+    const tbbDir = ovGenaiTbbDir(this.host.platform, runtimeRoot);
+    const libraryDirs = tbbDir !== undefined && existsSync(tbbDir) ? [libDir, tbbDir] : [libDir];
     const modelPath = await this.ensureIrModel(paths, model, settings);
     this.host.onStatus({ status: 'starting' });
+    // Support diagnostics: the runner reports its own app version and the
+    // OpenVINO GenAI version it was built against (undefined for old runners
+    // without --version).
+    const versions = await (this.host.probeRunnerVersion ?? probeRunnerVersion)(runnerPath, libraryDirs, this.host);
+    this.host.log(`ovgenai runner version: app=${versions?.app ?? 'unknown'} ovGenai=${versions?.ovGenai ?? 'unknown'}`);
 
     const contextLength = devices[0] === 'npu' || settings.device === 'npu'
       ? Math.min(model.contextLength, settings.npuContextLength > 0 ? settings.npuContextLength : NPU_CONTEXT_LENGTH)
@@ -303,7 +316,7 @@ export class EngineManager {
             modelPath,
             device: activeDevice.toUpperCase(),
             contextLength,
-            libraryDir,
+            libraryDirs,
             onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
             onStderr: (line) => this.host.log(`ovgenai: ${line}`),
           },
@@ -416,23 +429,41 @@ export class EngineManager {
     return modelDir;
   }
 
+  /** Returns the unpacked OpenVINO GenAI runtime root (lib dirs derive from it). */
   private async ensureOvGenaiRuntime(paths: EnginePaths, settings: EngineManagerSettings): Promise<string> {
+    const libDirOf = (root: string): string => ovGenaiLibDir(this.host.platform, root);
     if (settings.distroDir.length > 0) {
-      const libDir = ovGenaiLibDir(this.host.platform, settings.distroDir);
-      if (!existsSync(libDir)) {
-        throw new Error(`Local OpenVINO GenAI distribution has an unexpected layout: no runtime libraries under ${libDir}.`);
+      if (!existsSync(libDirOf(settings.distroDir))) {
+        throw new Error(`Local OpenVINO GenAI distribution has an unexpected layout: no runtime libraries under ${libDirOf(settings.distroDir)}.`);
       }
-      return libDir;
+      return settings.distroDir;
     }
-    const asset = resolveOvGenaiAsset(this.host.platform, this.host.arch, OV_GENAI_VERSION, settings.openvinoUrl);
+    // Version negotiation: the runner is compiled against a specific OpenVINO
+    // GenAI version and crashes on a mismatched runtime, so the backend embeds
+    // its version in the binary and we download exactly that archive. Runners
+    // without the marker (older builds) fall back to the pinned latest.
+    const version = runnerOvGenaiVersion(settings.ovgenaiRunnerPath) ?? OV_GENAI_VERSION;
+    const asset = resolveOvGenaiAsset(this.host.platform, this.host.arch, version, settings.openvinoUrl);
     if (asset === undefined) {
       throw new Error(`No OpenVINO GenAI runtime archive for ${this.host.platform}/${this.host.arch}.`);
     }
     const topDir = asset.fileName.replace(/\.(zip|tar\.gz)$/, '');
-    const unpackedRoot = join(paths.engineRoot, `ov-genai-${OV_GENAI_VERSION}`, topDir);
-    const libDir = ovGenaiLibDir(this.host.platform, unpackedRoot);
-    if (existsSync(libDir)) {
-      return libDir;
+    const runtimeRoot = join(paths.engineRoot, `ov-genai-${version}`, topDir);
+    if (existsSync(libDirOf(runtimeRoot))) {
+      return runtimeRoot;
+    }
+    const ask = this.host.askDistroOrDownload;
+    if (ask !== undefined) {
+      const choice = await ask('ovgenai');
+      if (choice === undefined) {
+        throw new DOMException('Canceled', 'AbortError');
+      }
+      if (choice !== 'download') {
+        if (!existsSync(libDirOf(choice))) {
+          throw new Error(`Local OpenVINO GenAI distribution has an unexpected layout: no runtime libraries under ${libDirOf(choice)}.`);
+        }
+        return choice;
+      }
     }
     this.host.onStatus({ status: 'preparing-engine' });
     await mkdir(paths.engineRoot, { recursive: true });
@@ -443,12 +474,12 @@ export class EngineManager {
       signal: this.activeSignal,
       onProgress: (p) => this.host.onProgress?.('engine', p),
     });
-    await (this.host.extract ?? extractArchive)({ archivePath, destDir: join(paths.engineRoot, `ov-genai-${OV_GENAI_VERSION}`), signal: this.activeSignal });
+    await (this.host.extract ?? extractArchive)({ archivePath, destDir: join(paths.engineRoot, `ov-genai-${version}`), signal: this.activeSignal });
     await rm(archivePath, { force: true });
-    if (!existsSync(libDir)) {
-      throw new Error(`OpenVINO runtime libraries not found after unpacking (${libDir}).`);
+    if (!existsSync(libDirOf(runtimeRoot))) {
+      throw new Error(`OpenVINO runtime libraries not found after unpacking (${libDirOf(runtimeRoot)}).`);
     }
-    return libDir;
+    return runtimeRoot;
   }
 
   private async ensureIrModel(paths: EnginePaths, model: ReturnType<typeof irModel>, settings: EngineManagerSettings): Promise<string> {
@@ -502,6 +533,20 @@ export class EngineManager {
     if (asset === undefined) {
       throw new Error(`No llama.cpp release asset for ${this.host.platform}/${this.host.arch}.`);
     }
+    const ask = this.host.askDistroOrDownload;
+    if (ask !== undefined) {
+      const choice = await ask('llama.cpp');
+      if (choice === undefined) {
+        throw new DOMException('Canceled', 'AbortError');
+      }
+      if (choice !== 'download') {
+        const binary = findBinary(choice, this.host.platform, 'llama-server');
+        if (binary === undefined) {
+          throw new Error(`Local llama.cpp distribution has an unexpected layout: no llama-server binary in ${choice}.`);
+        }
+        return binary;
+      }
+    }
     this.host.onStatus({ status: 'preparing-engine' });
     await mkdir(paths.engineRoot, { recursive: true });
     const archivePath = join(paths.engineRoot, asset.fileName);
@@ -552,12 +597,16 @@ function modelFilePath(paths: EnginePaths, modelId: string): string {
   return model !== undefined ? join(paths.modelDir, model.fileName) : join(paths.modelDir, modelId);
 }
 
+// Directory names come from the catalog (unique per model + format) so models
+// from different families never share a folder.
 function irModelDir(paths: EnginePaths, modelId: string): string {
-  return join(paths.modelDir, `${modelId}-int8-ov`);
+  const spec = isLocalModelId(modelId) ? irModel(modelId) : undefined;
+  return join(paths.modelDir, spec?.dirName ?? `${modelId}-int8-ov`);
 }
 
 function mlxModelDir(paths: EnginePaths, modelId: string): string {
-  return join(paths.modelDir, `${modelId}-mlx`);
+  const spec = isLocalModelId(modelId) ? mlxModel(modelId) : undefined;
+  return join(paths.modelDir, spec?.dirName ?? `${modelId}-mlx`);
 }
 
 function findBinary(dir: string, platform: NodeJS.Platform, kind: 'llama-server'): string | undefined {

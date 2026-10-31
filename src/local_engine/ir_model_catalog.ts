@@ -7,6 +7,10 @@ export interface IrModelSpec {
   repo: string;
   /** Files that must be present in the model directory for the pipeline to load. */
   files: string[];
+  /** Download directory name under the models dir (unique per model+format). */
+  dirName: string;
+  /** Built-in FIM template id matching the model family. */
+  template: string;
   approximateBytes: number;
   contextLength: number;
 }
@@ -27,6 +31,8 @@ const IR_CATALOG: Record<LocalModelId, IrModelSpec> = {
     label: 'Qwen2.5-Coder 0.5B (OpenVINO IR)',
     repo: 'OpenVINO/Qwen2.5-Coder-0.5B-Instruct-int8-ov',
     files: IR_FILES,
+    dirName: '0.5b-int8-ov',
+    template: 'qwen2',
     approximateBytes: 515_000_000,
     contextLength: 32_768,
   },
@@ -35,6 +41,8 @@ const IR_CATALOG: Record<LocalModelId, IrModelSpec> = {
     label: 'Qwen2.5-Coder 1.5B (OpenVINO IR)',
     repo: 'OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov',
     files: IR_FILES,
+    dirName: '1.5b-int8-ov',
+    template: 'qwen2',
     approximateBytes: 1_570_000_000,
     contextLength: 32_768,
   },
@@ -43,6 +51,8 @@ const IR_CATALOG: Record<LocalModelId, IrModelSpec> = {
     label: 'Qwen2.5-Coder 3B (OpenVINO IR)',
     repo: 'OpenVINO/Qwen2.5-Coder-3B-Instruct-int8-ov',
     files: IR_FILES,
+    dirName: '3b-int8-ov',
+    template: 'qwen2',
     approximateBytes: 3_110_000_000,
     contextLength: 32_768,
   },

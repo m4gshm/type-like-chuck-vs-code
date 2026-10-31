@@ -3,7 +3,7 @@ import { PassThrough } from 'stream';
 import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, rm, writeFile } from 'fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus } from '../../local_engine/engine_manager';
 import { OV_GENAI_VERSION, ovGenaiLibDir } from '../../local_engine/ov_runtime';
@@ -96,6 +96,9 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
     }) as never,
     delayImpl: async () => undefined,
     pickPort: async () => 0,
+    // Avoids the real --version probe: the fake engine child never closes, and
+    // the probe process would otherwise become spawned[0].
+    probeRunnerVersion: async () => ({ app: 'test-runner', ovGenai: OV_GENAI_VERSION }),
   };
   return { host, statuses, downloads, spawned, root };
 };
@@ -164,6 +167,29 @@ describe('EngineManager (ovgenai engine)', () => {
     expect(last(f.statuses).status).toBe('error');
   });
 
+  it('cancels the preparation when the distro question is dismissed', async () => {
+    const f = await makeFixture();
+    await rm(join(f.root, 'engine'), { recursive: true, force: true }); // no runtime present
+    f.host.askDistroOrDownload = async () => undefined;
+    const manager = new EngineManager(f.host);
+    await expect(manager.ensureReady()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(f.downloads).toHaveLength(0);
+  });
+
+  it('uses the folder picked in the distro question instead of downloading', async () => {
+    const f = await makeFixture();
+    await rm(join(f.root, 'engine'), { recursive: true, force: true }); // no runtime present
+    const picked = await mkdtemp(join(tmpdir(), 'tlc-ov-picked-'));
+    await mkdir(join(picked, 'runtime', 'lib', 'intel64'), { recursive: true });
+    await writeFile(join(picked, 'runtime', 'lib', 'intel64', 'libopenvino.so'), 'lib');
+    f.host.askDistroOrDownload = async () => picked;
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(status).toMatchObject({ status: 'ready' });
+    expect(f.downloads).toHaveLength(0);
+    await manager.stop();
+  });
+
   it('uses a local OpenVINO GenAI distribution folder and skips the runtime download', async () => {
     const distro = await mkdtemp(join(tmpdir(), 'tlc-ov-distro-'));
     const libDir = ovGenaiLibDir('linux', distro);
@@ -183,6 +209,24 @@ describe('EngineManager (ovgenai engine)', () => {
     const f = await makeFixture({ distroDir: distro });
     await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/unexpected layout/);
     expect(last(f.statuses).status).toBe('error');
+  });
+
+  it('negotiates the runtime version from the runner binary marker', async () => {
+    // A runner built against a newer OpenVINO GenAI embeds its version; the
+    // engine must download/use the matching runtime folder, not the pin.
+    const runnerPath = join(await mkdtemp(join(tmpdir(), 'tlc-ovgenai-runner-')), 'tlc-ovgenai-runner');
+    await writeFile(runnerPath, Buffer.concat([Buffer.alloc(64, 0x90), Buffer.from('ovgenai-runtime-version: 2026.5.0.0\0')]));
+    const f = await makeFixture({ ovgenaiRunnerPath: runnerPath });
+    const negotiated = `ov-genai-2026.5.0.0`;
+    const libDir = ovGenaiLibDir('linux', join(f.root, 'engine', negotiated, 'openvino_genai_ubuntu22_2026.5.0.0_x86_64'));
+    await mkdir(libDir, { recursive: true });
+    await writeFile(join(libDir, 'libopenvino.so'), 'lib');
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(status).toMatchObject({ status: 'ready' });
+    expect(f.downloads).toHaveLength(0);
+    expect(f.spawned[0].env.LD_LIBRARY_PATH).toContain(libDir);
+    await manager.stop();
   });
 
   it('downloads the runtime archive when the lib dir is missing', async () => {

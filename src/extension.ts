@@ -14,7 +14,7 @@ import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 import { EngineManager, EngineStatus, ResetTarget } from './local_engine/engine_manager';
 import { DownloadProgress } from './local_engine/downloader';
-import { localModelDiskDialog, localModelPickerItems } from './local_engine/model_picker';
+import { localModelDiskDialog, localModelPickerItems, localModelSpec } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { probeCapability } from './local_engine/capability';
 
@@ -80,13 +80,14 @@ export function activate(context: vscode.ExtensionContext): void {
   /**
    * Switches the prompt template to the built-in matching the model family
    * (unless the user chose "custom" or the match is already selected).
+   * `template` (from the local model catalog) overrides name matching.
    */
-  const applyTemplateSuggestion = async (modelId: string): Promise<void> => {
+  const applyTemplateSuggestion = async (modelId: string, template?: string): Promise<void> => {
     const selected = config().promptTemplate;
     if (selected === 'custom') {
       return;
     }
-    const suggestion = pickTemplateForModel(modelId);
+    const suggestion = template ?? pickTemplateForModel(modelId);
     if (suggestion === undefined || suggestion === selected) {
       return;
     }
@@ -147,6 +148,35 @@ export function activate(context: vscode.ExtensionContext): void {
       context.globalStorageUri.fsPath,
     );
   let engineProgressListener: ((kind: 'engine' | 'model', progress: DownloadProgress) => void) | undefined;
+  // The picked folder persists as tlc.local.distroDir so later starts skip the question.
+  const askDistroOrDownload = async (kind: 'ovgenai' | 'llama.cpp'): Promise<string | 'download' | undefined> => {
+    const kindLabel = kind === 'ovgenai' ? 'OpenVINO GenAI runtime' : 'llama.cpp build';
+    const chosen = await vscode.window.showQuickPick(
+      [
+        { label: '$(cloud-download) Download', detail: `Download the ${kindLabel} archive on demand`, value: 'download' as const },
+        { label: '$(folder-opened) Use an existing folder…', detail: `Pick an unpacked ${kindLabel} on disk (saved to tlc.local.distroDir)`, value: 'disk' as const },
+      ],
+      { title: 'TLC: Local Engine Runtime', placeHolder: `Download the ${kindLabel} or use an existing unpacked distribution?` },
+    );
+    if (chosen === undefined) {
+      return undefined;
+    }
+    if (chosen.value === 'download') {
+      return 'download';
+    }
+    const folder = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      title: 'TLC: Select Unpacked Engine Distribution',
+    });
+    if (folder?.[0] === undefined) {
+      return undefined;
+    }
+    const dir = folder[0].fsPath;
+    await vscode.workspace.getConfiguration('tlc').update('local.distroDir', dir, vscode.ConfigurationTarget.Global);
+    return dir;
+  };
   const engineManager = new EngineManager({
     platform: process.platform,
     arch: process.arch,
@@ -177,6 +207,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     log: trace,
     warn: warn,
+    askDistroOrDownload,
   });
 
   /**
@@ -184,6 +215,16 @@ export function activate(context: vscode.ExtensionContext): void {
    * points at a dead local URL (never at the remote server); once ready it
    * points at the engine and uses its per-session API key.
    */
+  /** Human labels for the current local engine kind and model (progress + status bar). */
+  const localKindLabel = (): string => {
+    const kind = config().localEngineKind;
+    return kind === 'ovgenai' ? 'ovgenai runner' : kind === 'mlx' ? 'mlx runner' : 'llama-server';
+  };
+  const localModelName = (): string => localModelSpec(config().localEngineKind, config().localModel)?.label ?? 'model';
+  // The ovgenai "engine" download is the OpenVINO runtime, not the bundled runner.
+  const localEnginePhaseLabel = (): string =>
+    config().localEngineKind === 'ovgenai' ? 'OpenVINO runtime' : localKindLabel();
+
   const handleEngineStatus = (status: EngineStatus): void => {
     if (status.status === 'ready') {
       const runner = engineManager.stdioRunner();
@@ -208,13 +249,11 @@ export function activate(context: vscode.ExtensionContext): void {
       statusBar.setEngine(`$(error) engine: ${status.message}`);
       warn(`TLC local engine error: ${status.message}`);
     } else {
-      const kind = config().localEngineKind;
-      const kindLabel = kind === 'ovgenai' ? 'ovgenai runner' : kind === 'mlx' ? 'mlx runner' : 'llama-server';
       const label = status.status === 'preparing-engine'
-        ? 'downloading engine…'
+        ? `downloading ${localEnginePhaseLabel()}…`
         : status.status === 'preparing-model'
-          ? 'downloading model…'
-          : `starting ${kindLabel}… (the first NPU start compiles the model — several minutes)`;
+          ? `downloading ${localModelName()}…`
+          : `starting ${localKindLabel()}… (the first NPU start compiles the model — several minutes)`;
       engineStageLabel = label;
       statusBar.setEngine(`$(loading~spin) ${label}`);
     }
@@ -276,7 +315,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const total = progress.totalBytes;
         const part = `${formatBytes(progress.downloadedBytes)}${total !== undefined ? ` / ${formatBytes(total)}` : ''}`;
-        const phaseLabel = progressKind === 'engine' ? 'llama.cpp' : 'model';
+        const phaseLabel = progressKind === 'engine' ? localEnginePhaseLabel() : `model: ${localModelName()}`;
         bar.report({ message: `${phaseLabel}: ${part}` });
       }, 200);
       try {
@@ -297,14 +336,27 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   };
 
+  /** Local model template hint: catalog spec (label + template id) for
+   * catalog models; for From-disk models the family is matched by the path
+   * name since the catalog id may be stale. */
+  const localModelHint = (): { modelId: string; template?: string } => {
+    const modelPath = config().localModelPath;
+    if (modelPath.length > 0) {
+      return { modelId: modelPath };
+    }
+    const spec = localModelSpec(config().localEngineKind, config().localModel);
+    return spec !== undefined ? { modelId: spec.label, template: spec.template } : { modelId: config().localModel };
+  };
+
   const applyMode = async (): Promise<void> => {
     if (config().mode === 'local') {
       localEndpoint = LOCAL_ENDPOINT_NOT_READY;
       client.refresh();
       await client.setApiKey(undefined);
-      // The local models are all Qwen2.5-Coder: make the FIM template follow
-      // them (pickTemplateForModel matches the qwen family), unless custom.
-      await applyTemplateSuggestion(`Qwen2.5-Coder local ${config().localModel}`);
+      // Make the FIM template follow the selected model (spec-driven for
+      // catalog models, name-matched for From-disk), unless custom.
+      const hint = localModelHint();
+      await applyTemplateSuggestion(hint.modelId, hint.template);
       handleEngineStatus({ status: 'starting' });
       await runEngineTask('TLC: preparing the local engine', (signal) => managerEnsureReady(signal));
     } else {
@@ -783,7 +835,8 @@ export function activate(context: vscode.ExtensionContext): void {
         await applyMode();
       } else if (localTargetChanged) {
         if (config().mode === 'local') {
-          await applyTemplateSuggestion(`Qwen2.5-Coder local ${config().localModel}`);
+          const hint = localModelHint();
+          await applyTemplateSuggestion(hint.modelId, hint.template);
         }
         handleEngineStatus({ status: 'starting' });
         await runEngineTask('TLC: restarting the local engine', (signal) => managerEnsureReady(signal));

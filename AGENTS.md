@@ -71,7 +71,10 @@ completion backend is needed.
 ## Behavioral rules (keep docs in sync!)
 
 When changing behavior, update `README.md` **and** the setting descriptions in
-`package.json` — past bugs were exactly README/description drift. Key invariants:
+`package.json` — past bugs were exactly README/description drift. Behavioral
+contracts also live in `openspec/` (active change:
+`openspec/changes/openvino-genai-stdio-runner`): spec-visible changes go through
+that change's delta specs. Key invariants:
 
 - **Template fields** (`tlc.prefix/suffix/middle/stop`): used only when
   `tlc.promptTemplate` is `custom`. Editing any field switches the selection to

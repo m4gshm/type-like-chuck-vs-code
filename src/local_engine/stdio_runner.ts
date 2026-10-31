@@ -9,8 +9,8 @@ export interface StdioRunnerStartOptions {
   /** Log prefix for diagnostics (defaults to the ovgenai runner). */
   label?: string;
   contextLength?: number;
-  /** Runtime library directory prepended to PATH (win) / LD_LIBRARY_PATH (linux). */
-  libraryDir?: string;
+  /** Runtime library directories prepended to PATH (win) / LD_LIBRARY_PATH (linux). */
+  libraryDirs?: string[];
   readyTimeoutMs?: number;
   onUnexpectedExit?: (message: string) => void;
   onStderr?: (line: string) => void;
@@ -24,6 +24,73 @@ export interface StdioRunnerDeps {
 
 export interface GenerateResult {
   finishReason: 'stop' | 'length' | 'cancel';
+}
+
+/** Versions reported by `--version` (the app version may be "unknown"). */
+export interface RunnerVersions {
+  /** Runner's own application version from git. */
+  app?: string;
+  /** OpenVINO GenAI version the runner was built against. */
+  ovGenai?: string;
+}
+
+/** Prepends the runtime library directories to the loader search path. */
+function prependLibraryDirs(env: NodeJS.ProcessEnv, dirs: string[], platform: NodeJS.Platform): void {
+  if (dirs.length === 0) {
+    return;
+  }
+  if (platform === 'win32') {
+    env.PATH = `${dirs.join(';')};${env.PATH ?? ''}`;
+  } else {
+    env.LD_LIBRARY_PATH = `${dirs.join(':')}${env.LD_LIBRARY_PATH ? `:${env.LD_LIBRARY_PATH}` : ''}`;
+  }
+}
+
+/**
+ * Runs `<runner> --version` (one short-lived process; needs the runtime
+ * libraries on the loader path, so only callable once the runtime is ready)
+ * and parses the version event. Undefined when the runner cannot start, hangs
+ * past the timeout, or predates the --version flag.
+ */
+export async function probeRunnerVersion(runnerPath: string, libraryDirs: string[] = [], deps: StdioRunnerDeps = {}): Promise<RunnerVersions | undefined> {
+  const spawnImpl = deps.spawnImpl ?? spawn;
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  prependLibraryDirs(env, libraryDirs, deps.platform ?? process.platform);
+  return await new Promise((resolve) => {
+    let out = '';
+    let done = false;
+    const finish = (result: RunnerVersions | undefined) => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve(result);
+      }
+    };
+    const child = spawnImpl(runnerPath, ['--version'], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    const timer = setTimeout(() => child.kill(), 10_000);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    child.on('error', () => finish(undefined));
+    child.on('close', () => {
+      for (const line of out.split('\n')) {
+        try {
+          const event = JSON.parse(line) as Record<string, unknown>;
+          if (event.type === 'version') {
+            finish({
+              app: typeof event.app === 'string' ? event.app : undefined,
+              ovGenai: typeof event.ovGenai === 'string' ? event.ovGenai : undefined,
+            });
+            return;
+          }
+        } catch {
+          // Not JSON — e.g. loader error text from an old runner; keep scanning.
+        }
+      }
+      finish(undefined);
+    });
+  });
 }
 
 /**
@@ -43,13 +110,7 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
   const label = options.label ?? 'ovgenai';
 
   const env: NodeJS.ProcessEnv = { ...process.env };
-  if (options.libraryDir !== undefined) {
-    if ((deps.platform ?? process.platform) === 'win32') {
-      env.PATH = `${options.libraryDir};${env.PATH ?? ''}`;
-    } else {
-      env.LD_LIBRARY_PATH = `${options.libraryDir}${env.LD_LIBRARY_PATH ? `:${env.LD_LIBRARY_PATH}` : ''}`;
-    }
-  }
+  prependLibraryDirs(env, options.libraryDirs ?? [], deps.platform ?? process.platform);
 
   const args = ['--model', options.modelPath];
   if (options.device !== undefined) {

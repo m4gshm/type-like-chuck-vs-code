@@ -155,7 +155,7 @@
               "Qwen2.5-Coder 1.5B (Q4_K_M GGUF, ~1.1 GB)",
               "Qwen2.5-Coder 3B (Q4_K_M GGUF, ~2.0 GB)"
             ],
-            "description": "Local engine model (local mode only). Use \"TLC: Select Local Model\" to pick; the model is downloaded on demand."
+            "description": "Local engine model (local mode only). Use \"TLC: Select Local Model\" to pick, or \"From disk…\" for a local model file/directory without downloading. The catalog ships Qwen2.5-Coder; each entry carries its own FIM template and download directory so other model families can be added without Qwen-specific assumptions."
           },
           "tlc.local.device": {
             "type": "string",
@@ -353,7 +353,7 @@
             "type": "string",
             "order": 5,
             "default": "",
-            "description": "Locally unpacked engine distribution to use instead of downloading (local mode only): an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build for llama.cpp. Ignored by the mlx kind. When set, no engine download happens."
+            "description": "Locally unpacked engine distribution to use instead of downloading (local mode only): an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build for llama.cpp. Ignored by the mlx kind. When set, no engine download happens; before the first download the extension offers picking such a folder."
           },
           "tlc.local.engineDir": {
             "type": "string",

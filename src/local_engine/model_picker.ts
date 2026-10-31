@@ -1,9 +1,16 @@
 import { LocalEngineKind } from '../config';
-import { LOCAL_MODEL_IDS, LocalModelId, localModel } from './model_catalog';
+import { isLocalModelId, LOCAL_MODEL_IDS, LocalModelId, localModel } from './model_catalog';
 import { irModel } from './ir_model_catalog';
 import { mlxModel } from './mlx_model_catalog';
 
 export type LocalModelPickValue = LocalModelId | 'disk';
+
+/** Catalog spec (label, FIM template, size) for a model id under an engine kind. */
+export function localModelSpec(kind: LocalEngineKind, id: string): { label: string; template: string; approximateBytes: number } | undefined {
+  return isLocalModelId(id)
+    ? (kind === 'ovgenai' ? irModel(id) : kind === 'mlx' ? mlxModel(id) : localModel(id))
+    : undefined;
+}
 
 export interface LocalModelPickItem {
   label: string;
@@ -14,10 +21,8 @@ export interface LocalModelPickItem {
 
 /** QuickPick items for TLC: Select Local Model, including the "From disk…" offline entry. */
 export function localModelPickerItems(kind: LocalEngineKind, currentId: string): LocalModelPickItem[] {
-  const modelOf = (id: LocalModelId) =>
-    kind === 'ovgenai' ? irModel(id) : kind === 'mlx' ? mlxModel(id) : localModel(id);
   const items: LocalModelPickItem[] = LOCAL_MODEL_IDS.map((id) => {
-    const model = modelOf(id);
+    const model = localModelSpec(kind, id)!;
     return {
       label: model.label,
       description: currentId === id ? '$(check) current' : undefined,
