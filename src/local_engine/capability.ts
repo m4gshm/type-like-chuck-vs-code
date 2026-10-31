@@ -42,12 +42,15 @@ function execOut(file: string, args: string[]): Promise<string> {
   });
 }
 
-/** Windows: WMI PnP device named "Intel(R) AI Boost". */
+/**
+ * Windows: the NPU shows up as "Intel(R) AI Boost" (older drivers) or
+ * "Intel(R) NPU" (newer drivers, PNPClass ComputeAccelerator).
+ */
 async function npuWindows(): Promise<boolean> {
   const out = await execOut('powershell', [
     '-NoProfile',
     '-Command',
-    'Get-CimInstance -Query "SELECT Name FROM Win32_PnPEntity WHERE Name LIKE \'%AI Boost%\'"',
+    'Get-CimInstance -Query "SELECT Name FROM Win32_PnPEntity WHERE Name LIKE \'%Intel(R) NPU%\' OR Name LIKE \'%AI Boost%\' OR PNPClass = \'ComputeAccelerator\'"',
   ]);
   return out.trim().length > 0;
 }
