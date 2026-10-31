@@ -34,7 +34,7 @@ class FakeChild extends EventEmitter {
 
 const baseOptions = (overrides: Partial<StdioRunnerStartOptions> = {}): StdioRunnerStartOptions => ({
   runnerPath: '/ext/binaries/ovgenai/linux-x64/tlc-ovgenai-runner',
-  modelPath: '/models/1.5b-int4-ov',
+  modelPath: '/models/1.5b-int8-ov',
   device: 'NPU',
   ...overrides,
 });
@@ -54,7 +54,7 @@ describe('startStdioRunner', () => {
   it('resolves on the ready event and exposes the reported device', async () => {
     const children: FakeChild[] = [];
     const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawnFake(children) });
-    expect(children[0].args).toEqual(['--model', '/models/1.5b-int4-ov', '--device', 'NPU']);
+    expect(children[0].args).toEqual(['--model', '/models/1.5b-int8-ov', '--device', 'NPU']);
     expect(runner.device).toBe('NPU');
     await runner.stop();
   });
@@ -196,9 +196,9 @@ describe('resolveOvGenaiAsset', () => {
 });
 
 describe('ir model catalog', () => {
-  it('exposes the OpenVINO int4-ov repos with the full file set', () => {
+  it('exposes the OpenVINO int8-ov repos with the full file set', () => {
     const spec = irModel('1.5b');
-    expect(spec.repo).toBe('OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int4-ov');
+    expect(spec.repo).toBe('OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov');
     expect(spec.files).toContain('openvino_model.xml');
     expect(spec.files).toContain('openvino_model.bin');
     expect(spec.files).toContain('openvino_tokenizer.xml');
@@ -206,6 +206,6 @@ describe('ir model catalog', () => {
   });
 
   it('builds resolve urls from the hf base', () => {
-    expect(irModelFileUrl(irModel('0.5b'), 'openvino_model.bin')).toBe('https://huggingface.co/OpenVINO/Qwen2.5-Coder-0.5B-Instruct-int4-ov/resolve/main/openvino_model.bin');
+    expect(irModelFileUrl(irModel('0.5b'), 'openvino_model.bin')).toBe('https://huggingface.co/OpenVINO/Qwen2.5-Coder-0.5B-Instruct-int8-ov/resolve/main/openvino_model.bin');
   });
 });

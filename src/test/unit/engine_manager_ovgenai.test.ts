@@ -6,7 +6,7 @@ import { join } from 'path';
 import { mkdir, writeFile } from 'fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus } from '../../local_engine/engine_manager';
-import { OV_GENAI_VERSION } from '../../local_engine/ov_runtime';
+import { OV_GENAI_VERSION, ovGenaiLibDir } from '../../local_engine/ov_runtime';
 
 class FakeRunnerChild extends EventEmitter {
   stdin = {
@@ -49,6 +49,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
     npuContextLength: 8192,
     releaseTag: 'b1',
     engineBinary: '',
+    distroDir: '',
     huggingfaceUrl: 'https://huggingface.co',
     githubUrl: 'https://github.com',
     openvinoUrl: 'https://storage.openvinotoolkit.org',
@@ -66,7 +67,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const libDir = join(engineRoot, `ov-genai-${OV_GENAI_VERSION}`, `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`, 'runtime', 'lib', 'intel64');
   await mkdir(libDir, { recursive: true });
   await writeFile(join(libDir, 'libopenvino.so'), 'lib');
-  const modelPath = join(modelDir, '1.5b-int4-ov');
+  const modelPath = join(modelDir, '1.5b-int8-ov');
   await mkdir(modelPath, { recursive: true });
   for (const file of ['openvino_model.xml', 'openvino_model.bin', 'openvino_tokenizer.xml', 'openvino_tokenizer.bin', 'openvino_detokenizer.xml', 'openvino_detokenizer.bin', 'tokenizer.json']) {
     await writeFile(join(modelPath, file), 'data');
@@ -110,7 +111,7 @@ describe('EngineManager (ovgenai engine)', () => {
     const status = await manager.ensureReady();
     expect(status).toMatchObject({ status: 'ready', model: '1.5b', device: 'gpu', baseUrl: '', apiKey: undefined });
     expect(f.downloads).toHaveLength(0);
-    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('1.5b-int4-ov'), '--device', 'GPU', '--ctx', '32768']);
+    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('1.5b-int8-ov'), '--device', 'GPU', '--ctx', '32768']);
     expect(manager.stdioRunner()).toBeDefined();
     await manager.stop();
   });
@@ -122,7 +123,7 @@ describe('EngineManager (ovgenai engine)', () => {
     const before = f.spawned.length;
     const settings = f.host.settings();
     (settings as { modelId: string }).modelId = '0.5b';
-    const modelPath = join(f.root, 'models', '0.5b-int4-ov');
+    const modelPath = join(f.root, 'models', '0.5b-int8-ov');
     const { mkdir: mk, writeFile: wf } = await import('fs/promises');
     await mk(modelPath, { recursive: true });
     for (const file of ['openvino_model.xml', 'openvino_model.bin', 'openvino_tokenizer.xml', 'openvino_tokenizer.bin', 'openvino_detokenizer.xml', 'openvino_detokenizer.bin', 'tokenizer.json']) {
@@ -160,6 +161,27 @@ describe('EngineManager (ovgenai engine)', () => {
     const f = await makeFixture({ ovgenaiRunnerPath: undefined });
     const manager = new EngineManager(f.host);
     await expect(manager.ensureReady()).rejects.toThrow('not bundled');
+    expect(last(f.statuses).status).toBe('error');
+  });
+
+  it('uses a local OpenVINO GenAI distribution folder and skips the runtime download', async () => {
+    const distro = await mkdtemp(join(tmpdir(), 'tlc-ov-distro-'));
+    const libDir = ovGenaiLibDir('linux', distro);
+    await mkdir(join(distro, 'runtime', 'lib', 'intel64'), { recursive: true });
+    await writeFile(join(distro, 'runtime', 'lib', 'intel64', 'libopenvino.so'), 'lib');
+    const f = await makeFixture({ distroDir: distro });
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(status).toMatchObject({ status: 'ready' });
+    expect(f.downloads).toHaveLength(0);
+    expect(f.spawned[0].env.LD_LIBRARY_PATH).toContain(libDir);
+    await manager.stop();
+  });
+
+  it('fails on a local OpenVINO GenAI distribution folder with an unexpected layout', async () => {
+    const distro = await mkdtemp(join(tmpdir(), 'tlc-ov-distro-empty-'));
+    const f = await makeFixture({ distroDir: distro });
+    await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/unexpected layout/);
     expect(last(f.statuses).status).toBe('error');
   });
 

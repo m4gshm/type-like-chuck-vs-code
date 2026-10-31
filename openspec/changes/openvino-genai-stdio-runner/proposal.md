@@ -14,6 +14,10 @@ The OVMS experiment (`local-engine-ovms`) failed: OVMS produced garbage inferenc
 - Add a stdio transport in the extension side so the existing FIM completion pipeline (prompt templates, single-line truncation, caching) works unchanged on top of the runner.
 - Extend model catalog with int4-ov IR model entries (xml+bin pair download with pair-existence checks, reusing the OVMS change's downloader extension).
 - Platform matrix (first iteration): Windows x64 and Linux (Ubuntu) x64, devices CPU / GPU (Intel Arc) / NPU.
+- **Capability probe**: the first-run engine recommendation chooses engine kind + device, not just device: Windows/Linux Intel x64 → `ovgenai` (NPU detected → NPU, else GPU→CPU via the runner's auto chain); macOS arm64 → `mlx`; macOS x64 → llama.cpp; other platforms → llama.cpp (GPU→CPU); unsupported → remote.
+- **Local distribution folders**: the user can point the extension at a locally unpacked engine distribution (`tlc.local.distroDir`) for the `ovgenai` (OpenVINO GenAI runtime) or llama.cpp kind — setup skips downloads and uses the folder in place.
+- **Model selection without re-download**: `TLC: Select Local Model` gains a "From disk…" entry that sets `tlc.local.modelPath` (GGUF file or IR `.xml`), so an already-available local model is used without downloading.
+- **Non-Qwen2.5-Coder warning**: selecting a model that is not a Qwen2.5-Coder catalog entry (via catalog or `tlc.local.modelPath`) shows a compatibility warning.
 - Remove/reject the OVMS engine kind path (`ovms` work is superseded; the OVMS change is archived without implementation).
 
 ## Capabilities
@@ -25,7 +29,7 @@ The OVMS experiment (`local-engine-ovms`) failed: OVMS produced garbage inferenc
 ### Modified Capabilities
 
 - `local-engine-runtime`: engine kind selection gains `ovgenai`; for this kind the lifecycle is a stdio child process (no HTTP endpoint isolation, no per-session key — the process is a private pipe); device selection maps to the OpenVINO GenAI device string; model/device switches restart the runner.
-- `local-engine-setup`: for the `ovgenai` kind the engine is a bundled binary plus a downloaded OpenVINO runtime library archive; models are `.xml`+`.bin` IR pairs instead of GGUF files.
+- `local-engine-setup`: for the `ovgenai` kind the engine is a bundled binary plus a downloaded OpenVINO runtime library archive; models are `.xml`+`.bin` IR pairs instead of GGUF files; a locally unpacked distribution folder can replace downloads; a local model file can be selected without downloading.
 - `local-engine-mode`: in local mode with `engineKind: "ovgenai"` completion requests are routed through the stdio transport instead of an HTTP endpoint; remote/llama.cpp behavior is unchanged.
 
 ## Impact

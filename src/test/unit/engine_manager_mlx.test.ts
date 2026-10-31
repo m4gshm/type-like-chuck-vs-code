@@ -50,6 +50,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
     npuContextLength: 8192,
     releaseTag: 'b1',
     engineBinary: '',
+    distroDir: '',
     huggingfaceUrl: 'https://huggingface.co',
     githubUrl: 'https://github.com',
     openvinoUrl: 'https://storage.openvinotoolkit.org',

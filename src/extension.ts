@@ -14,10 +14,7 @@ import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 import { EngineManager, EngineStatus, ResetTarget } from './local_engine/engine_manager';
 import { DownloadProgress } from './local_engine/downloader';
-import { LOCAL_MODEL_IDS, localModel } from './local_engine/model_catalog';
-import { irModel } from './local_engine/ir_model_catalog';
-import { mlxModel } from './local_engine/mlx_model_catalog';
-import { LocalModelId } from './local_engine/model_catalog';
+import { localModelDiskDialog, localModelPickerItems } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { probeCapability } from './local_engine/capability';
 
@@ -161,6 +158,7 @@ export function activate(context: vscode.ExtensionContext): void {
       npuContextLength: config().localNpuContextMaxLength,
       releaseTag: config().localLlamaCppRelease,
       engineBinary: config().localEngineBinary,
+      distroDir: config().localDistroDir,
       huggingfaceUrl: config().localHuggingfaceUrl,
       githubUrl: config().localGithubUrl,
       openvinoUrl: config().localOpenvinoUrl,
@@ -509,23 +507,31 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('tlc.selectLocalModel', async () => {
       const kind = config().localEngineKind;
-      const modelOf = (id: LocalModelId) =>
-        kind === 'ovgenai' ? irModel(id) : kind === 'mlx' ? mlxModel(id) : localModel(id);
       const chosen = await vscode.window.showQuickPick(
-        LOCAL_MODEL_IDS.map((id) => {
-          const model = modelOf(id);
-          return {
-            label: model.label,
-            description: config().localModel === id ? '$(check) current' : undefined,
-            detail: `${(model.approximateBytes / 1_000_000_000).toFixed(1)} GB download · id: ${id}`,
-            value: id,
-          };
-        }),
+        localModelPickerItems(kind, config().localModel),
         { title: 'TLC: Select Local Model', placeHolder: 'Model downloaded for the local engine' },
       );
-      if (chosen !== undefined) {
-        await vscode.workspace.getConfiguration('tlc').update('local.model', chosen.value, vscode.ConfigurationTarget.Global);
+      if (chosen === undefined) {
+        return;
       }
+      const tlc = vscode.workspace.getConfiguration('tlc');
+      if (chosen.value === 'disk') {
+        const dialog = localModelDiskDialog(kind);
+        const file = await vscode.window.showOpenDialog({
+          canSelectFiles: dialog.canSelectFiles,
+          canSelectFolders: dialog.canSelectFolders,
+          canSelectMany: false,
+          filters: dialog.filters,
+          title: 'TLC: Select Local Model From Disk',
+        });
+        if (file?.[0]) {
+          await tlc.update('local.modelPath', file[0].fsPath, vscode.ConfigurationTarget.Global);
+        }
+        return;
+      }
+      // A catalog model replaces any offline modelPath override.
+      await tlc.update('local.modelPath', undefined, vscode.ConfigurationTarget.Global);
+      await tlc.update('local.model', chosen.value, vscode.ConfigurationTarget.Global);
     }),
     vscode.commands.registerCommand('tlc.selectLocalDevice', async () => {
       const kind = config().localEngineKind;
@@ -855,32 +861,37 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const LOCAL_ENGINE_RECO_DISMISSED = 'localEngineRecommendationDismissed';
-  const deviceChosen = (): boolean => {
-    const inspect = vscode.workspace.getConfiguration('tlc').inspect('local.device');
+  const settingChosen = (key: string): boolean => {
+    const inspect = vscode.workspace.getConfiguration('tlc').inspect(key);
     return [inspect?.globalValue, inspect?.workspaceValue, inspect?.workspaceFolderValue, inspect?.defaultLanguageValue].some((v) => v !== undefined) === true;
   };
+  const deviceChosen = (): boolean => settingChosen('local.device');
+  const kindChosen = (): boolean => settingChosen('local.engineKind');
   const offerRecommendedLocalEngine = async (): Promise<void> => {
     const dismissed = context.globalState.get<boolean>(LOCAL_ENGINE_RECO_DISMISSED) === true;
     const rec = await probeCapability({ platform: process.platform, arch: process.arch });
     if (rec.kind === 'local') {
-      info(`TLC local engine recommendation: ${rec.device}. ${rec.reason}.`);
+      info(`TLC local engine recommendation: ${rec.engineKind} (${rec.device}). ${rec.reason}.`);
       if (dismissed) {
         return;
       }
-      const current = config();
-      const chosen = deviceChosen();
-      if (chosen && current.localDevice === rec.device) {
+      if (kindChosen()) {
         return;
       }
-      const header = chosen
-        ? `TLC: recommended local device`
-        : 'TLC: local device is not selected — the best match';
+      const current = config();
+      if (deviceChosen() && current.localDevice === rec.device && current.localEngineKind === rec.engineKind) {
+        return;
+      }
+      const header = deviceChosen()
+        ? `TLC: recommended local engine`
+        : 'TLC: no local engine selected — the best match';
       const choice = await vscode.window.showInformationMessage(
-        `${header} — ${rec.device.toUpperCase()}. ${rec.reason}`,
+        `${header} — ${rec.engineKind} (${rec.device === 'auto' ? 'auto device' : `${rec.device.toUpperCase()} device`}). ${rec.reason}`,
         'Apply Recommendation',
         "Don't Ask Again",
       );
       if (choice === 'Apply Recommendation') {
+        await vscode.workspace.getConfiguration('tlc').update('local.engineKind', rec.engineKind, vscode.ConfigurationTarget.Global);
         await vscode.workspace.getConfiguration('tlc').update('local.device', rec.device, vscode.ConfigurationTarget.Global);
       } else if (choice === "Don't Ask Again") {
         await context.globalState.update(LOCAL_ENGINE_RECO_DISMISSED, true);
@@ -891,7 +902,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const choice = await vscode.window.showInformationMessage(
-        `TLC: local device is not selected and no local acceleration is available on this platform (${rec.reason}); the remote API will be used.`,
+        `TLC: no local engine is selected and no local acceleration is available on this platform (${rec.reason}); the remote API will be used.`,
         "Don't Ask Again",
       );
       if (choice === "Don't Ask Again") {

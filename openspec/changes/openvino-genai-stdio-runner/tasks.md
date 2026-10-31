@@ -30,3 +30,11 @@ there); the plugin only imports its binaries (tasks 4.x).
 
 - [ ] 5.1 End-to-end smoke test on a dev host with real OpenVINO libs: ovgenai start → FIM completion → device switch → engine-kind switch llama.cpp ↔ ovgenai; confirm no HTTP port is opened and logs show `ovgenai:` lines (artifact: smoke-test notes; verified by running the extension dev host)
 - [x] 5.2 Run `npm run build` (test + lint) and fix any issues (artifact: green CI-style build; verified by `npm run build`)
+
+## 6. Engine recommendation, distro folders, model picker
+
+- [x] 6.1 Extend `probeCapability()` to detect CPU vendor (Intel) and NPU hardware (Windows WMI PnP "Intel(R) AI Boost"; Linux PCI vendor 0x8086 class 0x1180), `RecommendedPath` gains `engineKind`; recommendation matrix: Intel+NPU → ovgenai/NPU, Intel without NPU → ovgenai/auto, macOS arm64 → mlx, macOS x64/other → llama.cpp/auto, unsupported → remote; `offerRecommendedLocalEngine` applies engineKind + device on acceptance; unit tests for the platform/device matrix (artifact: `capability.ts` + `extension.ts` + tests; verified by `npm run unit`)
+- [x] 6.2 Add `tlc.local.distroDir` to `package.json` contributes and `config.ts`; the manager skips engine/runtime download for the matching kind when set (ovgenai: OpenVINO GenAI runtime folder, llama.cpp: unpacked build) and uses the folder in place; wrong layout → start failure naming the missing layout; unit tests for skip and mismatch (artifact: config + manager + tests; verified by `npm run unit`)
+- [x] 6.3 Add a "From disk…" entry to `TLC: Select Local Model` (file dialog: GGUF for llama.cpp, IR `.xml` for ovgenai) that sets `tlc.local.modelPath` without downloading, and clears the setting when a catalog model is chosen again; unit tests for picker contents (artifact: `extension.ts` + tests; verified by `npm run unit`)
+- [x] 6.4 Warn on engine start when the resolved model is not a Qwen2.5-Coder catalog entry (catalog selection or `tlc.local.modelPath`); unit test for the warning trigger (artifact: manager/startup + test; verified by `npm run unit`)
+- [x] 6.5 Sync the IR catalog to int8-ov (`OpenVINO/Qwen2.5-Coder-*-Instruct-int8-ov`, the backend-validated model) in `ir_model_catalog.ts` and the design/README notes; re-verify int8-ov repo sizes (artifact: catalog + tests; verified by `npm run unit`)

@@ -38,6 +38,8 @@ export interface EngineManagerSettings {
   releaseTag: string;
   /** Local engine binary to use instead of downloading (llama-server). */
   engineBinary: string;
+  /** Locally unpacked engine distribution used instead of downloading (OpenVINO GenAI runtime folder for ovgenai, llama.cpp build for llama.cpp). */
+  distroDir: string;
   huggingfaceUrl: string;
   githubUrl: string;
   openvinoUrl: string;
@@ -172,6 +174,10 @@ export class EngineManager {
       await this.stop();
       const paths = this.host.paths();
       const settings = this.host.settings();
+      if (settings.modelPath.length > 0) {
+        // All catalog models are Qwen2.5-Coder; anything else is unvalidated for FIM.
+        this.host.warn(`TLC local engine: model "${settings.modelPath}" is not a Qwen2.5-Coder catalog entry and was not validated for FIM completions — quality may vary.`);
+      }
       if (settings.engineKind === 'ovgenai') {
         return await this.startOvgenai(paths, settings);
       }
@@ -411,6 +417,13 @@ export class EngineManager {
   }
 
   private async ensureOvGenaiRuntime(paths: EnginePaths, settings: EngineManagerSettings): Promise<string> {
+    if (settings.distroDir.length > 0) {
+      const libDir = ovGenaiLibDir(this.host.platform, settings.distroDir);
+      if (!existsSync(libDir)) {
+        throw new Error(`Local OpenVINO GenAI distribution has an unexpected layout: no runtime libraries under ${libDir}.`);
+      }
+      return libDir;
+    }
     const asset = resolveOvGenaiAsset(this.host.platform, this.host.arch, OV_GENAI_VERSION, settings.openvinoUrl);
     if (asset === undefined) {
       throw new Error(`No OpenVINO GenAI runtime archive for ${this.host.platform}/${this.host.arch}.`);
@@ -471,6 +484,13 @@ export class EngineManager {
   private async ensureLlamaEngine(paths: EnginePaths, settings: EngineManagerSettings, variant: EngineVariant): Promise<string> {
     if (settings.engineBinary.length > 0) {
       return localEngineBinary(settings.engineBinary);
+    }
+    if (settings.distroDir.length > 0) {
+      const binary = findBinary(settings.distroDir, this.host.platform, 'llama-server');
+      if (binary === undefined) {
+        throw new Error(`Local llama.cpp distribution has an unexpected layout: no llama-server binary in ${settings.distroDir}.`);
+      }
+      return binary;
     }
     const tag = settings.releaseTag;
     const tagDir = join(paths.engineRoot, `${tag}-${variant}`);
@@ -533,7 +553,7 @@ function modelFilePath(paths: EnginePaths, modelId: string): string {
 }
 
 function irModelDir(paths: EnginePaths, modelId: string): string {
-  return join(paths.modelDir, `${modelId}-int4-ov`);
+  return join(paths.modelDir, `${modelId}-int8-ov`);
 }
 
 function mlxModelDir(paths: EnginePaths, modelId: string): string {

@@ -41,6 +41,7 @@ const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManager
   npuContextLength: 8192,
   releaseTag: 'b1',
   engineBinary: '',
+  distroDir: '',
   huggingfaceUrl: 'https://huggingface.co',
   githubUrl: 'https://github.com',
   openvinoUrl: 'https://storage.openvinotoolkit.org',
@@ -222,10 +223,46 @@ describe('EngineManager (llama.cpp engine)', () => {
     await new EngineManager(f.host).stop();
   });
 
+  it('uses a local llama.cpp distribution folder and skips the engine download', async () => {
+    const distro = await mkdtempActual(join((await import('os')).tmpdir(), 'tlc-distro-'));
+    await writeFile(join(distro, 'llama-server.exe'), 'bin');
+    const f = await makeFixture({}, { distroDir: distro });
+    const status = await new EngineManager(f.host).ensureReady();
+    expect(status).toMatchObject({ status: 'ready' });
+    expect(f.downloads.length).toBe(1);
+    expect(f.downloads[0].url).toContain('gguf');
+    expect(f.extracts.length).toBe(0);
+    expect(f.downloads.filter((d) => d.url.includes('vulkan') || d.url.includes('openvino'))).toHaveLength(0);
+    await new EngineManager(f.host).stop();
+  });
+
+  it('fails on a local llama.cpp distribution folder with an unexpected layout', async () => {
+    const distro = await mkdtempActual(join((await import('os')).tmpdir(), 'tlc-distro-empty-'));
+    const f = await makeFixture({}, { distroDir: distro });
+    await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/unexpected layout.*llama-server/s);
+    expect(last(f.statuses)).toMatchObject({ status: 'error' });
+  });
+
   it('reports an error when the local engine binary is missing', async () => {
     const f = await makeFixture({}, { engineBinary: join('nowhere', 'llama-server.exe') });
     await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/Local engine binary not found/);
     expect(last(f.statuses).status).toBe('error');
+  });
+
+  it('warns when the resolved model is not a Qwen2.5-Coder catalog entry', async () => {
+    const localFile = join((await import('os')).tmpdir(), `tlc-custom-${Date.now()}.gguf`);
+    await writeFile(localFile, 'gguf');
+    const warns: string[] = [];
+    const offline = await makeFixture({ warn: (m) => warns.push(m) }, { modelPath: localFile });
+    await new EngineManager(offline.host).ensureReady();
+    expect(warns.some((w) => /not a Qwen2\.5-Coder catalog entry/.test(w))).toBe(true);
+    await rm(localFile, { force: true });
+
+    const catalog = await makeFixture({ warn: (m) => warns.push(m) });
+    const countBefore = warns.length;
+    await new EngineManager(catalog.host).ensureReady();
+    expect(warns.slice(countBefore).some((w) => /not a Qwen2\.5-Coder catalog entry/.test(w))).toBe(false);
+    await new EngineManager(catalog.host).stop();
   });
 
   it('restart picks a changed model and skips its download when cached', async () => {

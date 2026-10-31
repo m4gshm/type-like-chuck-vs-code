@@ -16,6 +16,7 @@ function mkConfig(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     localLlamaCppRelease: 'b11935',
     localEngineDir: '',
     localEngineBinary: '',
+    localDistroDir: '',
     localModelDir: '',
     localModelCacheDir: '',
     localHuggingfaceUrl: 'https://huggingface.co',

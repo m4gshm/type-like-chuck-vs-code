@@ -22,7 +22,7 @@ The extension SHALL resolve a llama.cpp GitHub release asset matching the curren
 - **THEN** only the OpenVINO runtime archive is downloaded; the runner binary itself comes from the extension package
 
 ### Requirement: Model download with choice of size
-The extension SHALL offer the Qwen2.5-Coder GGUF models 0.5B, 1.5B and 3B via `TLC: Select Local Model`, download the chosen model file into global storage if missing, and remember the choice in `tlc.local.model` (default 1.5B). For the `ovgenai` kind the catalog SHALL offer the same sizes as native IR models (`.xml` + `.bin` pairs, int4), downloaded as a pair with pair-existence validation, and `tlc.local.modelPath` SHALL accept a local IR `.xml` file as an offline alternative.
+The extension SHALL offer the Qwen2.5-Coder GGUF models 0.5B, 1.5B and 3B via `TLC: Select Local Model`, download the chosen model file into global storage if missing, and remember the choice in `tlc.local.model` (default 1.5B). For the `ovgenai` kind the catalog SHALL offer the same sizes as native IR models (`.xml` + `.bin` pairs, int8-ov), downloaded as a pair with pair-existence validation, and `tlc.local.modelPath` SHALL accept a local IR `.xml` file as an offline alternative. The picker SHALL offer a "From disk…" entry (GGUF for llama.cpp, IR `.xml` for ovgenai) that sets `tlc.local.modelPath` and downloads nothing. When the resolved model is not a Qwen2.5-Coder catalog entry, the extension SHALL warn on engine start that the model was not validated for FIM completions; completions continue.
 
 #### Scenario: First model download
 - **WHEN** local mode is entered for the first time with no model present
@@ -39,3 +39,22 @@ The extension SHALL offer the Qwen2.5-Coder GGUF models 0.5B, 1.5B and 3B via `T
 #### Scenario: Offline IR model
 - **WHEN** `tlc.local.modelPath` points to an existing IR `.xml` file with its `.bin` alongside
 - **THEN** the `ovgenai` runner starts with that model and no download happens
+
+### Requirement: Local distribution folder
+The user SHALL be able to point the extension at a locally unpacked engine distribution via `tlc.local.distroDir` (empty by default). For the `ovgenai` kind the folder is an OpenVINO GenAI runtime archive directory; for llama.cpp it is an unpacked llama.cpp build. When set, the engine/runtime download for that kind SHALL be skipped and the folder used in place; the resolved path SHALL be written to the TLC output channel. A folder that does not match the expected layout SHALL fail engine start with a non-blocking error naming the missing layout; clearing the setting restores the standard download path.
+
+#### Scenario: Local distribution folder used
+- **WHEN** `tlc.local.distroDir` is set and local mode starts with the matching engine kind
+- **THEN** no engine/runtime download happens and the engine starts from the folder in place
+
+#### Scenario: Local distribution folder mismatched
+- **WHEN** `tlc.local.distroDir` is set but the folder does not contain the expected engine layout
+- **THEN** engine start fails with a non-blocking error naming the missing layout
+
+#### Scenario: Model picked from disk
+- **WHEN** the user picks the "From disk…" entry in `TLC: Select Local Model` and chooses a model file
+- **THEN** `tlc.local.modelPath` is set to that file, no download starts, and the engine restarts with it; selecting a catalog model again clears the setting
+
+#### Scenario: Non-Qwen2.5-Coder model selected
+- **WHEN** the resolved model (catalog selection or `tlc.local.modelPath`) is not a Qwen2.5-Coder catalog entry
+- **THEN** the engine starts and the user is warned that the model was not validated for FIM completions

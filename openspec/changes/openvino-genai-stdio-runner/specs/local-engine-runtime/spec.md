@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Engine kind selection
-The local engine kind SHALL be selectable via `tlc.local.engineKind` (`llama.cpp` or `ovgenai`, default `llama.cpp`); an unknown kind SHALL be reported as an engine error without downloading anything. User-facing messages SHALL name the engine precisely (e.g. "llama.cpp", "OpenVINO GenAI"), keeping "local engine" as the generic term. Selecting `ovgenai` on a platform without a bundled runner binary SHALL report the engine as unavailable for the platform.
+The local engine kind SHALL be selectable via `tlc.local.engineKind` (`llama.cpp`, `ovgenai` or `mlx`, default `llama.cpp`); an unknown kind SHALL be reported as an engine error without downloading anything. User-facing messages SHALL name the engine precisely (e.g. "llama.cpp", "OpenVINO GenAI", "MLX"), keeping "local engine" as the generic term. Selecting `ovgenai` on a platform without a bundled runner binary SHALL report the engine as unavailable for the platform.
 
 #### Scenario: Unknown engine kind
 - **WHEN** `tlc.local.engineKind` is set to a value the extension does not implement
@@ -12,6 +12,33 @@ The local engine kind SHALL be selectable via `tlc.local.engineKind` (`llama.cpp
 #### Scenario: OpenVINO GenAI kind selected
 - **WHEN** `tlc.local.engineKind` is set to `ovgenai` on Windows x64 or Linux x64
 - **THEN** the local engine runs as the bundled OpenVINO GenAI stdio runner with a native IR model
+
+### Requirement: First-run engine recommendation
+On the first local-mode entry (before `tlc.local.engineKind` or `tlc.local.device` is touched) the extension SHALL probe the platform, CPU vendor and NPU hardware and recommend an engine kind and device: Windows/Linux Intel x64 with an Intel NPU → `ovgenai` with NPU; Windows/Linux Intel x64 without NPU → `ovgenai` with `auto` (GPU→CPU resolved at start); macOS arm64 → `mlx`; macOS x64 and other supported platforms → llama.cpp with `auto`; unsupported → remote. The user SHALL be able to accept (applying engineKind and device to settings) or dismiss the recommendation; a dismissal is remembered per session. GPU presence is not probed at extension level — the engine's start-fallback chain resolves GPU→CPU.
+
+#### Scenario: Intel NPU detected
+- **WHEN** the first-run recommendation runs on Windows/Linux Intel x64 with an Intel NPU present
+- **THEN** the recommendation is `ovgenai` with NPU, and accepting it applies both engineKind and device
+
+#### Scenario: Intel without NPU
+- **WHEN** the first-run recommendation runs on Windows/Linux Intel x64 without an NPU
+- **THEN** the recommendation is `ovgenai` with `auto` (the runner resolves GPU→CPU at start)
+
+#### Scenario: macOS arm64
+- **WHEN** the first-run recommendation runs on macOS arm64
+- **THEN** the recommendation is `mlx`
+
+#### Scenario: Non-Intel platform
+- **WHEN** the first-run recommendation runs on Windows/Linux AMD x64 (or any other non-Intel platform)
+- **THEN** the recommendation is llama.cpp with `auto`
+
+#### Scenario: Recommendation accepted
+- **WHEN** the user accepts the recommendation
+- **THEN** `tlc.local.engineKind` and `tlc.local.device` are updated to the recommended values and the engine starts with them
+
+#### Scenario: Recommendation dismissed
+- **WHEN** the user dismisses the recommendation
+- **THEN** no settings change and the notification does not re-appear until the next session
 
 ### Requirement: Engine process lifecycle
 The extension SHALL start the downloaded llama.cpp server as a child process bound to a free localhost port, wait until its OpenAI-compatible endpoint responds, and terminate the process when the extension deactivates or the mode switches to remote. For the `ovgenai` engine kind the lifecycle SHALL instead be a private stdio child process: the extension spawns the bundled runner with the model path, treats the runner as ready when it reports readiness on stdout, and terminates the process on the same shutdown triggers. The stdio runner SHALL NOT open any network port and SHALL NOT require an API key (its stdin/stdout pipes are private to the extension).

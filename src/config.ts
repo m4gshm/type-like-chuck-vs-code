@@ -17,6 +17,7 @@ export interface ExtensionConfig {
   localLlamaCppRelease: string;
   localEngineDir: string;
   localEngineBinary: string;
+  localDistroDir: string;
   localModelDir: string;
   localModelCacheDir: string;
   localHuggingfaceUrl: string;
@@ -91,6 +92,7 @@ export function readConfig(): ExtensionConfig {
     localLlamaCppRelease: c.get<string>('local.llamaCppRelease', 'b11935'),
     localEngineDir: c.get<string>('local.engineDir', ''),
     localEngineBinary: c.get<string>('local.engineBinary', ''),
+    localDistroDir: c.get<string>('local.distroDir', ''),
     localModelDir: c.get<string>('local.modelDir', ''),
     localModelCacheDir: c.get<string>('local.modelCacheDir', ''),
     localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', 'https://huggingface.co'),
