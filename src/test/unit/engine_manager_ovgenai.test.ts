@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus } from '../../local_engine/engine_manager';
+import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_manager';
 import { OV_GENAI_VERSION, ovGenaiLibDir } from '../../local_engine/ov_runtime';
 
 class FakeRunnerChild extends EventEmitter {
@@ -63,11 +63,12 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const engineRoot = join(root, 'engine');
   await mkdir(modelDir, { recursive: true });
   await mkdir(engineRoot, { recursive: true });
-  // Pre-create the runtime libs and the IR model so no download is needed.
-  const libDir = join(engineRoot, `ov-genai-${OV_GENAI_VERSION}`, `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`, 'runtime', 'lib', 'intel64');
+  // Pre-create the runtime libs (flat install layout) and the IR model so no
+  // download is needed.
+  const libDir = join(engineRoot, `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`, 'runtime', 'lib', 'intel64');
   await mkdir(libDir, { recursive: true });
   await writeFile(join(libDir, 'libopenvino.so'), 'lib');
-  const modelPath = join(modelDir, '1.5b-int8-ov');
+  const modelPath = join(modelDir, '1.5b-nf4-ov');
   await mkdir(modelPath, { recursive: true });
   for (const file of ['openvino_model.xml', 'openvino_model.bin', 'openvino_tokenizer.xml', 'openvino_tokenizer.bin', 'openvino_detokenizer.xml', 'openvino_detokenizer.bin', 'tokenizer.json']) {
     await writeFile(join(modelPath, file), 'data');
@@ -114,7 +115,7 @@ describe('EngineManager (ovgenai engine)', () => {
     const status = await manager.ensureReady();
     expect(status).toMatchObject({ status: 'ready', model: '1.5b', device: 'gpu', baseUrl: '', apiKey: undefined });
     expect(f.downloads).toHaveLength(0);
-    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('1.5b-int8-ov'), '--device', 'GPU', '--ctx', '32768']);
+    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('1.5b-nf4-ov'), '--device', 'GPU', '--ctx', '32768', '--prop', expect.stringMatching(/^CACHE_DIR=.*gpu-blobs$/)]);
     expect(manager.stdioRunner()).toBeDefined();
     await manager.stop();
   });
@@ -126,7 +127,7 @@ describe('EngineManager (ovgenai engine)', () => {
     const before = f.spawned.length;
     const settings = f.host.settings();
     (settings as { modelId: string }).modelId = '0.5b';
-    const modelPath = join(f.root, 'models', '0.5b-int8-ov');
+    const modelPath = join(f.root, 'models', '0.5b-nf4-ov');
     const { mkdir: mk, writeFile: wf } = await import('fs/promises');
     await mk(modelPath, { recursive: true });
     for (const file of ['openvino_model.xml', 'openvino_model.bin', 'openvino_tokenizer.xml', 'openvino_tokenizer.bin', 'openvino_detokenizer.xml', 'openvino_detokenizer.bin', 'tokenizer.json']) {
@@ -138,15 +139,21 @@ describe('EngineManager (ovgenai engine)', () => {
     await manager.stop();
   });
 
-  it('falls back to CPU when the requested device fails to start', async () => {
+  it('falls back through gpu to cpu when npu fails to start', async () => {
     const f = await makeFixture({ device: 'npu' });
-    let first = true;
+    const failed: string[] = [];
     f.host.spawnImpl = ((_path: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
       const child = new FakeRunnerChild(args, opts.env);
       f.spawned.push(child);
+      const device = args[args.indexOf('--device') + 1];
+      if (device === 'NPU') {
+        expect(args[args.indexOf('--prop') + 1]).toMatch(/^CACHE_DIR=.*npu-blobs$/);
+      } else if (device === 'GPU') {
+        expect(args[args.indexOf('--prop') + 1]).toMatch(/^CACHE_DIR=.*gpu-blobs$/);
+      }
       setTimeout(() => {
-        if (first && args.includes('NPU')) {
-          first = false;
+        if (device !== 'CPU') {
+          failed.push(device);
           child.emit('close', 1);
           return;
         }
@@ -157,6 +164,7 @@ describe('EngineManager (ovgenai engine)', () => {
     const manager = new EngineManager(f.host);
     const status = await manager.ensureReady();
     expect(status).toMatchObject({ status: 'ready', device: 'cpu' });
+    expect(failed).toEqual(['NPU', 'GPU']);
     await manager.stop();
   });
 
@@ -173,6 +181,7 @@ describe('EngineManager (ovgenai engine)', () => {
     f.host.askDistroOrDownload = async () => undefined;
     const manager = new EngineManager(f.host);
     await expect(manager.ensureReady()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(f.statuses.map((s) => s.status)).toEqual([ENGINE_STATUS.awaitingInput]);
     expect(f.downloads).toHaveLength(0);
   });
 
@@ -217,8 +226,8 @@ describe('EngineManager (ovgenai engine)', () => {
     const runnerPath = join(await mkdtemp(join(tmpdir(), 'tlc-ovgenai-runner-')), 'tlc-ovgenai-runner');
     await writeFile(runnerPath, Buffer.concat([Buffer.alloc(64, 0x90), Buffer.from('ovgenai-runtime-version: 2026.5.0.0\0')]));
     const f = await makeFixture({ ovgenaiRunnerPath: runnerPath });
-    const negotiated = `ov-genai-2026.5.0.0`;
-    const libDir = ovGenaiLibDir('linux', join(f.root, 'engine', negotiated, 'openvino_genai_ubuntu22_2026.5.0.0_x86_64'));
+    const negotiated = `openvino_genai_ubuntu22_2026.5.0.0_x86_64`;
+    const libDir = ovGenaiLibDir('linux', join(f.root, 'engine', negotiated));
     await mkdir(libDir, { recursive: true });
     await writeFile(join(libDir, 'libopenvino.so'), 'lib');
     const manager = new EngineManager(f.host);
@@ -231,18 +240,36 @@ describe('EngineManager (ovgenai engine)', () => {
 
   it('downloads the runtime archive when the lib dir is missing', async () => {
     const f = await makeFixture();
-    const { rm } = await import('fs/promises');
-    const libDir = join(f.root, 'engine', `ov-genai-${OV_GENAI_VERSION}`, `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`, 'runtime', 'lib', 'intel64');
-    await rm(libDir, { recursive: true, force: true });
+    const { readdir, rm } = await import('fs/promises');
+    const topDir = `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`;
+    await rm(join(f.root, 'engine', topDir), { recursive: true, force: true });
     f.host.extract = (async (opts: { archivePath: string; destDir: string }) => {
-      const lib = join(opts.destDir, `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`, 'runtime', 'lib', 'intel64');
+      const lib = join(opts.destDir, topDir, 'runtime', 'lib', 'intel64');
       const { mkdir: mk, writeFile: wf } = await import('fs/promises');
       await mk(lib, { recursive: true });
       await wf(join(lib, 'libopenvino.so'), 'lib');
     }) as never;
     const manager = new EngineManager(f.host);
     await manager.ensureReady();
-    expect(f.downloads.some((d) => d.url.includes(`openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64.tar.gz`))).toBe(true);
+    expect(f.downloads.some((d) => d.url.includes(`${topDir}.tar.gz`))).toBe(true);
+    // The archive's top folder is moved up: a single-level install, no staging left.
+    expect(f.spawned[0].env.LD_LIBRARY_PATH).toContain(ovGenaiLibDir('linux', join(f.root, 'engine', topDir)));
+    expect((await readdir(join(f.root, 'engine'))).filter((e) => e.includes('staging') || e.startsWith('ov-genai-'))).toEqual([]);
+    await manager.stop();
+  });
+
+  it('keeps using a legacy two-level install without re-downloading', async () => {
+    const f = await makeFixture();
+    const { mkdir, rename } = await import('fs/promises');
+    const topDir = `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`;
+    await mkdir(join(f.root, 'engine', `ov-genai-${OV_GENAI_VERSION}`), { recursive: true });
+    await rename(join(f.root, 'engine', topDir), join(f.root, 'engine', `ov-genai-${OV_GENAI_VERSION}`, topDir));
+    const legacyLibDir = ovGenaiLibDir('linux', join(f.root, 'engine', `ov-genai-${OV_GENAI_VERSION}`, topDir));
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(status).toMatchObject({ status: 'ready' });
+    expect(f.downloads).toHaveLength(0);
+    expect(f.spawned[0].env.LD_LIBRARY_PATH).toContain(legacyLibDir);
     await manager.stop();
   });
 });

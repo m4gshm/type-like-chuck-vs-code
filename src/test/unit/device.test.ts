@@ -8,9 +8,14 @@ describe('deviceChain', () => {
   });
 
   it('tries an explicit device first, then cpu', () => {
-    expect(deviceChain('npu')).toEqual(['npu', 'cpu']);
     expect(deviceChain('gpu')).toEqual(['gpu', 'cpu']);
     expect(deviceChain('cpu')).toEqual(['cpu']);
+  });
+
+  it('redirects an explicit npu to gpu for llama.cpp, and through gpu for ovgenai', () => {
+    expect(deviceChain('npu')).toEqual(['gpu', 'cpu']);
+    expect(deviceChain('npu', 'ovgenai')).toEqual(['npu', 'gpu', 'cpu']);
+    expect(deviceChain('auto', 'ovgenai')).toEqual(['gpu', 'cpu']);
   });
 });
 

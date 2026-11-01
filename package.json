@@ -167,7 +167,7 @@
               "gpu",
               "npu"
             ],
-            "description": "Inference device for the local engine (local mode only). `auto` follows NPU → GPU → CPU; the NPU is opt-in via `npu` and requires an OpenVINO path (the ovgenai runner or the llama.cpp openvino build on Windows/Linux x64); a failed accelerated start falls back to CPU. The mlx engine always runs on GPU (Metal), regardless of this setting. Use \"TLC: Select Local Device\"."
+            "description": "Inference device for the local engine (local mode only). `auto` follows GPU → CPU; an explicit `npu` is supported by the ovgenai runner (falling back through GPU to CPU) and redirected to GPU with a warning for the llama.cpp engine. The mlx engine always runs on GPU (Metal), regardless of this setting. Use \"TLC: Select Local Device\"."
           }
         }
       },
@@ -245,7 +245,7 @@
             "order": 1,
             "default": 0,
             "minimum": 0,
-            "description": "Maximum combined prefix+suffix context (characters). Filled automatically from /v1/models when the model is updated; 0 means unlimited. When exceeded, the prefix and suffix budgets are scaled proportionally with priority to the prefix."
+            "description": "Maximum combined prefix+suffix context (characters). Filled automatically from /v1/models in remote mode; local engines' windows are known from the built-in catalog and the NPU is capped separately via tlc.local.npuContextMaxLength. 0 means unlimited. When exceeded, the prefix and suffix budgets are scaled proportionally with priority to the prefix."
           },
           "tlc.prefixContextMaxLength": {
             "type": "integer",
@@ -371,7 +371,7 @@
             "type": "string",
             "order": 8,
             "default": "",
-            "description": "Directory for the local model cache (local mode only; the NPU currently does not use an on-disk compiled-model cache). Empty uses the extension storage."
+            "description": "Directory for the local model cache (local mode only). Empty uses the extension storage."
           },
           "tlc.local.modelPath": {
             "type": "string",
@@ -437,6 +437,7 @@
     "compile": "node esbuild.js",
     "compile-tests": "tsc -p tsconfig.test.json",
     "watch": "node esbuild.js --watch",
+    "sync-runner": "node scripts/sync-runner-binaries.mjs",
     "unit": "vitest run",
     "coverage": "vitest run --coverage",
     "test": "npm run unit && npm run compile && npm run compile-tests && npm run vscode-test",

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'fs';
-import { mkdir, rm } from 'fs/promises';
+import { mkdir, readdir, rename, rm } from 'fs/promises';
 import { join } from 'path';
 import { LocalDevice } from '../config';
 import { deviceChain, NPU_CONTEXT_LENGTH } from './device';
@@ -11,16 +11,28 @@ import { isLocalModelId, localModel, localModelUrl } from './model_catalog';
 import { mlxModel, mlxModelFileUrl } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { OV_GENAI_VERSION, ovGenaiLibDir, ovGenaiTbbDir, resolveOvGenaiAsset, runnerOvGenaiVersion } from './ov_runtime';
-import { resolveEngineAsset, EngineVariant } from './release_assets';
+import { resolveEngineAsset } from './release_assets';
 import { probeRunnerVersion, RunningStdioRunner, startStdioRunner } from './stdio_runner';
 
+/** Engine lifecycle phase names: the discriminant values of EngineStatus below, shared with its consumers. */
+export const ENGINE_STATUS = {
+  notInstalled: 'not-installed',
+  awaitingInput: 'awaiting-input',
+  preparingEngine: 'preparing-engine',
+  preparingModel: 'preparing-model',
+  starting: 'starting',
+  ready: 'ready',
+  error: 'error',
+} as const;
+
 export type EngineStatus =
-  | { status: 'not-installed' }
-  | { status: 'preparing-engine' }
-  | { status: 'preparing-model' }
-  | { status: 'starting' }
-  | { status: 'ready'; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device: LocalDevice }
-  | { status: 'error'; message: string };
+  | { status: typeof ENGINE_STATUS.notInstalled }
+  | { status: typeof ENGINE_STATUS.awaitingInput; prompt: string }
+  | { status: typeof ENGINE_STATUS.preparingEngine }
+  | { status: typeof ENGINE_STATUS.preparingModel }
+  | { status: typeof ENGINE_STATUS.starting }
+  | { status: typeof ENGINE_STATUS.ready; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device: LocalDevice }
+  | { status: typeof ENGINE_STATUS.error; message: string };
 
 /** The running ovgenai stdio runner exposed for the completions transport. */
 export type RunningLocalEngine = RunningEngine | RunningStdioRunner;
@@ -53,6 +65,9 @@ export interface EngineManagerSettings {
   apiKeyEnabled: boolean;
 }
 
+/** Marker `askDistroOrDownload` returns when the user opts into downloading. */
+export const DISTRO_CHOICE_DOWNLOAD = 'download';
+
 export interface EngineManagerHost extends RunnerDeps {
   platform: NodeJS.Platform;
   arch: string;
@@ -66,8 +81,8 @@ export interface EngineManagerHost extends RunnerDeps {
   extract?: typeof extractArchive;
   /** Injectable runner `--version` probe (defaults to the real spawn). */
   probeRunnerVersion?: typeof probeRunnerVersion;
-  /** Returns a picked distro folder, 'download', or undefined when dismissed. */
-  askDistroOrDownload?: (kind: 'ovgenai' | 'llama.cpp') => Promise<string | 'download' | undefined>;
+  /** Returns a picked distro folder, DISTRO_CHOICE_DOWNLOAD, or undefined when dismissed. */
+  askDistroOrDownload?: (kind: 'ovgenai' | 'llama.cpp') => Promise<string | typeof DISTRO_CHOICE_DOWNLOAD | undefined>;
 }
 
 export class EngineManager {
@@ -120,7 +135,7 @@ export class EngineManager {
         device: this.runningDevice,
       };
     }
-    return { status: 'not-installed' };
+    return { status: ENGINE_STATUS.notInstalled };
   }
 
   /**
@@ -193,40 +208,22 @@ export class EngineManager {
       }
       const model = localModel(settings.modelId);
       const devices = deviceChain(settings.device);
-      // NPU only exists on the openvino engine build; when the chain starts
-      // with NPU the whole chain runs on it (it serves GPU and CPU too).
-      const variant: EngineVariant = devices[0] === 'npu' ? 'llama-openvino' : 'llama-std';
+      if (settings.device === 'npu') {
+        this.host.warn('TLC local engine: the NPU is supported only by the OpenVINO GenAI engine; using GPU instead.');
+      }
 
-      const serverPath = await this.ensureLlamaEngine(paths, settings, variant);
+      const serverPath = await this.ensureLlamaEngine(paths, settings);
       const modelPath = await this.ensureGgufModel(paths, model, settings);
-      this.host.onStatus({ status: 'starting' });
+      this.host.onStatus({ status: ENGINE_STATUS.starting });
 
       const startOne = (active: (typeof devices)[number]): Promise<RunningEngine> => {
-        const env: Record<string, string> = variant === 'llama-openvino'
-          ? {
-              GGML_OPENVINO_DEVICE: active.toUpperCase(),
-              GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR: paths.modelCacheDir,
-              GGML_OPENVINO_PREFILL_CHUNK_SIZE: '256',
-              GGML_OPENVINO_NPU_COMPILE_CONFIG: 'optimization-level=3',
-              GGML_OPENVINO_MANUAL_GQA_ATTN: '1',
-              // No GGML_OPENVINO_CACHE_DIR here: it enables the NPUW
-              // weights-separation flow, which fails on ggml graphs with
-              // "No WeightlessCacheAttribute" at inference.
-            }
-          : {};
-        const contextLength = variant === 'llama-openvino'
-          ? Math.min(model.contextLength, settings.npuContextLength > 0 ? settings.npuContextLength : NPU_CONTEXT_LENGTH)
-          : model.contextLength;
-        const args = withModelPlaceholder(llamaArgs(contextLength, active), modelPath);
-        if (variant === 'llama-openvino') {
-          args.push('-b', '256', '-ub', '256');
-        }
+        const args = withModelPlaceholder(llamaArgs(model.contextLength, active), modelPath);
         return startEngine(
           {
             serverPath,
             modelPath,
             args,
-            env,
+            env: {},
             apiKeyEnabled: settings.apiKeyEnabled,
             onUnexpectedExit: (message) => this.handleUnexpectedExit(message),
           },
@@ -271,8 +268,12 @@ export class EngineManager {
       this.host.onStatus(status);
       return status;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.host.onStatus({ status: 'error', message });
+      // A user-initiated cancel (dismissed question, aborted download) is
+      // already silent at the task level — don't paint the status bar red.
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.host.onStatus({ status: ENGINE_STATUS.error, message });
+      }
       await this.stop();
       throw err;
     }
@@ -287,14 +288,14 @@ export class EngineManager {
       throw new Error(`Unknown local model "${settings.modelId}".`);
     }
     const model = irModel(settings.modelId);
-    const devices = deviceChain(settings.device);
+    const devices = deviceChain(settings.device, 'ovgenai');
     const runtimeRoot = await this.ensureOvGenaiRuntime(paths, settings);
     const libDir = ovGenaiLibDir(this.host.platform, runtimeRoot);
     // The Windows runner links TBB directly; its dlls sit outside the OpenVINO bin dir.
     const tbbDir = ovGenaiTbbDir(this.host.platform, runtimeRoot);
     const libraryDirs = tbbDir !== undefined && existsSync(tbbDir) ? [libDir, tbbDir] : [libDir];
     const modelPath = await this.ensureIrModel(paths, model, settings);
-    this.host.onStatus({ status: 'starting' });
+    this.host.onStatus({ status: ENGINE_STATUS.starting });
     // Support diagnostics: the runner reports its own app version and the
     // OpenVINO GenAI version it was built against (undefined for old runners
     // without --version).
@@ -310,12 +311,21 @@ export class EngineManager {
     const fallbacks: string[] = [];
     for (;;) {
       try {
+        this.host.log(`ovgenai: loading ${model.label} on ${activeDevice.toUpperCase()} (${modelPath})`);
         runner = await startStdioRunner(
           {
             runnerPath,
             modelPath,
             device: activeDevice.toUpperCase(),
             contextLength,
+            // The runner's own CACHE_DIR default is relative to its cwd (the
+            // extension host's, unpredictable); pin it to the model cache so
+            // compiled blobs persist across starts. Blob caches are
+            // device-specific (incompatible blobs) — one folder per device.
+            props: activeDevice === 'npu' || activeDevice === 'gpu' ? { CACHE_DIR: join(paths.modelCacheDir, `${activeDevice}-blobs`) } : undefined,
+            // First NPU start compiles the graph, which can take unbounded
+            // time; a dead runner is still detected via the exit check.
+            readyTimeoutMs: activeDevice === 'npu' ? Number.POSITIVE_INFINITY : undefined,
             libraryDirs,
             onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
             onStderr: (line) => this.host.log(`ovgenai: ${line}`),
@@ -371,7 +381,7 @@ export class EngineManager {
     }
     const model = mlxModel(settings.modelId);
     const modelPath = await this.ensureMlxModel(paths, model, settings);
-    this.host.onStatus({ status: 'starting' });
+    this.host.onStatus({ status: ENGINE_STATUS.starting });
     // Metal is the only MLX backend; no device fallback chain.
     const runner = await startStdioRunner(
       {
@@ -411,7 +421,7 @@ export class EngineManager {
     if (missing.length === 0) {
       return modelDir;
     }
-    this.host.onStatus({ status: 'preparing-model' });
+    this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(modelDir, { recursive: true });
     for (const file of missing) {
       const overrideKey = `${model.id}/${file}`;
@@ -448,24 +458,33 @@ export class EngineManager {
       throw new Error(`No OpenVINO GenAI runtime archive for ${this.host.platform}/${this.host.arch}.`);
     }
     const topDir = asset.fileName.replace(/\.(zip|tar\.gz)$/, '');
-    const runtimeRoot = join(paths.engineRoot, `ov-genai-${version}`, topDir);
+    // Single-level install keeping the archive's own (version-bearing) folder
+    // name; the ov-genai-<version> wrapper would only duplicate it.
+    const runtimeRoot = join(paths.engineRoot, topDir);
+    const legacyRoot = join(paths.engineRoot, `ov-genai-${version}`, topDir);
     if (existsSync(libDirOf(runtimeRoot))) {
       return runtimeRoot;
     }
+    if (existsSync(libDirOf(legacyRoot))) {
+      return legacyRoot;
+    }
+    // A status before the question: it blocks the flow, and the progress toast
+    // would otherwise keep showing the previous stage.
     const ask = this.host.askDistroOrDownload;
     if (ask !== undefined) {
+      this.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: 'choose: download the OpenVINO GenAI runtime or use an existing unpacked folder' });
       const choice = await ask('ovgenai');
       if (choice === undefined) {
         throw new DOMException('Canceled', 'AbortError');
       }
-      if (choice !== 'download') {
+      if (choice !== DISTRO_CHOICE_DOWNLOAD) {
         if (!existsSync(libDirOf(choice))) {
           throw new Error(`Local OpenVINO GenAI distribution has an unexpected layout: no runtime libraries under ${libDirOf(choice)}.`);
         }
         return choice;
       }
     }
-    this.host.onStatus({ status: 'preparing-engine' });
+    this.host.onStatus({ status: ENGINE_STATUS.preparingEngine });
     await mkdir(paths.engineRoot, { recursive: true });
     const archivePath = join(paths.engineRoot, asset.fileName);
     await (this.host.download ?? downloadFile)({
@@ -474,8 +493,22 @@ export class EngineManager {
       signal: this.activeSignal,
       onProgress: (p) => this.host.onProgress?.('engine', p),
     });
-    await (this.host.extract ?? extractArchive)({ archivePath, destDir: join(paths.engineRoot, `ov-genai-${version}`), signal: this.activeSignal });
+    // Extract into a staging dir (extractArchive wipes destDir on failure and
+    // engineRoot holds other engines), then move the archive's top folder up.
+    const stagingDir = join(paths.engineRoot, `${topDir}.staging`);
+    await (this.host.extract ?? extractArchive)({ archivePath, destDir: stagingDir, signal: this.activeSignal });
+    // A previous interrupted install can leave the target shell behind; rename
+    // onto an existing directory fails on Windows.
+    await rm(runtimeRoot, { recursive: true, force: true });
+    await rename(join(stagingDir, topDir), runtimeRoot);
+    await rm(stagingDir, { recursive: true, force: true });
     await rm(archivePath, { force: true });
+    for (const entry of await readdir(paths.engineRoot)) {
+      // Stale installs from the previous two-level layout (ov-genai-<version>/...).
+      if (entry.startsWith('ov-genai-')) {
+        await rm(join(paths.engineRoot, entry), { recursive: true, force: true });
+      }
+    }
     if (!existsSync(libDirOf(runtimeRoot))) {
       throw new Error(`OpenVINO runtime libraries not found after unpacking (${libDirOf(runtimeRoot)}).`);
     }
@@ -494,7 +527,7 @@ export class EngineManager {
     if (missing.length === 0) {
       return modelDir;
     }
-    this.host.onStatus({ status: 'preparing-model' });
+    this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(modelDir, { recursive: true });
     for (const file of missing) {
       const overrideKey = `${model.id}/${file}`;
@@ -512,7 +545,7 @@ export class EngineManager {
     return modelDir;
   }
 
-  private async ensureLlamaEngine(paths: EnginePaths, settings: EngineManagerSettings, variant: EngineVariant): Promise<string> {
+  private async ensureLlamaEngine(paths: EnginePaths, settings: EngineManagerSettings): Promise<string> {
     if (settings.engineBinary.length > 0) {
       return localEngineBinary(settings.engineBinary);
     }
@@ -524,22 +557,25 @@ export class EngineManager {
       return binary;
     }
     const tag = settings.releaseTag;
-    const tagDir = join(paths.engineRoot, `${tag}-${variant}`);
+    const tagDir = join(paths.engineRoot, `${tag}-llama-std`);
     const serverPath = findBinary(tagDir, this.host.platform, 'llama-server');
     if (serverPath !== undefined) {
       return serverPath;
     }
-    const asset = resolveEngineAsset(this.host.platform, this.host.arch, tag, settings.githubUrl, variant);
+    const asset = resolveEngineAsset(this.host.platform, this.host.arch, tag, settings.githubUrl);
     if (asset === undefined) {
       throw new Error(`No llama.cpp release asset for ${this.host.platform}/${this.host.arch}.`);
     }
+    // A status before the question: it blocks the flow, and the progress toast
+    // would otherwise keep showing the previous stage.
     const ask = this.host.askDistroOrDownload;
     if (ask !== undefined) {
+      this.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: 'choose: download the llama.cpp build or use an existing unpacked folder' });
       const choice = await ask('llama.cpp');
       if (choice === undefined) {
         throw new DOMException('Canceled', 'AbortError');
       }
-      if (choice !== 'download') {
+      if (choice !== DISTRO_CHOICE_DOWNLOAD) {
         const binary = findBinary(choice, this.host.platform, 'llama-server');
         if (binary === undefined) {
           throw new Error(`Local llama.cpp distribution has an unexpected layout: no llama-server binary in ${choice}.`);
@@ -547,7 +583,7 @@ export class EngineManager {
         return binary;
       }
     }
-    this.host.onStatus({ status: 'preparing-engine' });
+    this.host.onStatus({ status: ENGINE_STATUS.preparingEngine });
     await mkdir(paths.engineRoot, { recursive: true });
     const archivePath = join(paths.engineRoot, asset.fileName);
     await (this.host.download ?? downloadFile)({
@@ -580,7 +616,7 @@ export class EngineManager {
     if (existsSync(modelPath)) {
       return modelPath;
     }
-    this.host.onStatus({ status: 'preparing-model' });
+    this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(paths.modelDir, { recursive: true });
     await (this.host.download ?? downloadFile)({
       url,
@@ -601,7 +637,7 @@ function modelFilePath(paths: EnginePaths, modelId: string): string {
 // from different families never share a folder.
 function irModelDir(paths: EnginePaths, modelId: string): string {
   const spec = isLocalModelId(modelId) ? irModel(modelId) : undefined;
-  return join(paths.modelDir, spec?.dirName ?? `${modelId}-int8-ov`);
+  return join(paths.modelDir, spec?.dirName ?? `${modelId}-nf4-ov`);
 }
 
 function mlxModelDir(paths: EnginePaths, modelId: string): string {

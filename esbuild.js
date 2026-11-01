@@ -3,6 +3,27 @@ const esbuild = require('esbuild');
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
+/** @type {import('esbuild').Plugin} */
+const problemMatcherPlugin = {
+  name: 'problem-matcher',
+  setup(build) {
+    build.onStart(() => {
+      console.log('[watch] build started');
+    });
+    const report = (level, mark) => ({ text, location }) => {
+      console.error(`${mark} [${level}] ${text}`);
+      if (location) {
+        console.error(`    ${location.file}:${location.line}:${location.column}:`);
+      }
+    };
+    build.onEnd((result) => {
+      result.errors.forEach(report('ERROR', '✘'));
+      result.warnings.forEach(report('WARNING', '▲'));
+      console.log('[watch] build finished');
+    });
+  },
+};
+
 /** @type {import('esbuild').BuildOptions} */
 const extensionConfig = {
   entryPoints: ['src/extension.ts'],
@@ -14,7 +35,8 @@ const extensionConfig = {
   platform: 'node',
   outfile: 'dist/extension.js',
   external: ['vscode'],
-  logLevel: 'info',
+  logLevel: 'silent',
+  plugins: [problemMatcherPlugin],
 };
 
 (async () => {
@@ -29,4 +51,3 @@ const extensionConfig = {
   console.error(e);
   process.exit(1);
 });
-

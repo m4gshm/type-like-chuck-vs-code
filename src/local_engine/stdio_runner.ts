@@ -9,8 +9,11 @@ export interface StdioRunnerStartOptions {
   /** Log prefix for diagnostics (defaults to the ovgenai runner). */
   label?: string;
   contextLength?: number;
+  /** OpenVINO plugin properties passed as --prop KEY=VALUE (e.g. CACHE_DIR). */
+  props?: Record<string, string>;
   /** Runtime library directories prepended to PATH (win) / LD_LIBRARY_PATH (linux). */
   libraryDirs?: string[];
+  /** Ready-wait limit; Infinity waits forever (NPU graph compilation can take unbounded time). */
   readyTimeoutMs?: number;
   onUnexpectedExit?: (message: string) => void;
   onStderr?: (line: string) => void;
@@ -94,8 +97,9 @@ export async function probeRunnerVersion(runnerPath: string, libraryDirs: string
 }
 
 /**
- * Client for the bundled ovgenai runner: NDJSON over stdin/stdout. Requests
- * are serialized; a generate issued while another is running is rejected.
+ * Client for the bundled ovgenai runner: NDJSON over stdin/stdout. The runner
+ * queues generate requests and serves them one at a time; several client
+ * streams may be pending concurrently.
  */
 export interface RunningStdioRunner {
   device: string;
@@ -119,6 +123,9 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
   if (options.contextLength !== undefined && options.contextLength > 0) {
     args.push('--ctx', String(options.contextLength));
   }
+  for (const [key, value] of Object.entries(options.props ?? {})) {
+    args.push('--prop', `${key}=${value}`);
+  }
   const child = spawnImpl(options.runnerPath, args, { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
@@ -126,13 +133,15 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
   let exited: Error | undefined;
   let cleanStop = false;
   let nextId = 1;
-  let active: {
+  // Requests the runner has accepted but not yet answered with a terminal
+  // done/error event. Insertion order = send order = runner processing order:
+  // token events (which carry no id) belong to the oldest pending request.
+  const requests = new Map<number, {
     id: number;
     onToken: (text: string) => void;
     resolve: (result: GenerateResult) => void;
     reject: (err: Error) => void;
-    finished: boolean;
-  } | undefined;
+  }>();
   const lines = createInterface({ input: child.stdout! });
   lines.on('line', handleLine);
   child.stderr?.on('data', (chunk: string) => {
@@ -150,10 +159,11 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
       exited = new Error(`${label} runner exited (code ${code ?? signal})`);
       options.onUnexpectedExit?.(exited.message);
     }
-    if (exited !== undefined) {
-      active?.reject(exited);
+    const leftover = exited ?? new Error(`${label} runner closed`);
+    for (const pending of requests.values()) {
+      pending.reject(leftover);
     }
-    active = undefined;
+    requests.clear();
   });
 
   const readyInfo = await waitForReady(options.readyTimeoutMs ?? 600_000);
@@ -174,49 +184,64 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
       log(`${label}: startup error: ${String(event.message)}`);
       return;
     }
-    const current = active;
-    if (current === undefined || event.id !== current.id) {
+    // Token events carry no request id (the runner serves one generation at a
+    // time); route them to the oldest pending request (send order = runner
+    // processing order). done/error carry the id and close that request.
+    if (type === 'token') {
+      requests.values().next().value?.onToken(String(event.text ?? ''));
       return;
     }
-    if (type === 'token') {
-      current.onToken(String(event.text ?? ''));
-    } else if (type === 'done') {
-      current.finished = true;
+    const current = typeof event.id === 'number' ? requests.get(event.id) : undefined;
+    if (current === undefined) {
+      return;
+    }
+    if (type === 'done') {
+      requests.delete(current.id);
       current.resolve({ finishReason: (event.finishReason as GenerateResult['finishReason']) ?? 'stop' });
-      active = undefined;
     } else if (type === 'error') {
-      current.finished = true;
+      requests.delete(current.id);
       current.reject(new Error(String(event.message)));
-      active = undefined;
     }
   }
 
   function waitForReady(timeoutMs: number): Promise<{ model: string; device: string; ctx: number }> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${label} runner did not become ready in time`)), timeoutMs);
+      const cleanup = (): void => {
+        clearInterval(checkDead);
+        clearTimeout(timer);
+        lines.off('line', onLine);
+      };
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+            cleanup();
+            reject(new Error(`${label} runner did not become ready in time`));
+          }, timeoutMs)
+        : undefined;
       const checkDead = setInterval(() => {
         if (exited !== undefined) {
-          clearInterval(checkDead);
-          clearTimeout(timer);
+          cleanup();
           reject(exited);
         }
       }, 100);
-      lines.once('line', (line) => {
-        clearInterval(checkDead);
-        clearTimeout(timer);
+      // Non-JSON stdout lines (e.g. OpenVINO logs from old runner builds) are
+      // skipped: keep scanning until a real event arrives.
+      const onLine = (line: string): void => {
+        let event: Record<string, unknown>;
         try {
-          const event = JSON.parse(line) as Record<string, unknown>;
-          if (event.type === 'ready') {
-            resolve({ model: String(event.model ?? ''), device: String(event.device ?? ''), ctx: Number(event.ctx ?? 0) });
-          } else if (event.type === 'error') {
-            reject(new Error(String(event.message)));
-          } else {
-            reject(new Error(`unexpected first runner event: ${line.slice(0, 200)}`));
-          }
-        } catch (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
+          event = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          log(`${label}: non-JSON stdout line dropped: ${line.slice(0, 200)}`);
+          return;
         }
-      });
+        if (event.type === 'ready') {
+          cleanup();
+          resolve({ model: String(event.model ?? ''), device: String(event.device ?? ''), ctx: Number(event.ctx ?? 0) });
+        } else if (event.type === 'error') {
+          cleanup();
+          reject(new Error(String(event.message)));
+        }
+      };
+      lines.on('line', onLine);
     });
   }
 
@@ -224,14 +249,12 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     if (exited !== undefined) {
       throw exited;
     }
-    if (active !== undefined) {
-      throw new Error(`${label} runner is busy`);
-    }
     const id = nextId++;
     const queue: string[] = [];
     let result: GenerateResult | undefined;
     let error: Error | undefined;
     let cancelled = false;
+    let finished = false;
 
     const onAbort = () => {
       cancelled = true;
@@ -239,17 +262,18 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     };
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    active = {
+    requests.set(id, {
       id,
       onToken: (text) => queue.push(text),
       resolve: (r) => {
+        finished = true;
         result = r;
       },
       reject: (e) => {
+        finished = true;
         error = e;
       },
-      finished: false,
-    };
+    });
     child.stdin?.write(`${JSON.stringify({ type: 'generate', id, prompt, maxTokens, stop })}\n`);
 
     try {
@@ -273,17 +297,12 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
       }
     } finally {
       signal?.removeEventListener('abort', onAbort);
-      if (!cancelled && active !== undefined && !active.finished) {
+      if (!finished && !cancelled) {
         child.stdin?.write(`${JSON.stringify({ type: 'cancel', id })}\n`);
       }
-      // Wait for the runner to acknowledge cancellation before allowing the
-      // next request (the busy flag is cleared by the done event).
-      while (active !== undefined && !active.finished && exited === undefined) {
-        await new Promise<void>((r) => setTimeout(r, 1));
-      }
-      if (active !== undefined && active.id === id) {
-        active = undefined;
-      }
+      // The request stays in the map until its terminal done/error event
+      // arrives: straggler tokens of a canceled generation must not misroute
+      // to the next request.
     }
   }
 

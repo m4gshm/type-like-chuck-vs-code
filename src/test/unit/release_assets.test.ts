@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RELEASE_TAG, OPENVINO_BUILD_VERSION, resolveEngineAsset } from '../../local_engine/release_assets';
+import { DEFAULT_RELEASE_TAG, resolveEngineAsset } from '../../local_engine/release_assets';
 
 describe('resolveEngineAsset', () => {
   it('resolves the vulkan build by default on windows x64', () => {
     const asset = resolveEngineAsset('win32', 'x64');
-    expect(asset?.variant).toBe('llama-std');
     expect(asset?.fileName).toBe(`llama-${DEFAULT_RELEASE_TAG}-bin-win-vulkan-x64.zip`);
   });
 
@@ -14,15 +13,6 @@ describe('resolveEngineAsset', () => {
     expect(resolveEngineAsset('linux', 'arm64')?.fileName).toBe(`llama-${DEFAULT_RELEASE_TAG}-bin-ubuntu-vulkan-arm64.tar.gz`);
     expect(resolveEngineAsset('darwin', 'x64')?.fileName).toBe(`llama-${DEFAULT_RELEASE_TAG}-bin-macos-x64.tar.gz`);
     expect(resolveEngineAsset('darwin', 'arm64')?.fileName).toBe(`llama-${DEFAULT_RELEASE_TAG}-bin-macos-arm64.tar.gz`);
-  });
-
-  it('resolves the openvino build on win/linux x64 for npu', () => {
-    expect(resolveEngineAsset('win32', 'x64', DEFAULT_RELEASE_TAG, undefined, 'llama-openvino')?.fileName)
-      .toBe(`llama-${DEFAULT_RELEASE_TAG}-bin-win-openvino-${OPENVINO_BUILD_VERSION}-x64.zip`);
-    expect(resolveEngineAsset('linux', 'x64', DEFAULT_RELEASE_TAG, undefined, 'llama-openvino')?.fileName)
-      .toBe(`llama-${DEFAULT_RELEASE_TAG}-bin-ubuntu-openvino-${OPENVINO_BUILD_VERSION}-x64.tar.gz`);
-    expect(resolveEngineAsset('win32', 'arm64', DEFAULT_RELEASE_TAG, undefined, 'llama-openvino')).toBeUndefined();
-    expect(resolveEngineAsset('darwin', 'arm64', DEFAULT_RELEASE_TAG, undefined, 'llama-openvino')).toBeUndefined();
   });
 
   it('embeds the requested release tag in the url', () => {

@@ -115,6 +115,10 @@ that change's delta specs. Key invariants:
 - **Arrow functions**: when a function body fits on one line, write it without
   braces and `return` (expression body): `const double = (n: number) => n * 2;`
   Braces + `return` are only for multi-line bodies.
+- **Shared literals**: string values that cross a module boundary (engine
+  lifecycle phases, protocol/marker names, picker result markers) live in
+  exported constants (`ENGINE_STATUS`, `DISTRO_CHOICE_DOWNLOAD`), with the type
+  unions referencing them — not inline literals at each use site.
 - TypeScript strict mode, CommonJS sources bundled by esbuild; unit tests run
   directly on TS sources by vitest — no build step for them.
 - Constructors take a "host" interface (functions/ports) instead of importing

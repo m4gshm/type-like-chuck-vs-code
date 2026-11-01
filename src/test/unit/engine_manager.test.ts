@@ -3,7 +3,7 @@ import { mkdir, mkdtemp as mkdtempActual, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus } from '../../local_engine/engine_manager';
+import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_manager';
 import { DownloadProgress } from '../../local_engine/downloader';
 
 class FakeChild extends EventEmitter {
@@ -109,7 +109,7 @@ describe('EngineManager (llama.cpp engine)', () => {
       'https://github.com/ggml-org/llama.cpp/releases/download/b1/llama-b1-bin-win-vulkan-x64.zip',
       'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
     ]);
-    expect(f.statuses.map((s) => s.status)).toEqual(['preparing-engine', 'preparing-model', 'starting', 'ready']);
+    expect(f.statuses.map((s) => s.status)).toEqual([ENGINE_STATUS.preparingEngine, ENGINE_STATUS.preparingModel, ENGINE_STATUS.starting, ENGINE_STATUS.ready]);
     expect(status).toMatchObject({ status: 'ready', model: '1.5b', device: 'gpu' });
     const args = f.spawned[0].child.args;
     expect(args.join(' ')).toContain('qwen2.5-coder-1.5b-instruct-q4_k_m.gguf');
@@ -293,30 +293,14 @@ describe('EngineManager (llama.cpp engine)', () => {
   });
 });
 
-describe('EngineManager (npu via the openvino build)', () => {
-  it('downloads the openvino build and starts on npu with the openvino env', async () => {
-    const f = await makeFixture({}, { device: 'npu' });
+describe('EngineManager (llama.cpp devices)', () => {
+  it('redirects an explicit npu to gpu with a warning (the llama.cpp build has no NPU path)', async () => {
+    const warns: string[] = [];
+    const f = await makeFixture({ warn: (m) => warns.push(m) }, { device: 'npu' });
     const status = await new EngineManager(f.host).ensureReady();
-    expect(status).toMatchObject({ status: 'ready', device: 'npu' });
-    if (status.status !== 'ready') {
-      throw new Error('unreachable');
-    }
-    expect(f.downloads[0].url).toBe('https://github.com/ggml-org/llama.cpp/releases/download/b1/llama-b1-bin-win-openvino-2026.4.1-x64.zip');
-    expect(f.spawned[0].env.GGML_OPENVINO_DEVICE).toBe('NPU');
-    expect(f.spawned[0].env.GGML_OPENVINO_CACHE_DIR).toBeUndefined();
-    expect(f.spawned[0].env.GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR).toBe(join(f.root, 'cache'));
-    expect(f.spawned[0].env.GGML_OPENVINO_PREFILL_CHUNK_SIZE).toBe('256');
-    expect(f.spawned[0].env.GGML_OPENVINO_NPU_COMPILE_CONFIG).toBe('optimization-level=3');
-    expect(f.spawned[0].env.GGML_OPENVINO_MANUAL_GQA_ATTN).toBe('1');
-    expect(f.spawned[0].child.args.join(' ')).toMatch(/-c 8192/);
-    expect(f.spawned[0].child.args.join(' ')).toMatch(/-b 256 -ub 256/);
-    await new EngineManager(f.host).stop();
-  });
-
-  it('honors a custom npu context length', async () => {
-    const f = await makeFixture({}, { device: 'npu', npuContextLength: 4096 });
-    await new EngineManager(f.host).ensureReady();
-    expect(f.spawned[0].child.args.join(' ')).toMatch(/-c 4096/);
+    expect(status).toMatchObject({ status: 'ready', device: 'gpu' });
+    expect(f.downloads[0].url).toContain('vulkan');
+    expect(warns.some((w) => /NPU is supported only by the OpenVINO GenAI engine/.test(w))).toBe(true);
     await new EngineManager(f.host).stop();
   });
 
@@ -340,12 +324,13 @@ describe('EngineManager (npu via the openvino build)', () => {
     await new EngineManager(f.host).stop();
   });
 
-  it('explicit npu uses the openvino build even when the npu probe missed, falling back to cpu', async () => {
+  it('explicit npu on the std build falls back to cpu after gpu fails', async () => {
     const f = await makeFixture({}, { device: 'npu' });
     const spawned: FakeChild[] = [];
     f.host.spawnImpl = ((_: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
       const child = new FakeChild(args);
       spawned.push(child);
+      expect(opts.env.GGML_OPENVINO_DEVICE).toBeUndefined();
       if (spawned.length < 2) {
         child.exitCode = 1;
       }
@@ -353,9 +338,9 @@ describe('EngineManager (npu via the openvino build)', () => {
     }) as never;
     const status = await new EngineManager(f.host).ensureReady();
     expect(status).toMatchObject({ status: 'ready', device: 'cpu' });
-    expect(f.downloads[0].url).toContain('win-openvino-2026.4.1-x64.zip');
+    expect(f.downloads[0].url).toContain('vulkan');
     expect(f.notify).toHaveLength(1);
-    expect(f.notify[0]).toMatch(/started on CPU — NPU unavailable/);
+    expect(f.notify[0]).toMatch(/started on CPU — GPU unavailable/);
   });
 
 });

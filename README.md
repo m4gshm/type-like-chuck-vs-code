@@ -9,8 +9,8 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 - **Automatic trigger** — completions are requested after you stop typing (debounce, default 250 ms).
 - **Manual trigger** — run `TLC: Trigger Completion Now` (default `Ctrl+Alt+Space` or `Alt+\`) to request a completion immediately; it always performs a fresh API request, ignoring the cache and any pending request. When Type like Chuck is disabled or yielding to Copilot, the same keys trigger the suggestion (e.g. Copilot's) directly.
 - **Built-in FIM templates** for Qwen2.5-Coder and Mellum (JetBrains), plus user-defined custom templates.
-- **Local engine mode** — no external server needed: TLC downloads a llama.cpp build and a Qwen2.5-Coder GGUF model (0.5B / 1.5B / 3B) on first use and starts its own local server. Two build flavors, chosen by the requested device: a **vulkan build** (GPU via NVIDIA/AMD/Intel + CPU fallback) and an **openvino build** (Windows/Linux x64) that runs the same GGUF on the **Intel NPU** via the NPUW backend — no separate IR model download. A platform probe picks the best device at startup (NPU when present, GPU when a CUDA device answers, CPU otherwise); failed accelerated starts fall back to CPU.
-- **OpenVINO GenAI runner (`ovgenai` engine kind)** — an alternative local engine for Windows/Linux x64: a small runner binary bundled with the extension (no engine download) speaking NDJSON over stdin/stdout (no ports, no HTTP, no keys), loading native **OpenVINO IR** models (Qwen2.5-Coder int8-ov, ~0.5/1.6/3.1 GB) with NNCF int8 weights, and running on CPU, Intel Arc (GPU) or the Intel NPU. The OpenVINO runtime libraries (~130–250 MB per platform) are downloaded on first use into the engine directory, at the version the runner binary reports (the binary embeds the OpenVINO GenAI version it was built against; runners without that marker fall back to the latest known version). On every engine start the extension probes `--version` and logs the runner's `app` and `ovGenai` versions for support diagnostics. Select it with `tlc.local.engineKind: "ovgenai"`.
+- **Local engine mode** — no external server needed: TLC downloads a llama.cpp vulkan build (GPU via NVIDIA/AMD/Intel + CPU fallback) and a Qwen2.5-Coder GGUF model (0.5B / 1.5B / 3B) on first use and starts its own local server. A platform probe picks the best engine kind and device at startup; failed accelerated starts fall back to CPU.
+- **OpenVINO GenAI runner (`ovgenai` engine kind)** — an alternative local engine for Windows/Linux x64: a small runner binary bundled with the extension (no engine download) speaking NDJSON over stdin/stdout (no ports, no HTTP, no keys), loading native **OpenVINO IR** models (Qwen2.5-Coder nf4, ~0.3/0.9/1.7 GB) with NNCF nf4 weights, and running on CPU, Intel Arc (GPU) or the Intel NPU. The OpenVINO runtime libraries (~130–250 MB per platform) are downloaded on first use into the engine directory, at the version the runner binary reports (the binary embeds the OpenVINO GenAI version it was built against; runners without that marker fall back to the latest known version). On every engine start the extension probes `--version` and logs the runner's `app` and `ovGenai` versions for support diagnostics. Select it with `tlc.local.engineKind: "ovgenai"`.
 - **MLX runner (`mlx` engine kind)** — the local engine for **macOS arm64**: a small Swift runner binary bundled with the extension speaking the same NDJSON stdio protocol, loading **MLX 4-bit** models (`mlx-community` Qwen2.5-Coder, ~0.4/1.0/1.9 GB) on Metal. The binary is self-contained (MLX statically linked, Metal is a system framework) — no engine or runtime downloads at all. Select it with `tlc.local.engineKind: "mlx"`.
 - **Streaming** requests against the legacy OpenAI `POST /v1/completions` endpoint with stop sequences derived from the template's reserved tokens.
 - **Single-line suggestions** that accept with <kbd>Tab</kbd> and dismiss with <kbd>Esc</kbd> via VS Code's native inline suggestions.
@@ -24,14 +24,14 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 
 1. Install the extension (F5 in this repository, or install the packaged `.vsix`).
 2. Pick the completion source with `TLC: Select Mode`:
-   - **Local engine** (default): nothing else is required — the engine and the model are downloaded on first use (about 0.4–2 GB). Pick the model with `TLC: Select Local Model` and the device (auto/GPU/CPU, opt-in NPU) with `TLC: Select Local Device`. GPU acceleration uses the llama.cpp vulkan build (NVIDIA/AMD/Intel). The NPU is opt-in (`device: npu`, Intel Core Ultra with the NPU driver): it uses the llama.cpp openvino build, each start compiles the graph (~15 s, no on-disk compile cache), and it is not recommended as the default device.
+   - **Local engine** (default): nothing else is required — the engine and the model are downloaded on first use (about 0.4–2 GB). Pick the model with `TLC: Select Local Model` and the device (auto/GPU/CPU) with `TLC: Select Local Device`. GPU acceleration uses the llama.cpp vulkan build (NVIDIA/AMD/Intel); an explicit `device: npu` is redirected to GPU with a warning (the NPU is available via the `ovgenai` engine kind).
    - **Remote**: set `tlc.openai.baseUrl` to your OpenAI-compatible server (e.g. LM Studio, llama.cpp, vLLM, Ollama) and `tlc.openai.model` to the loaded model.
 3. Pick `tlc.promptTemplate` matching your model family (`qwen2`, `qwen3`, `lfm2`, `mellum`, or `custom`) — in local mode the template follows the Qwen2.5-Coder models automatically.
 4. Remote mode: run `TLC: Select Model` to pick from the models your server exposes via `GET /v1/models`; if your server needs authentication, run `TLC: Set API Key`.
 
 ## Security
 
-In local mode the local engine is reached only via the loopback interface with a randomly generated per-session key (never persisted), so other processes on the machine cannot use it. The resolved engine/model/cache directories are written to the TLC output channel; change them via `tlc.local.engineDir` / `tlc.local.modelDir` (existing downloads are moved to the new location). `TLC: Reset Local Engine` re-downloads the engine or the model, or clears the cache. At startup TLC probes the platform (local GPU acceleration on Windows/Linux/macOS → none) and suggests the matching device with a reason; the suggestion is always shown until `tlc.local.device` is explicitly chosen (Apply Recommendation, `TLC: Select Local Device`, or a stored setting) or the offer is dismissed ("Don't Ask Again").
+In local mode the local engine is reached only via the loopback interface with a randomly generated per-session key (never persisted), so other processes on the machine cannot use it. The resolved engine/model/cache directories are written to the TLC output channel; change them via `tlc.local.engineDir` / `tlc.local.modelDir` (existing downloads are moved to the new location). `TLC: Reset Local Engine` re-downloads the engine (choosing the engine kind first) or the model, or clears the cache. At startup TLC probes the platform (local GPU acceleration on Windows/Linux/macOS → none) and suggests the matching device with a reason; the suggestion is always shown until `tlc.local.device` is explicitly chosen (Apply Recommendation, `TLC: Select Local Device`, or a stored setting) or the offer is dismissed ("Don't Ask Again").
 
 ## Commands
 
@@ -40,8 +40,8 @@ In local mode the local engine is reached only via the loopback interface with a
 | `TLC: Trigger Completion Now` | Request a completion immediately, bypassing the debounce, the cache, and pending-request reuse |
 | `TLC: Select Mode` | Switch between the local engine and a remote server |
 | `TLC: Select Local Model` | Pick the local engine model: 0.5B / 1.5B / 3B |
-| `TLC: Select Local Device` | Pick the inference device: auto / GPU / CPU (opt-in: NPU) |
-| `TLC: Reset Local Engine` | Re-download the engine or the model, or clear the cache |
+| `TLC: Select Local Device` | Pick the inference device: auto / GPU / CPU (NPU selects GPU for llama.cpp) |
+| `TLC: Reset Local Engine` | Re-download the engine (engine kind picked first) or the model, or clear the cache |
 | `TLC: Test Connection` | Check that `tlc.openai.baseUrl` is reachable, fetch `/v1/models` and apply the model list (remote mode) |
 | `TLC: Select Model` | Pick a model from the server's `GET /v1/models` list (or enter an id manually); supported-family models are marked with a check (remote mode) |
 | `TLC: Set API Key` | Store the API key in secret storage (empty input clears usage) |
@@ -57,14 +57,14 @@ In local mode the local engine is reached only via the loopback interface with a
 | `tlc.mode` | `local` | Completion source: `local` (TLC-managed engine: llama.cpp or OpenVINO GenAI) or `remote` (OpenAI-compatible server at `tlc.openai.baseUrl`) |
 | `tlc.local.engineKind` | `mlx` on macOS arm64, `llama.cpp` elsewhere | Local engine implementation (local mode): `llama.cpp` (llama-server + GGUF, all platforms), `ovgenai` (bundled OpenVINO GenAI runner + IR models, Windows/Linux x64, NPU/GPU/CPU) or `mlx` (bundled MLX runner + 4-bit models, macOS arm64, Metal) |
 | `tlc.local.model` | `1.5b` | Local engine model (local mode): `0.5b`, `1.5b` or `3b` (Qwen2.5-Coder; GGUF for llama.cpp, OpenVINO IR int8 for ovgenai, MLX 4-bit for mlx) |
-| `tlc.local.device` | `auto` | Local engine inference device: `auto` (NPU → GPU → CPU), or `cpu`, `gpu`, `npu`; a failed accelerated start falls back to CPU |
+| `tlc.local.device` | `auto` | Local engine inference device: `auto` (GPU → CPU), or `cpu`, `gpu`, `npu` (NPU: ovgenai runs it, llama.cpp redirects to GPU); a failed accelerated start falls back to CPU |
 | `tlc.local.npuContextMaxLength` | `8192` | Context window used on the NPU (local mode only). The NPU graph is compiled for this window: a smaller window compiles faster, generates faster and needs less memory; it also caps the prefix/suffix prompt budgets when the NPU is used. `0` uses the model's full context |
-| `tlc.local.llamaCppRelease` | `b11935` | llama.cpp release tag used for the engine download (vulkan build for GPU/CPU, openvino build for NPU) |
+| `tlc.local.llamaCppRelease` | `b11935` | llama.cpp release tag used for the engine download (vulkan build) |
 | `tlc.local.engineBinary` | `""` | Path to a locally unpacked llama-server binary used instead of downloading (empty = download) |
 | `tlc.local.distroDir` | `""` | Locally unpacked engine distribution used instead of downloading: an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build for llama.cpp (ignored by mlx; empty = download). Before the first download the extension asks whether to download or pick such a folder |
 | `tlc.local.engineDir` | `""` | Directory for the downloaded engine (empty = extension storage; changing it moves the engine) |
 | `tlc.local.modelDir` | `""` | Directory for the downloaded models (empty = extension storage; changing it moves the models) |
-| `tlc.local.modelCacheDir` | `""` | Directory for the NPU compiled-blob cache (`GGML_OPENVINO_COMPILED_MODEL_CACHE_DIR`) — NPU starts after the first one are much faster (empty = extension storage) |
+| `tlc.local.modelCacheDir` | `""` | Directory for the local model cache (cleared by `TLC: Reset Local Engine` → Clear model cache; empty = extension storage) |
 | `tlc.local.modelPath` | `""` | Path to a local model file to use instead of downloading (empty = download): a GGUF file for llama.cpp, an IR `.xml` (with its `.bin` alongside) or model directory for ovgenai, an mlx model directory for mlx |
 | `tlc.local.modelUrls` | `{}` | Per-model download URL overrides, keyed by model id (`{ "1.5b": "https://mirror/.../model.gguf" }`); for the ovgenai kind, key individual IR files as `1.5b/openvino_model.bin` |
 | `tlc.local.huggingfaceUrl` | `https://huggingface.co` | Base URL for model downloads (local mode only; change to a mirror) |
@@ -114,7 +114,7 @@ All fields apply live. The fields and the selection stay in sync: selecting a bu
 
 ## Debugging
 
-The TLC output channel shows the engine's own log lines (`llama-server: …`) at the **Trace** level — set the channel filter to Trace to see them, including NPU compile progress on the openvino build.
+The TLC output channel shows the engine's own log lines (`llama-server: …`) at the **Trace** level — set the channel filter to Trace to see them.
 
 ## Building and testing
 

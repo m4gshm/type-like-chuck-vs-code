@@ -20,6 +20,12 @@ describe('downloadFile', () => {
         res.writeHead(200);
         res.write('chunk');
         req.on('close', () => res.destroy());
+      } else if (req.url === '/drop') {
+        // Server-side connection drop mid-body: content-length promises more
+        // data than is ever sent.
+        res.writeHead(200, { 'content-length': 1000 });
+        res.write('chunk');
+        setTimeout(() => res.destroy(), 50);
       } else {
         res.writeHead(404);
         res.end();
@@ -59,6 +65,13 @@ describe('downloadFile', () => {
     const pending = downloadFile({ url: `${baseUrl}/hang`, destination, signal: controller.signal });
     setTimeout(() => controller.abort(), 50);
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(stat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(`${destination}.part`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('wraps a server-side mid-stream connection drop with context', async () => {
+    const destination = join(dir, 'drop.bin');
+    await expect(downloadFile({ url: `${baseUrl}/drop`, destination })).rejects.toThrow(/Download failed after \d+ bytes: .+ \(.+\/drop\)/);
     await expect(stat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(stat(`${destination}.part`)).rejects.toMatchObject({ code: 'ENOENT' });
   });

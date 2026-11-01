@@ -38,7 +38,7 @@ class FakeChild extends EventEmitter {
 
 const baseOptions = (overrides: Partial<StdioRunnerStartOptions> = {}): StdioRunnerStartOptions => ({
   runnerPath: '/ext/binaries/ovgenai/linux-x64/tlc-ovgenai-runner',
-  modelPath: '/models/1.5b-int8-ov',
+  modelPath: '/models/1.5b-nf4-ov',
   device: 'NPU',
   ...overrides,
 });
@@ -58,7 +58,7 @@ describe('startStdioRunner', () => {
   it('resolves on the ready event and exposes the reported device', async () => {
     const children: FakeChild[] = [];
     const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawnFake(children) });
-    expect(children[0].args).toEqual(['--model', '/models/1.5b-int8-ov', '--device', 'NPU']);
+    expect(children[0].args).toEqual(['--model', '/models/1.5b-nf4-ov', '--device', 'NPU']);
     expect(runner.device).toBe('NPU');
     await runner.stop();
   });
@@ -72,6 +72,33 @@ describe('startStdioRunner', () => {
       return child;
     };
     await expect(startStdioRunner(baseOptions(), { spawnImpl: spawn as never })).rejects.toThrow('load failed: bad model');
+  });
+
+  it('skips non-JSON stdout noise before the ready event', async () => {    const children: FakeChild[] = [];
+    const logs: string[] = [];
+    const spawn = (_cmd: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+      const child = new FakeChild(args, opts.env);
+      children.push(child);
+      setTimeout(() => {
+        child.stdout.write('\x1b[36m[INFO] compilation finished\n');
+        child.emitLine({ type: 'ready', model: args[2] ?? '', device: 'NPU', ctx: 0 });
+      }, 0);
+      return child;
+    };
+    const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawn as never, log: (m) => logs.push(m) });
+    expect(runner.device).toBe('NPU');
+    await runner.stop();
+  });
+
+  it('waits indefinitely for ready with an infinite timeout', async () => {
+    const spawn = (_cmd: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+      const child = new FakeChild(args, opts.env);
+      setTimeout(() => child.emitLine({ type: 'ready', model: args[2] ?? '', device: 'NPU', ctx: 0 }), 200);
+      return child;
+    };
+    const runner = await startStdioRunner(baseOptions({ readyTimeoutMs: Number.POSITIVE_INFINITY }), { spawnImpl: spawn as never });
+    expect(runner.device).toBe('NPU');
+    await runner.stop();
   });
 
   it('rejects when the process dies before becoming ready', async () => {
@@ -99,31 +126,95 @@ describe('startStdioRunner', () => {
     await vi.waitFor(() => {
       expect(child.written.some((w) => w.includes('"type":"generate"'))).toBe(true);
     });
-    child.emitLine({ type: 'token', id: 1, text: 'if' });
-    child.emitLine({ type: 'token', id: 1, text: ' x' });
+    child.emitLine({ type: 'token', text: 'if' });
+    child.emitLine({ type: 'token', text: ' x' });
     child.emitLine({ type: 'done', id: 1, finishReason: 'stop' });
     await expect(generation).resolves.toEqual(['if', ' x']);
     await runner.stop();
   });
 
-  it('rejects a second generate while one is running', async () => {
+  it('queues a second generate while one is running (no busy rejection)', async () => {
+    const children: FakeChild[] = [];
+    const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawnFake(children) });
+    const child = children[0];
+    const first = (async () => {
+      const tokens: string[] = [];
+      for await (const token of runner.stream('a', 32, [])) {
+        tokens.push(token);
+      }
+      return tokens;
+    })();
+    await vi.waitFor(() => {
+      expect(child.written.filter((w) => w.includes('"type":"generate"')).length).toBe(1);
+    });
+    const second = (async () => {
+      const tokens: string[] = [];
+      for await (const token of runner.stream('b', 32, [])) {
+        tokens.push(token);
+      }
+      return tokens;
+    })();
+    await vi.waitFor(() => {
+      expect(child.written.filter((w) => w.includes('"type":"generate"')).length).toBe(2);
+    });
+    // Tokens carry no id: they stream to the oldest pending request.
+    child.emitLine({ type: 'token', text: 'a1' });
+    child.emitLine({ type: 'done', id: 1, finishReason: 'stop' });
+    // After done id=1 the queued request becomes the oldest and receives tokens.
+    child.emitLine({ type: 'token', text: 'b1' });
+    child.emitLine({ type: 'done', id: 2, finishReason: 'stop' });
+    await expect(first).resolves.toEqual(['a1']);
+    await expect(second).resolves.toEqual(['b1']);
+    await runner.stop();
+  });
+
+  it('rejects all pending requests when the runner closes', async () => {
+    const children: FakeChild[] = [];
+    const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawnFake(children) });
+    const child = children[0];
+    const first = (async () => {
+      for await (const _token of runner.stream('a', 32, [])) {
+        // never reached
+      }
+    })();
+    const second = (async () => {
+      for await (const _token of runner.stream('b', 32, [])) {
+        // never reached
+      }
+    })();
+    await vi.waitFor(() => {
+      expect(child.written.filter((w) => w.includes('"type":"generate"')).length).toBe(2);
+    });
+    child.emit('close', 1);
+    await expect(first).rejects.toThrow('runner exited');
+    await expect(second).rejects.toThrow('runner exited');
+    await runner.stop();
+  });
+
+  it('resolves a queued request cancelled before it starts with finishReason=cancel', async () => {
     const children: FakeChild[] = [];
     const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawnFake(children) });
     const child = children[0];
     void (async () => {
-      for await (const _token of runner.stream('a', 32, [])) {
+      for await (const _token of runner.stream('a', 500, [])) {
         // consume until done
       }
     })().catch(() => undefined);
     await vi.waitFor(() => {
       expect(child.written.some((w) => w.includes('"type":"generate"'))).toBe(true);
     });
-    await expect(async () => {
-      for await (const _token of runner.stream('b', 32, [])) {
-        // never reached
+    const controller = new AbortController();
+    const second = (async () => {
+      for await (const _token of runner.stream('b', 32, [], controller.signal)) {
+        // never reached: aborted while still queued
       }
-    }).rejects.toThrow('busy');
-    child.emitLine({ type: 'done', id: 1, finishReason: 'stop' });
+    })();
+    await vi.waitFor(() => {
+      expect(child.written.filter((w) => w.includes('"type":"generate"')).length).toBe(2);
+    });
+    controller.abort();
+    child.emitLine({ type: 'done', id: 2, finishReason: 'cancel' });
+    await expect(second).resolves.toBeUndefined();
     await runner.stop();
   });
 
@@ -140,7 +231,7 @@ describe('startStdioRunner', () => {
     await vi.waitFor(() => {
       expect(child.written.some((w) => w.includes('"type":"generate"'))).toBe(true);
     });
-    child.emitLine({ type: 'token', id: 1, text: 'x' });
+    child.emitLine({ type: 'token', text: 'x' });
     await vi.waitFor(() => {
       expect(child.written.some((w) => w.includes('"type":"cancel"'))).toBe(true);
     });
@@ -271,21 +362,21 @@ describe('probeRunnerVersion', () => {
 });
 
 describe('ir model catalog', () => {
-  it('exposes the OpenVINO int8-ov repos with the full file set', () => {
+  it('exposes the OpenVINO nf4 repos with the full file set', () => {
     const spec = irModel('1.5b');
-    expect(spec.repo).toBe('OpenVINO/Qwen2.5-Coder-1.5B-Instruct-int8-ov');
+    expect(spec.repo).toBe('m4gshm/Qwen2.5-Coder-1.5B-nf4-sym-g-1-se-awq');
     expect(spec.files).toContain('openvino_model.xml');
     expect(spec.files).toContain('openvino_model.bin');
     expect(spec.files).toContain('openvino_tokenizer.xml');
     expect(spec.files).toContain('openvino_detokenizer.bin');
     // dirName is unique per model+format so families never collide; template
     // drives the FIM template suggestion.
-    expect(spec.dirName).toBe('1.5b-int8-ov');
+    expect(spec.dirName).toBe('1.5b-nf4-ov');
     expect(spec.template).toBe('qwen2');
   });
 
   it('builds resolve urls from the hf base', () => {
-    expect(irModelFileUrl(irModel('0.5b'), 'openvino_model.bin')).toBe('https://huggingface.co/OpenVINO/Qwen2.5-Coder-0.5B-Instruct-int8-ov/resolve/main/openvino_model.bin');
+    expect(irModelFileUrl(irModel('0.5b'), 'openvino_model.bin')).toBe('https://huggingface.co/m4gshm/Qwen2.5-Coder-0.5B-nf4-sym-g-1-se-awq/resolve/main/openvino_model.bin');
   });
 });
 

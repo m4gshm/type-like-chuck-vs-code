@@ -62,6 +62,7 @@ export class CompletionsClient {
   private client: Pick<OpenAI, 'completions' | 'models'>;
   private apiKey: string | undefined;
   private stdioSource: StdioCompletionSource | undefined;
+  private modelLabel: string | undefined;
 
   constructor(
     private readonly getBaseUrl: () => string,
@@ -78,12 +79,14 @@ export class CompletionsClient {
     this.client = this.createClient();
   }
 
+  /** Transport label for traces: the stdio runner has no HTTP endpoint, so
+   * reporting the (placeholder) base URL there would mislead diagnostics. */
   get endpoint(): string {
-    return this.getBaseUrl();
+    return this.stdioSource !== undefined ? 'stdio' : this.getBaseUrl();
   }
 
   get model(): string {
-    return this.getModel();
+    return this.modelLabel ?? this.getModel();
   }
 
   private createClient(): Pick<OpenAI, 'completions' | 'models'> {
@@ -117,7 +120,23 @@ export class CompletionsClient {
     this.stdioSource = source;
   }
 
+  /** Model shown in traces while the stdio transport is active: the local
+   * engine serves tlc.local.model, unrelated to the remote tlc.model setting. */
+  setModelLabel(label: string | undefined): void {
+    this.modelLabel = label;
+  }
+
+  /** The OpenAI SDK silently defaults an empty baseURL to api.openai.com; an
+   * empty endpoint in local mode means the engine is not ready yet — fail fast
+   * instead of leaking a 401 from the wrong host. */
+  private requireEndpoint(): void {
+    if (this.getBaseUrl() === '') {
+      throw new CompletionError('connection', 'No completions endpoint configured (local engine is not ready).');
+    }
+  }
+
   async listModels(): Promise<ModelInfo[]> {
+    this.requireEndpoint();
     const page = await this.client.models.list();
     const models: ModelInfo[] = [];
     for await (const model of page) {
@@ -147,6 +166,7 @@ export class CompletionsClient {
         signal,
       );
     }
+    this.requireEndpoint();
     try {
       // `timings_per_token` is a llama.cpp extension; other servers ignore the
       // unknown field. Raw param types: the SDK's would reject the extra key.
@@ -208,7 +228,9 @@ export class CompletionsClient {
     let text = '';
     let done = false;
     let loopDetected = false;
+    let chunksSeen = 0;
     for await (const chunk of chunks) {
+      chunksSeen++;
       const chunkText = chunk.choices[0]?.text ?? '';
       if (chunkText.length > 0) {
         text += chunkText;
@@ -252,7 +274,9 @@ export class CompletionsClient {
         text = text.split(token).join('');
       }
     }
-    this.logResponse?.(`api response (${text.length} chars, ${Date.now() - startedAt} ms): ${text}`);
+    // chunks=0 means the backend produced nothing; chunks>0 with 0 chars means
+    // tokens arrived but were cut (newline/stop token/loop/abort).
+    this.logResponse?.(`api response (${text.length} chars, ${chunksSeen} chunks${signal.aborted ? ', aborted' : ''}, ${Date.now() - startedAt} ms): ${text}`);
     return { text: text.trim().length === 0 ? '' : text };
   }
 }

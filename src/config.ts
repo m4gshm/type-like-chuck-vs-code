@@ -75,7 +75,9 @@ export function readConfig(): ExtensionConfig {
     ? 'mlx'
     : engineKind;
   const npuLimitRaw = c.get<number>('local.npuContextMaxLength', 8192);
-  const npuEligible = mode === 'local' && npuLimitRaw > 0 && device === 'npu';
+  // Only the ovgenai runner actually runs on the NPU (llama.cpp redirects an
+  // explicit npu to GPU), so the NPU context cap applies there only.
+  const npuEligible = mode === 'local' && npuLimitRaw > 0 && device === 'npu' && effectiveKind === 'ovgenai';
   let contextMaxLength = c.get<number>('contextMaxLength', 0);
   if (npuEligible && (contextMaxLength <= 0 || contextMaxLength > npuLimitRaw)) {
     contextMaxLength = npuLimitRaw;

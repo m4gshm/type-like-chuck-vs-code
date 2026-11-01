@@ -22,7 +22,7 @@ The extension SHALL resolve a llama.cpp GitHub release asset matching the curren
 - **THEN** only the OpenVINO runtime archive is downloaded; the runner binary itself comes from the extension package
 
 ### Requirement: Model download with choice of size
-The extension SHALL offer the Qwen2.5-Coder GGUF models 0.5B, 1.5B and 3B via `TLC: Select Local Model`, download the chosen model file into global storage if missing, and remember the choice in `tlc.local.model` (default 1.5B). For the `ovgenai` kind the catalog SHALL offer the same sizes as native IR models (`.xml` + `.bin` pairs, int8-ov), downloaded as a pair with pair-existence validation, and `tlc.local.modelPath` SHALL accept a local IR `.xml` file as an offline alternative. The picker SHALL offer a "From disk…" entry (GGUF for llama.cpp, IR `.xml` for ovgenai) that sets `tlc.local.modelPath` and downloads nothing. When the resolved model is not a Qwen2.5-Coder catalog entry, the extension SHALL warn on engine start that the model was not validated for FIM completions; completions continue.
+The extension SHALL offer the Qwen2.5-Coder GGUF models 0.5B, 1.5B and 3B via `TLC: Select Local Model`, download the chosen model file into global storage if missing, and remember the choice in `tlc.local.model` (default 1.5B). For the `ovgenai` kind the catalog SHALL offer the same sizes as native IR models (`.xml` + `.bin` pairs, nf4 quantization from the m4gshm Hugging Face repos), downloaded as a pair with pair-existence validation, and `tlc.local.modelPath` SHALL accept a local IR `.xml` file as an offline alternative. The picker SHALL offer a "From disk…" entry (GGUF for llama.cpp, IR `.xml` for ovgenai) that sets `tlc.local.modelPath` and downloads nothing. When the resolved model is not a Qwen2.5-Coder catalog entry, the extension SHALL warn on engine start that the model was not validated for FIM completions; completions continue.
 
 #### Scenario: First model download
 - **WHEN** local mode is entered for the first time with no model present
@@ -54,6 +54,10 @@ The user SHALL be able to point the extension at a locally unpacked engine distr
 #### Scenario: Distribution question dismissed
 - **WHEN** the engine/runtime distribution is missing and the user dismisses the download-or-folder question
 - **THEN** the preparation is canceled silently (same semantics as a canceled download) and no partial state is left
+
+#### Scenario: Engine reset chooses the engine kind first
+- **WHEN** the user runs `TLC: Reset Local Engine` → "Re-download engine"
+- **THEN** a quick pick offers the engine kinds available on the platform (current marked) and the chosen kind is stored in `tlc.local.engineKind` before the download-or-folder question
 
 #### Scenario: Model picked from disk
 - **WHEN** the user picks the "From disk…" entry in `TLC: Select Local Model` and chooses a model file

@@ -53,6 +53,15 @@ function nodeRequest(url: URL, agent: ProxyAgentInstance | undefined, signal: Ab
 
 const REDIRECT_LIMIT = 5;
 
+// A dropped connection surfaces as Node's bare "aborted" — wrap it with context.
+function downloadError(err: unknown, url: string, signal: AbortSignal | undefined, downloaded?: number): Error {
+  if (signal?.aborted) {
+    return new DOMException('Download canceled', 'AbortError');
+  }
+  const bytes = downloaded === undefined ? '' : ` after ${downloaded} bytes`;
+  return new Error(`Download failed${bytes}: ${err instanceof Error ? err.message : String(err)} (${url})`);
+}
+
 async function requestFollowingRedirects(url: URL, agent: ProxyAgentInstance | undefined, signal: AbortSignal | undefined, proxy?: URL): Promise<SimpleResponse> {
   let current = url;
   for (let redirects = 0; ; redirects += 1) {
@@ -93,7 +102,12 @@ export async function downloadFile({ url, destination, onProgress, signal, fetch
   let totalBytes: number | undefined;
   let source: Readable;
   if (fetchImpl !== undefined) {
-    const response = await fetchImpl(url, { signal });
+    let response: Awaited<ReturnType<typeof fetchImpl>>;
+    try {
+      response = await fetchImpl(url, { signal });
+    } catch (err) {
+      throw downloadError(err, url, signal);
+    }
     if (!response.ok || response.body === null) {
       throw new Error(`Download failed (${response.status}): ${url}`);
     }
@@ -101,7 +115,12 @@ export async function downloadFile({ url, destination, onProgress, signal, fetch
     totalBytes = totalHeader !== null && Number.isFinite(+totalHeader) ? Number(totalHeader) : undefined;
     source = Readable.fromWeb(response.body as import('stream/web').ReadableStream);
   } else {
-    const response = await defaultRequest(url, signal);
+    let response: Awaited<ReturnType<typeof defaultRequest>>;
+    try {
+      response = await defaultRequest(url, signal);
+    } catch (err) {
+      throw downloadError(err, url, signal);
+    }
     if (response.status !== 200) {
       throw new Error(`Download failed (${response.status}): ${url}`);
     }
@@ -119,10 +138,7 @@ export async function downloadFile({ url, destination, onProgress, signal, fetch
     await pipeline(source, createWriteStream(partFile));
   } catch (err) {
     await rm(partFile, { force: true });
-    if (signal?.aborted) {
-      throw new DOMException('Download canceled', 'AbortError');
-    }
-    throw err;
+    throw downloadError(err, url, signal, downloaded);
   }
   await rename(partFile, destination);
 }

@@ -24,6 +24,17 @@ function clientWith(sdk: ReturnType<typeof fakeSdk>): CompletionsClient {
   );
 }
 
+function clientWithoutEndpoint(sdk: ReturnType<typeof fakeSdk>): CompletionsClient {
+  return new CompletionsClient(
+    () => '',
+    () => 'stub-model',
+    () => 256,
+    undefined,
+    undefined,
+    () => sdk as unknown as Pick<OpenAI, 'completions' | 'models'>,
+  );
+}
+
 async function* stream(parts: string[]) {
   for (const text of parts) {
     yield { choices: [{ text }] };
@@ -39,6 +50,12 @@ function complete(client: CompletionsClient, prefix = '', suffix = '', signal = 
 // ---------------------------------------------------------------------------
 
 describe('CompletionsClient.complete', () => {
+  it('fails fast on an empty endpoint instead of leaking to the SDK default host', async () => {
+    const sdk = fakeSdk(async () => stream(['should not be reached']));
+    await expect(complete(clientWithoutEndpoint(sdk))).rejects.toThrow('No completions endpoint');
+    expect(sdk.completions.create).not.toHaveBeenCalled();
+  });
+
   it('accumulates streamed chunks into the completion text', async () => {
     const sdk = fakeSdk(async () => stream(['Hello', ', ', 'world']));
     const result = await complete(clientWith(sdk), 'const x = ', '\n');
@@ -185,5 +202,24 @@ describe('CompletionsClient stdio transport', () => {
     const result = await complete(client);
     expect(httpUsed).toBe(true);
     expect(result.text).toBe('from http');
+  });
+
+  it('reports the local model label for traces and falls back when cleared', () => {
+    const client = clientWith(fakeSdk(async () => stream([])));
+    client.setModelLabel('3b');
+    expect(client.model).toBe('3b');
+    client.setModelLabel(undefined);
+    expect(client.model).toBe('stub-model');
+  });
+
+  it('labels the endpoint as stdio only while a source is set', () => {
+    const client = clientWith(fakeSdk(async () => stream([])));
+    expect(client.endpoint).toBe('http://stub/v1');
+    client.setStdioSource(async function* () {
+      yield 'x';
+    });
+    expect(client.endpoint).toBe('stdio');
+    client.setStdioSource(undefined);
+    expect(client.endpoint).toBe('http://stub/v1');
   });
 });
