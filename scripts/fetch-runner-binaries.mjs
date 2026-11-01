@@ -4,9 +4,11 @@
 // into binaries/<engine>/<platform>/ with the final names the extension
 // resolves at runtime, restoring the executable bit lost in release assets.
 //
-// Backend version: pin with RUNNER_VERSION=<tag> (e.g. v0.1.0), otherwise each
-// backend repo's latest GitHub release is used. Runners already present on
-// disk are not re-downloaded.
+// Backend version: pinned per repo below so a plugin build always pairs with
+// a runner release it was developed against (compatibility over freshness).
+// Override with RUNNER_VERSION=<tag> to fetch that tag from every backend;
+// an explicit override also disables the local-build fallback. Runners
+// already present on disk are not re-downloaded.
 import { existsSync, mkdirSync, createWriteStream, copyFileSync } from 'node:fs';
 import { chmod, rename } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
@@ -26,7 +28,11 @@ const TARGETS = [
 
 const githubToken = process.env.GITHUB_TOKEN;
 const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubToken}` } : {};
-const version = process.env.RUNNER_VERSION;
+const versionOverride = process.env.RUNNER_VERSION?.trim();
+const DEFAULT_RUNNER_VERSIONS = {
+  'type-like-chuck-backed-openvino': 'v0.1.0',
+};
+const version = (repo) => versionOverride ?? DEFAULT_RUNNER_VERSIONS[repo];
 
 async function download(url, destination) {
   const response = await fetch(url, { headers, redirect: 'follow' });
@@ -39,12 +45,13 @@ async function download(url, destination) {
 }
 
 async function releaseAssets(repo) {
-  const endpoint = version !== undefined && version.length > 0
-    ? `https://api.github.com/repos/${OWNER}/${repo}/releases/tags/${version}`
+  const tag = version(repo);
+  const endpoint = tag !== undefined
+    ? `https://api.github.com/repos/${OWNER}/${repo}/releases/tags/${tag}`
     : `https://api.github.com/repos/${OWNER}/${repo}/releases/latest`;
   const release = await (await fetch(endpoint, { headers })).json();
   if (release.message !== undefined) {
-    throw new Error(`Backend release lookup failed (${release.message})${version ? ` for tag ${version}` : ''}.`);
+    throw new Error(`Backend release lookup failed (${release.message})${tag ? ` for tag ${tag}` : ''}.`);
   }
   return release.assets ?? [];
 }
@@ -58,7 +65,7 @@ const localRepoDir = (repo) => join(dirname(fileURLToPath(import.meta.url)), '..
 // This avoids needing a GitHub release for local builds and F5 runs.
 // Skipped when RUNNER_VERSION pins a release.
 function localBuild(target) {
-  if (version !== undefined && version.length > 0) {
+  if (versionOverride !== undefined) {
     return undefined;
   }
   const repoDir = localRepoDir(target.repo);
@@ -95,9 +102,24 @@ for (const target of TARGETS) {
     continue;
   }
   if (!assetsByRepo.has(target.repo)) {
-    assetsByRepo.set(target.repo, await releaseAssets(target.repo));
+    try {
+      assetsByRepo.set(target.repo, await releaseAssets(target.repo));
+    } catch (err) {
+      // A repo without a pin may simply not be published yet (e.g. mlx);
+      // skip it instead of failing the whole package run. A pinned lookup
+      // failure is fatal: the pinned release must exist.
+      if (version(target.repo) === undefined) {
+        console.warn(`skipping ${OWNER}/${target.repo}: ${err.message}`);
+        assetsByRepo.set(target.repo, null);
+      } else {
+        throw err;
+      }
+    }
   }
   const assets = assetsByRepo.get(target.repo);
+  if (assets === null) {
+    continue;
+  }
   const asset = assets.find((a) => a.name === target.asset);
   if (asset === undefined) {
     console.error(`Missing runner binary: ${target.asset} (not found among ${OWNER}/${target.repo} release assets).`);
