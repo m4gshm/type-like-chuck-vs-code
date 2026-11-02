@@ -8,7 +8,6 @@ const SUPPORTED_PATTERNS: readonly string[] = [
   'qwen2-coder',
   'qwen3-coder',
   'mellum',
-  'lfm2',
   'qwen2.5',
   'qwen3',
   'qwen2',
@@ -27,15 +26,12 @@ export function pickSupportedModel(models: readonly string[]): string | undefine
 
 /**
  * Suggests a built-in template id for a model name (partial match):
- * qwen3 → qwen3, other qwen → qwen2, mellum → mellum, lfm → lfm2.
+ * qwen3 → qwen3, other qwen → qwen2, mellum → mellum.
  */
 export function pickTemplateForModel(model: string): string | undefined {
   const m = model.toLowerCase();
   if (m.includes('mellum')) {
     return 'mellum';
-  }
-  if (m.includes('lfm')) {
-    return 'lfm2';
   }
   if (m.includes('qwen3')) {
     return 'qwen3';

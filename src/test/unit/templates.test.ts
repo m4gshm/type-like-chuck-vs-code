@@ -25,10 +25,9 @@ describe('template registry', () => {
     expect(template.render('fn a() {', '}')).toBe('<|fim_prefix|>fn a() {<|fim_suffix|>}<|fim_middle|>');
   });
 
-  it('renders qwen3, lfm2 and mellum prompts with family-specific markers', () => {
+  it('renders qwen3 and mellum prompts with family-specific markers', () => {
     const cases: Array<[string, string, string]> = [
       ['qwen3', '<|fim_prefix|>pre', 'suf<|fim_middle|>'],
-      ['lfm2', '<|fim_pre|>pre', 'suf<|fim_mid|>'],
       ['mellum', '<fim_prefix>pre', 'suf<fim_middle>'],
     ];
     for (const [id, expectedStart, expectedEnd] of cases) {

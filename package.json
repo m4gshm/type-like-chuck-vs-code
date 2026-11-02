@@ -283,14 +283,12 @@
             "enum": [
               "qwen2",
               "qwen3",
-              "lfm2",
               "mellum",
               "custom"
             ],
             "enumDescriptions": [
               "Qwen2 / Qwen2.5-Coder FIM format",
               "Qwen3 / Qwen3-Coder FIM format",
-              "Liquid AI LFM2 FIM format",
               "JetBrains Mellum FIM format",
               "User-defined template from the Prefix / Suffix / Middle / Stop settings below"
             ],

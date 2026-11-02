@@ -52,24 +52,6 @@ const qwen3: FimTemplate = {
   id: 'qwen3',
 };
 
-// LFM2 (Liquid AI): shortened FIM markers, verified against the LFM2 tokenizer.
-const lfm2: FimTemplate = {
-  ...fim(
-    '<|fim_pre|>',
-    '<|fim_suf|>',
-    '<|fim_mid|>',
-    [
-      '<|fim_pre|>',
-      '<|fim_suf|>',
-      '<|fim_mid|>',
-      '<|file_start|>',
-      '<|file_end|>',
-      '<|endoftext|>',
-    ],
-  ),
-  id: 'lfm2',
-};
-
 // Mellum (JetBrains): FIM markers without pipes, verified against the Mellum tokenizer.
 const mellum: FimTemplate = {
   ...fim(
@@ -89,6 +71,6 @@ const mellum: FimTemplate = {
   id: 'mellum',
 };
 
-export const BUILTIN_TEMPLATES: readonly FimTemplate[] = [qwen2, qwen3, lfm2, mellum];
+export const BUILTIN_TEMPLATES: readonly FimTemplate[] = [qwen2, qwen3, mellum];
 
 export const DEFAULT_TEMPLATE_ID = 'qwen2';

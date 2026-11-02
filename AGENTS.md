@@ -54,7 +54,7 @@ plain Node; `vscode` is stubbed in `src/test/unit/vscode-stub.ts`).
 | `model_polling.ts` | Poll interval constant and `modelIdsKey` (change detection for `/v1/models`) |
 | `completions_client.ts` | OpenAI SDK wrapper: `/v1/models`, streaming FIM request, stop-token cut, loop detection, line truncation, error classification (`auth`/`connection`/`other`) |
 | `completion_provider.ts` | `InlineCompletionItemProvider`: debounce, manual trigger, cache, pending-request grace, forbidden files |
-| `templates/` | `TemplateRegistry`, built-ins (qwen2, qwen3, lfm2, mellum), custom template compiled from the marker settings |
+| `templates/` | `TemplateRegistry`, built-ins (qwen2, qwen3, mellum), custom template compiled from the marker settings |
 | `prompt.ts` | FIM rendering and reserved-token masking in user code |
 | `forbidden_files.ts` | Glob matching (micromatch) of files where completions are disabled |
 | `connection_watchdog.ts` | Probes the server, pauses/re-enables completions |
