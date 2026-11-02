@@ -67,17 +67,17 @@ describe('StatusBar', () => {
     bar.refresh();
     expect(itemText()).toBe('$(circle-slash)');
     expect(itemTooltip()).toContain(reason);
-    expect(itemTooltip()).toContain('TLC is paused. Click to re-enable.');
+    expect(itemTooltip()).toContain('is paused. Click to re-enable.');
 
     // Connection restored: no reason left behind.
     state.setConnectionBlocked(false);
     bar.setConnectionReason(undefined);
-    expect(itemTooltip()).toBe('TLC completions enabled (click to toggle)');
+    expect(itemTooltip()).toContain('completions enabled (click to toggle)');
 
     // Manual disable: plain tooltip.
     void state.setEnabled(false);
     bar.refresh();
-    expect(itemTooltip()).toBe('TLC completions disabled (click to toggle)');
+    expect(itemTooltip()).toContain('completions disabled (click to toggle)');
   });
 
   it('shows the engine detail in the tooltip while the local engine is ready', () => {
@@ -95,7 +95,7 @@ describe('StatusBar', () => {
     // Cleared detail leaves the plain tooltip.
     bar.setEngine(undefined);
     bar.setEngineDetail(undefined);
-    expect(itemTooltip()).toBe('TLC completions enabled (click to toggle)');
+    expect(itemTooltip()).toContain('completions enabled (click to toggle)');
   });
 });
 

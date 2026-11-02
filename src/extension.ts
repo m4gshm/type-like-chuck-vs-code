@@ -22,6 +22,7 @@ import { TemplateFieldSync } from './template_fields';
 import { LocalModeStatusUi } from './local_mode_status';
 import { probeCapability } from './local_engine/capability';
 import { normalizeLocalModelSetting, offerLocalEngine } from './startup_prompts';
+import { BRAND } from './brand';
 import { registerTlcCommands, pickLocalModelFromDisk, presentModelQuickPick, TlcCommandDeps } from './commands';
 
 const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -72,7 +73,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await vscode.workspace.getConfiguration('tlc').update('promptTemplate', suggestion, vscode.ConfigurationTarget.Global);
     templates = buildTemplateRegistry(suggestion, config().customTemplate);
     void vscode.window.showInformationMessage(
-      `TLC: template "${suggestion}" selected to match model "${modelId}".`,
+      `${BRAND}: template "${suggestion}" selected to match model "${modelId}".`,
     );
   };
   templates = buildTemplateRegistry(config().promptTemplate, config().customTemplate);
@@ -150,7 +151,7 @@ export function activate(context: vscode.ExtensionContext): void {
         { label: '$(cloud-download) Download', detail: `Download the ${kindLabel} archive on demand`, value: DISTRO_CHOICE_DOWNLOAD },
         { label: '$(folder-opened) Use an existing folder…', detail: `Pick an unpacked ${kindLabel} on disk (saved to tlc.local.distroDir)`, value: 'disk' as const },
       ],
-      { title: 'TLC: Local Engine Runtime', placeHolder: `Download the ${kindLabel} or use an existing unpacked distribution?` },
+      { title: `${BRAND}: Local Engine Runtime`, placeHolder: `Download the ${kindLabel} or use an existing unpacked distribution?` },
     );
     if (chosen === undefined) {
       return undefined;
@@ -162,7 +163,7 @@ export function activate(context: vscode.ExtensionContext): void {
       canSelectFiles: false,
       canSelectFolders: true,
       canSelectMany: false,
-      title: 'TLC: Select Unpacked Engine Distribution',
+      title: `${BRAND}: Select Unpacked Engine Distribution`,
     });
     if (folder?.[0] === undefined) {
       return undefined;
@@ -250,7 +251,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const hint = localModelHint();
       await applyTemplateSuggestion(hint.modelId, hint.template);
       localModeUi.handle({ status: ENGINE_STATUS.starting });
-      await engineTasks.run('TLC: preparing the local engine', (signal) => managerEnsureReady(signal));
+      await engineTasks.run(`${BRAND}: preparing the local engine`, (signal) => managerEnsureReady(signal));
     } else {
       await engineManager.stop();
       client.setStdioSource(undefined);
@@ -286,12 +287,12 @@ export function activate(context: vscode.ExtensionContext): void {
       await migrateDirectory(previous.modelDir, paths.modelDir);
       await migrateDirectory(previous.modelCacheDir, paths.modelCacheDir);
     }
-    info(`TLC local engine directories: engine=${paths.engineRoot} models=${paths.modelDir} cache=${paths.modelCacheDir}`);
+    info(`${BRAND} local engine directories: engine=${paths.engineRoot} models=${paths.modelDir} cache=${paths.modelCacheDir}`);
     // Engine runtime internals (OV GenAI: ~85 chars below engineRoot) must fit
     // the Windows MAX_PATH of 260, including a custom tlc.local.engineDir.
     if (paths.engineRoot.length + 100 > 260) {
       void vscode.window.showWarningMessage(
-        `TLC: the engine directory is long (${paths.engineRoot.length} characters); runtime library paths may exceed the Windows 260-character limit and fail to load. Consider a shorter tlc.local.engineDir.`,
+        `${BRAND}: the engine directory is long (${paths.engineRoot.length} characters); runtime library paths may exceed the Windows 260-character limit and fail to load. Consider a shorter tlc.local.engineDir.`,
       );
     }
   };
@@ -341,11 +342,11 @@ export function activate(context: vscode.ExtensionContext): void {
       const current = config().model;
       const onList = models.some((m) => m.id === current);
       void vscode.window.showInformationMessage(
-        `TLC: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
+        `${BRAND}: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
         + (onList ? `Current model: ${current}.` : `Model updated from the server (was "${current}").`),
       );
     } catch (err) {
-      const message = `TLC: cannot reach ${config().baseUrl}: ${errMessage(err)}`;
+      const message = `${BRAND}: cannot reach ${config().baseUrl}: ${errMessage(err)}`;
       connectionWatchdog.reportFailure(message);
       void vscode.window.showWarningMessage(message);
     }
@@ -436,16 +437,16 @@ export function activate(context: vscode.ExtensionContext): void {
       await complectionState.setEnabled(false);
       complectionProvider.onDisabled();
       statusBar.refresh();
-      warn('GitHub Copilot detected: TLC completions disabled.');
+      warn('GitHub Copilot detected: Type like Chuck completions disabled.');
       void vscode.window.showInformationMessage(
-        'TLC completions are disabled because GitHub Copilot is enabled. TLC re-enables automatically when Copilot turns off.',
+        `${BRAND} completions are disabled because GitHub Copilot is enabled. ${BRAND} re-enables automatically when Copilot turns off.`,
       );
     } else if (!active && copilotAutoDisabled) {
       copilotAutoDisabled = false;
       if (!firstCheck) {
         await complectionState.setEnabled(true);
         statusBar.refresh();
-        void vscode.window.showInformationMessage('GitHub Copilot is off: TLC completions re-enabled.');
+        void vscode.window.showInformationMessage('GitHub Copilot is off: Type like Chuck completions re-enabled.');
       }
     }
   };
@@ -520,7 +521,7 @@ export function activate(context: vscode.ExtensionContext): void {
         } else {
           const revert = previous.localModel.length > 0 && previous.localModel !== 'custom' ? previous.localModel : DEFAULT_LOCAL_MODEL;
           await vscode.workspace.getConfiguration('tlc').update('local.model', revert, vscode.ConfigurationTarget.Global);
-          warn(`TLC local engine: model "custom" was canceled — reset to ${revert}.`);
+          warn(`${BRAND} local engine: model "custom" was canceled — reset to ${revert}.`);
         }
       } else if (modeChanged) {
         await applyMode();
@@ -530,7 +531,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await applyTemplateSuggestion(hint.modelId, hint.template);
         }
         localModeUi.handle({ status: ENGINE_STATUS.starting });
-        await engineTasks.run('TLC: restarting the local engine', (signal) => managerEnsureReady(signal));
+        await engineTasks.run(`${BRAND}: restarting the local engine`, (signal) => managerEnsureReady(signal));
       }
       if (event.affectsConfiguration('tlc.openai.apiKey') || event.affectsConfiguration('tlc.apiKey')) {
         await syncApiKey();
@@ -598,9 +599,9 @@ export function activate(context: vscode.ExtensionContext): void {
       // just log the capability probe for diagnostics.
       const rec = await probeCapability({ platform: process.platform, arch: process.arch });
       if (rec.kind === 'local') {
-        info(`TLC local engine: ${rec.engineKind} (${rec.device}) — ${rec.reason}.`);
+        info(`${BRAND} local engine: ${rec.engineKind} (${rec.device}) — ${rec.reason}.`);
       } else {
-        info(`TLC local engine: no local acceleration (${rec.reason}).`);
+        info(`${BRAND} local engine: no local acceleration (${rec.reason}).`);
       }
       void applyMode();
       return;
@@ -639,7 +640,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     warn(`Unknown prompt template "${selected ?? 'default'}" and no template matches model "${config().model}".`);
     const choice = await vscode.window.showWarningMessage(
-      `TLC: prompt template "${selected ?? 'default'}" is not recognized and no template matches model "${config().model}". Please pick a template.`,
+      `${BRAND}: prompt template "${selected ?? 'default'}" is not recognized and no template matches model "${config().model}". Please pick a template.`,
       'Open Settings',
     );
     if (choice === 'Open Settings') {

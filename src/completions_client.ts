@@ -1,3 +1,4 @@
+import { BRAND } from './brand';
 import OpenAI from 'openai';
 import { maskReservedTokens } from './prompt';
 import { truncateToLine } from './line_truncation';
@@ -210,7 +211,7 @@ export class CompletionsClient {
       }
       if (err instanceof OpenAI.APIError) {
         if (err.status === 401 || err.status === 403) {
-          throw new CompletionError('auth', 'Authentication failed. Set the API key with the "TLC: Set API Key" command.', err);
+          throw new CompletionError('auth', `Authentication failed. Set the API key with the "${BRAND}: Set API Key" command.`, err);
         }
         throw new CompletionError('other', `API error ${err.status ?? ''}: ${err.message}`, err);
       }

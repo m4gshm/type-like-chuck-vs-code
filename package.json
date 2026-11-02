@@ -40,52 +40,52 @@
       {
         "command": "tlc.triggerCompletion",
         "title": "Trigger Completion Now",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.setApiKey",
         "title": "Set API Key",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.clearApiKey",
         "title": "Clear API Key",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.testConnection",
         "title": "Test Connection",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.selectModel",
         "title": "Select Model",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.selectMode",
         "title": "Select Mode",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.selectLocalModel",
         "title": "Select Local Model",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.selectLocalDevice",
         "title": "Select Local Device",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.resetLocalEngine",
         "title": "Reset Local Engine",
-        "category": "TLC"
+        "category": "Type like Chuck"
       },
       {
         "command": "tlc.enableDisableCompletions",
         "title": "Enable/Disable Completions",
-        "category": "TLC"
+        "category": "Type like Chuck"
       }
     ],
     "keybindings": [

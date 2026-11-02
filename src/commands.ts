@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { BRAND } from './brand';
+
 import type { ExtensionConfig, LocalDevice } from './config';
 import type { ApiKeyStorage } from './api_key_storage';
 import type { CompletionsClient, ModelInfo } from './completions_client';
@@ -44,7 +46,7 @@ export const pickLocalModelFromDisk = async (kind: ExtensionConfig['localEngineK
     canSelectFolders: dialog.canSelectFolders,
     canSelectMany: false,
     filters: dialog.filters,
-    title: 'TLC: Select Local Model From Disk',
+    title: `${BRAND}: Select Local Model From Disk`,
   });
   return file?.[0]?.fsPath;
 };
@@ -73,7 +75,7 @@ export const presentModelQuickPick = async (deps: TlcCommandDeps, models: ModelI
   });
 
   const chosen = await vscode.window.showQuickPick(items, {
-    title: 'TLC: Select Model',
+    title: `${BRAND}: Select Model`,
     placeHolder: 'Model to use for completions (fetched from the server\'s /v1/models)',
     matchOnDescription: true,
   });
@@ -84,7 +86,7 @@ export const presentModelQuickPick = async (deps: TlcCommandDeps, models: ModelI
     return { id: chosen.model.id, contextLength: chosen.model.contextLength };
   }
   const manual = await vscode.window.showInputBox({
-    title: 'TLC: Model Id',
+    title: `${BRAND}: Model Id`,
     prompt: 'Model name sent in completion requests',
     value: deps.config().model,
   });
@@ -117,16 +119,16 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
       }
       if (config().apiKey.length > 0) {
         void vscode.window.showWarningMessage(
-          'TLC: tlc.openai.apiKey is set in the settings and takes precedence over the secret-stored key.',
+          `${BRAND}: tlc.openai.apiKey is set in the settings and takes precedence over the secret-stored key.`,
         );
       }
       await deps.setApiKey(config().apiKey.length > 0 ? config().apiKey : key.length === 0 ? undefined : key);
-      void vscode.window.showInformationMessage('TLC API key updated.');
+      void vscode.window.showInformationMessage(`${BRAND} API key updated.`);
     }),
     vscode.commands.registerCommand('tlc.clearApiKey', async () => {
       await deps.apiKeyStorage.clear();
       await deps.setApiKey(config().apiKey.length > 0 ? config().apiKey : undefined);
-      void vscode.window.showInformationMessage('TLC API key cleared.');
+      void vscode.window.showInformationMessage(`${BRAND} API key cleared.`);
     }),
     vscode.commands.registerCommand('tlc.testConnection', () => deps.reportServerReachability()),
     vscode.commands.registerCommand('tlc.selectModel', async () => {
@@ -149,9 +151,9 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
       const chosen = await vscode.window.showQuickPick(
         [
           { label: '$(cloud) Remote server', detail: `OpenAI-compatible API at ${config().baseUrl}`, value: 'remote' },
-          { label: '$(device-desktop) Local engine', detail: 'TLC-managed llama.cpp (downloaded on demand, optional NPU/GPU)', value: 'local' },
+          { label: '$(device-desktop) Local engine', detail: `${BRAND}-managed llama.cpp (downloaded on demand, optional NPU/GPU)`, value: 'local' },
         ],
-        { title: 'TLC: Select Mode', placeHolder: `Current: ${config().mode}` },
+        { title: `${BRAND}: Select Mode`, placeHolder: `Current: ${config().mode}` },
       );
       if (chosen !== undefined && chosen.value !== config().mode) {
         await updateTlcSetting('mode', chosen.value);
@@ -161,7 +163,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
       const kind = config().localEngineKind;
       const chosen = await vscode.window.showQuickPick(
         localModelPickerItems(kind, config().localModel),
-        { title: 'TLC: Select Local Model', placeHolder: 'Model downloaded for the local engine' },
+        { title: `${BRAND}: Select Local Model`, placeHolder: 'Model downloaded for the local engine' },
       );
       if (chosen === undefined) {
         return;
@@ -199,7 +201,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
           description: config().localDevice === i.value ? '$(check) current' : undefined,
           value: i.value,
         })),
-        { title: 'TLC: Select Local Device' },
+        { title: `${BRAND}: Select Local Device` },
       );
       if (chosen !== undefined) {
         await updateTlcSetting('local.device', chosen.value);
@@ -211,12 +213,12 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
         { label: 'Re-download model', detail: 'Deletes the selected model (GGUF or OpenVINO IR) and downloads it again', target: 'model' },
         { label: 'Clear model cache', detail: 'Deletes the model cache; it is rebuilt on the next start', target: 'cache' },
       ];
-      const chosen = await vscode.window.showQuickPick(targets, { title: 'TLC: Reset Local Engine' });
+      const chosen = await vscode.window.showQuickPick(targets, { title: `${BRAND}: Reset Local Engine` });
       if (chosen === undefined) {
         return;
       }
       if (config().mode !== 'local') {
-        void vscode.window.showInformationMessage('TLC: switch to the local engine mode first (TLC: Select Mode).');
+        void vscode.window.showInformationMessage(`${BRAND}: switch to the local engine mode first (${BRAND}: Select Mode).`);
         return;
       }
       if (chosen.target === 'engine') {
@@ -234,7 +236,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
         ];
         const kind = await vscode.window.showQuickPick(
           kinds.map((k) => ({ ...k, description: config().localEngineKind === k.value ? '$(check) current' : undefined })),
-          { title: 'TLC: Reset Local Engine — Engine Kind' },
+          { title: `${BRAND}: Reset Local Engine — Engine Kind` },
         );
         if (kind === undefined) {
           return;
@@ -243,7 +245,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
           await updateTlcSetting('local.engineKind', kind.value);
         }
       }
-      await deps.engineTasks.run(`TLC: resetting the local ${chosen.target}`, (signal) => deps.engineManager.reset(chosen.target, signal));
+      await deps.engineTasks.run(`${BRAND}: resetting the local ${chosen.target}`, (signal) => deps.engineManager.reset(chosen.target, signal));
     }),
     vscode.commands.registerCommand('tlc.enableDisableCompletions', async () => {
       // Clicking the error icon retries the connection instead of toggling:
@@ -254,11 +256,11 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
         try {
           const models = await deps.checkServerModels();
           void vscode.window.showInformationMessage(
-            `TLC: ${config().baseUrl} is reachable again (${models.length} model${models.length === 1 ? '' : 's'}).`,
+            `${BRAND}: ${config().baseUrl} is reachable again (${models.length} model${models.length === 1 ? '' : 's'}).`,
           );
         } catch (err) {
           deps.connectionWatchdog.reportFailure(
-            `TLC: cannot reach ${config().baseUrl}: ${errMessage(err)}`,
+            `${BRAND}: cannot reach ${config().baseUrl}: ${errMessage(err)}`,
           );
         } finally {
           deps.statusBar.setBusy(false);
@@ -275,7 +277,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
         deps.complectionProvider.onDisabled();
       }
       deps.statusBar.refresh();
-      void vscode.window.showInformationMessage(enabled ? 'TLC completions enabled.' : 'TLC completions disabled.');
+      void vscode.window.showInformationMessage(enabled ? `${BRAND} completions enabled.` : `${BRAND} completions disabled.`);
     }),
   ];
 };

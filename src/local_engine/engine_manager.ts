@@ -1,3 +1,4 @@
+import { BRAND } from '../brand';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { mkdir, readdir, rename, rm } from 'fs/promises';
 import { join } from 'path';
@@ -111,9 +112,9 @@ export class EngineManager {
     const now = Date.now();
     this.crashTimes = this.crashTimes.filter((t) => now - t < 60_000);
     this.crashTimes.push(now);
-    this.host.warn(`TLC local engine: ${message}; restarting.`);
+    this.host.warn(`${BRAND} local engine: ${message}; restarting.`);
     if (this.crashTimes.length > 3) {
-      this.host.onStatus({ status: 'error', message: `the local engine keeps exiting (${message}); restart manually via TLC: Reset Local Engine` });
+      this.host.onStatus({ status: 'error', message: `the local engine keeps exiting (${message}); restart manually via ${BRAND}: Reset Local Engine` });
       return;
     }
     void this.ensureReady().catch(() => undefined);
@@ -204,12 +205,12 @@ export class EngineManager {
       const paths = this.host.paths();
       const settings = this.host.settings();
       if (settings.modelId === 'custom' && settings.modelPath.length === 0) {
-        throw new Error('tlc.local.model is "custom" — set tlc.local.customModelPath to a model file (TLC: Select Local Model → From disk…).');
+        throw new Error('tlc.local.model is "custom" — set tlc.local.customModelPath to a model file (${BRAND}: Select Local Model → From disk…).`');
       }
       if (settings.modelPath.length > 0 && pickTemplateForModel(settings.modelPath) === undefined) {
         // Catalog models are validated Qwen2.5-Coder builds; an offline model
         // whose family cannot be recognized may not fit the FIM pipeline.
-        this.host.warn(`TLC local engine: model "${settings.modelPath}" was not validated for FIM completions — quality may vary.`);
+        this.host.warn(`${BRAND} local engine: model "${settings.modelPath}" was not validated for FIM completions — quality may vary.`);
       }
       if (settings.engineKind === 'ovgenai') {
         return await this.startOvgenai(paths, settings);
@@ -224,7 +225,7 @@ export class EngineManager {
       const contextLength = model !== undefined ? model.contextLength : CUSTOM_MODEL_CONTEXT_LENGTH;
       const devices = deviceChain(settings.device);
       if (settings.device === 'npu') {
-        this.host.warn('TLC local engine: the NPU is supported only by the OpenVINO GenAI engine; using GPU instead.');
+        this.host.warn(`${BRAND} local engine: the NPU is supported only by the OpenVINO GenAI engine; using GPU instead.`);
       }
 
       const serverPath = await this.ensureLlamaEngine(paths, settings);
@@ -262,7 +263,7 @@ export class EngineManager {
             throw err;
           }
           const message = err instanceof Error ? err.message : String(err);
-          this.host.warn(`TLC local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
+          this.host.warn(`${BRAND} local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
           fallbacks.push(`${activeDevice.toUpperCase()}: ${message}`);
           activeDevice = next;
         }
@@ -270,7 +271,7 @@ export class EngineManager {
       if (fallbacks.length > 0) {
         const failed = fallbacks.map((f) => f.split(':')[0]).join(', ');
         const reasons = fallbacks.map((f) => f.replace(': ', ' — ')).join('; ');
-        this.host.notify(`TLC: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
+        this.host.notify(`${BRAND}: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
       }
       this.engine = engine;
       this.runningModel = settings.modelId;
@@ -377,7 +378,7 @@ export class EngineManager {
           throw err;
         }
         const message = err instanceof Error ? err.message : String(err);
-        this.host.warn(`TLC local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
+        this.host.warn(`${BRAND} local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
         fallbacks.push(`${activeDevice.toUpperCase()}: ${message}`);
         activeDevice = next;
       }
@@ -385,7 +386,7 @@ export class EngineManager {
     if (fallbacks.length > 0) {
       const failed = fallbacks.map((f) => f.split(':')[0]).join(', ');
       const reasons = fallbacks.map((f) => f.replace(': ', ' — ')).join('; ');
-      this.host.notify(`TLC: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
+      this.host.notify(`${BRAND}: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
     }
     this.engine = runner;
     this.runningModel = settings.modelId;

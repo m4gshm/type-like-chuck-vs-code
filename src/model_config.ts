@@ -1,3 +1,4 @@
+import { BRAND } from './brand';
 import { ExtensionConfig } from './config';
 import { ModelInfo } from './completions_client';
 
@@ -63,7 +64,7 @@ export class ModelConfig {
     this.reload();
     if (modelChanged) {
       await this.host.onModelChanged?.(modelId);
-      this.host.notify(`TLC model set to ${modelId}.`);
+      this.host.notify(`${BRAND} model set to ${modelId}.`);
     }
   }
 

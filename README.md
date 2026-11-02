@@ -18,9 +18,9 @@ Inline (ghost text) code completions from any OpenAI-compatible API, with config
 
 ## Setup
 
-1. Pick the source with `TLC: Select Mode` — **Local engine** (default, everything downloads on first use) or **Remote** (set `tlc.openai.baseUrl`, optionally `TLC: Set API Key`).
-2. Local: choose the model with `TLC: Select Local Model` and the device with `TLC: Select Local Device` — the default already matches your platform (see the matrix below).
-3. Remote: pick model from `TLC: Select Model`; set `tlc.promptTemplate` if not auto-detected.
+1. Pick the source with `Type like Chuck: Select Mode` — **Local engine** (default, everything downloads on first use) or **Remote** (set `tlc.openai.baseUrl`, optionally `Type like Chuck: Set API Key`).
+2. Local: choose the model with `Type like Chuck: Select Local Model` and the device with `Type like Chuck: Select Local Device` — the default already matches your platform (see the matrix below).
+3. Remote: pick model from `Type like Chuck: Select Model`; set `tlc.promptTemplate` if not auto-detected.
 
 All commands are discoverable in the command palette under the `TLC:` prefix.
 
@@ -44,7 +44,7 @@ The NPU part of the `auto` chain (ovgenai only) is decided by Intel NPU generati
 
 A failed accelerated start falls back down the device chain automatically; a start failure that hits CPU doesn't loop.
 
-All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A model from a supported family is marked with a check in `TLC: Select Model`.
+All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A model from a supported family is marked with a check in `Type like Chuck: Select Model`.
 
 ## Custom FIM templates
 

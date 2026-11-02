@@ -130,7 +130,7 @@ describe('CompletionsClient.complete', () => {
     });
     const err = await complete(clientWith(sdk)).catch((e) => e);
     expect((err as CompletionError).kind).toBe('auth');
-    expect((err as CompletionError).message).toContain('TLC: Set API Key');
+    expect((err as CompletionError).message).toContain('Set the API key');
   });
 
   it('maps other API errors to the "other" kind keeping the status', async () => {

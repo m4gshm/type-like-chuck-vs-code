@@ -1,4 +1,5 @@
 import { DEFAULT_LOCAL_MODEL, isLocalModelId } from './local_engine/model_catalog';
+import { BRAND } from './brand';
 
 interface AskFn {
   (message: string, ...items: string[]): Promise<string | undefined>;
@@ -21,7 +22,7 @@ export const offerLocalEngine = async (host: {
     return;
   }
   const choice = await host.ask(
-    `TLC: no completion server is reachable at ${host.baseUrl}. `
+    `${BRAND}: no completion server is reachable at ${host.baseUrl}. `
     + 'Set up the built-in local engine (downloads llama.cpp and a Qwen2.5-Coder model)?',
     'Set Up Local Engine',
     'Not Now',
@@ -49,10 +50,10 @@ export const normalizeLocalModelSetting = async (host: {
   const { storedModel, customModelPath } = host;
   if (storedModel === 'custom' && customModelPath.length === 0) {
     await host.updateModel(host.defaultModel);
-    host.warn('TLC local engine: model "custom" has no tlc.local.customModelPath — reset to the default model.');
+    host.warn(`${BRAND} local engine: model "custom" has no tlc.local.customModelPath — reset to the default model.`);
   } else if (storedModel.length > 0 && storedModel !== 'custom' && !isLocalModelId(storedModel)) {
     await host.updateModel(undefined);
-    host.warn(`TLC local engine: model "${storedModel}" is not a catalog entry — reset to the default (${host.defaultModel}).`);
-    host.notify(`TLC: local model "${storedModel}" is unknown — reset to ${DEFAULT_LOCAL_MODEL}.`);
+    host.warn(`${BRAND} local engine: model "${storedModel}" is not a catalog entry — reset to the default (${host.defaultModel}).`);
+    host.notify(`${BRAND}: local model "${storedModel}" is unknown — reset to ${DEFAULT_LOCAL_MODEL}.`);
   }
 };

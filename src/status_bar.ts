@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { CompletionState } from './completion_state';
+import { BRAND } from './brand';
+
 
 const ENABLED_TEXT = '$(tlc-cowboy)';
 const DISABLED_TEXT = '$(circle-slash)';
@@ -67,11 +69,11 @@ export class StatusBar {
             : ENABLED_TEXT;
     const baseTooltip = this.connectionReason !== undefined
       ? `${this.connectionReason}\n\n${enabled
-        ? 'TLC keeps retrying; completions pause if the server stays unreachable. Click to toggle.'
-        : 'TLC is paused. Click to re-enable.'}`
+        ? `${BRAND} keeps retrying; completions pause if the server stays unreachable. Click to toggle.`
+        : `${BRAND} is paused. Click to re-enable.`}`
       : enabled
-        ? 'TLC completions enabled (click to toggle)'
-        : 'TLC completions disabled (click to toggle)';
+        ? `${BRAND} completions enabled (click to toggle)`
+        : `${BRAND} completions disabled (click to toggle)`;
     this.item.tooltip = enabled && this.engine === undefined && this.engineDetail !== undefined
       ? `${this.engineDetail}\nClick to toggle`
       : baseTooltip;

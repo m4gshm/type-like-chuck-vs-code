@@ -1,4 +1,6 @@
 import type { StatusBar } from './status_bar';
+import { BRAND } from './brand';
+
 import type { CompletionState } from './completion_state';
 import type { CompletionsClient } from './completions_client';
 import type { ConnectionWatchdog } from './connection_watchdog';
@@ -54,7 +56,7 @@ export class LocalModeStatusUi {
         this.host.client.setModelLabel(status.model);
         this.host.statusBar.setEngine(undefined);
         this.host.statusBar.setEngineDetail(`${status.model} (${status.device})`);
-        this.host.log.info(`TLC local engine ready: ${this.host.engineKind()} runner model=${status.modelPath} device=${status.device}`);
+        this.host.log.info(`${BRAND} local engine ready: ${this.host.engineKind()} runner model=${status.modelPath} device=${status.device}`);
         this.host.watchdog.reportSuccess();
       } else {
         this.host.setEndpoint(status.baseUrl);
@@ -63,7 +65,7 @@ export class LocalModeStatusUi {
         this.host.watchdog.reportSuccess();
         this.host.statusBar.setEngine(undefined);
         this.host.statusBar.setEngineDetail(`${status.model} (${status.device})`);
-        this.host.log.info(`TLC local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
+        this.host.log.info(`${BRAND} local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
       }
     } else if (status.status === ENGINE_STATUS.error) {
       this.host.client.setStdioSource(undefined);
@@ -76,7 +78,7 @@ export class LocalModeStatusUi {
       this.host.state.setConnectionBlocked(true);
       this.host.statusBar.setConnectionReason(status.message);
       this.host.statusBar.setEngine(`$(error) engine: ${status.message}`);
-      this.host.log.warn(`TLC local engine error: ${status.message}`);
+      this.host.log.warn(`${BRAND} local engine error: ${status.message}`);
     } else {
       const label = status.status === ENGINE_STATUS.awaitingInput
         ? status.prompt
