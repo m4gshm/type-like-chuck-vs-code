@@ -25,7 +25,7 @@ export interface ExtensionConfig {
   localGithubUrl: string;
   localOpenvinoUrl: string;
   localCustomModelPath: string;
-  localModelUrls: Record<string, string>;
+  localModelDownloadUrls: Record<string, string>;
   localApiKeyEnabled: boolean;
   promptTemplate: string | undefined;
   customTemplate: CustomTemplateDefinition | undefined;
@@ -98,7 +98,7 @@ export function readConfig(): ExtensionConfig {
     localGithubUrl: c.get<string>('local.githubUrl', 'https://github.com'),
     localOpenvinoUrl: c.get<string>('local.openvinoUrl', 'https://storage.openvinotoolkit.org'),
     localCustomModelPath: c.get<string>('local.customModelPath', ''),
-    localModelUrls: c.get<Record<string, string>>('local.modelUrls', {}),
+    localModelDownloadUrls: c.get<Record<string, string>>('local.modelDownloadUrls', {}),
     localApiKeyEnabled: c.get<boolean>('local.apiKeyEnabled', true),
     promptTemplate: c.get<string>('promptTemplate'),
     customTemplate: hasMarkers

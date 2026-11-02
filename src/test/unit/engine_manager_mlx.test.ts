@@ -54,7 +54,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
     githubUrl: 'https://github.com',
     openvinoUrl: 'https://storage.openvinotoolkit.org',
     modelPath: '',
-    modelUrls: {},
+    modelDownloadUrls: {},
     mlxRunnerPath: '/ext/binaries/mlx/darwin-arm64/tlc-mlx-runner',
     apiKeyEnabled: true,
     ...settingsOverrides,

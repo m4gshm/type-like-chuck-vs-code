@@ -253,14 +253,14 @@ If a download or unpack fails (network error, checksum mismatch, disk error), th
 - **THEN** the user sees a warning with a Retry action and no corrupt model is started
 
 ### Requirement: Custom download sources and offline model
-The download sources SHALL be overridable: `tlc.local.huggingfaceUrl` and `tlc.local.githubUrl` SHALL replace the base URLs of model and engine downloads (e.g. for mirrors), and `tlc.local.modelUrls` SHALL override the full URL per model id (for moved repositories). When a standard proxy environment variable (`HTTPS_PROXY` / `HTTP_PROXY`) is set, downloads SHALL go through it. The user SHALL be able to skip downloads entirely by providing a local GGUF file via `tlc.local.customModelPath`; the extension SHALL use that file as-is.
+The download sources SHALL be overridable: `tlc.local.huggingfaceUrl` and `tlc.local.githubUrl` SHALL replace the base URLs of model and engine downloads (e.g. for mirrors), and `tlc.local.modelDownloadUrls` SHALL override the full URL per model id (for moved repositories): a bare model id key applies to the llama.cpp GGUF download, per-file keys (`model id/file`) to the individual ovgenai IR and mlx model files, so entries do not collide across engine kinds. When a standard proxy environment variable (`HTTPS_PROXY` / `HTTP_PROXY`) is set, downloads SHALL go through it. The user SHALL be able to skip downloads entirely by providing a local GGUF file via `tlc.local.customModelPath`; the extension SHALL use that file as-is.
 
 #### Scenario: Mirror endpoint
 - **WHEN** the user sets `tlc.local.huggingfaceUrl` to an alternative endpoint
 - **THEN** model downloads are fetched from that endpoint instead of huggingface.co
 
 #### Scenario: Moved repository
-- **WHEN** the user sets a `tlc.local.modelUrls` entry for the selected model
+- **WHEN** the user sets a `tlc.local.modelDownloadUrls` entry for the selected model
 - **THEN** that exact URL is downloaded instead of the catalog entry
 
 #### Scenario: Local model copy

@@ -45,7 +45,7 @@ const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManager
   githubUrl: 'https://github.com',
   openvinoUrl: 'https://storage.openvinotoolkit.org',
   modelPath: '',
-  modelUrls: {},
+  modelDownloadUrls: {},
   apiKeyEnabled: true,
   ...overrides,
 });
@@ -196,7 +196,7 @@ describe('EngineManager (llama.cpp engine)', () => {
     expect(mirrored.downloads[1].url).toBe('https://hf-mirror.internal/bartowski/Qwen2.5-Coder-0.5B-GGUF/resolve/main/Qwen2.5-Coder-0.5B-Q4_K_M.gguf');
 
     const overridden = await makeFixture({}, {
-      modelUrls: { 'Qwen2.5-Coder 1.5B': 'https://example.org/moved-model.gguf' },
+      modelDownloadUrls: { 'Qwen2.5-Coder 1.5B': 'https://example.org/moved-model.gguf' },
     });
     await new EngineManager(overridden.host).ensureReady();
     expect(overridden.downloads.at(-1)?.url).toBe('https://example.org/moved-model.gguf');

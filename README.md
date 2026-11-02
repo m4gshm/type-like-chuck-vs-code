@@ -56,42 +56,7 @@ The NPU part of the `auto` chain (ovgenai only) is decided by Intel NPU generati
 
 A failed accelerated start falls back down the device chain automatically; a start failure that hits CPU doesn't loop.
 
-## Settings
-
-All settings apply live. In local mode nothing contacts any remote server.
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `tlc.mode` | `local` | `local` (TLC-managed engine) or `remote` (OpenAI-compatible API) |
-| `tlc.local.engineKind` | see matrix above | `llama.cpp` (all platforms), `ovgenai` (Windows/Linux x64, Linux arm64), `mlx` (macOS arm64) |
-| `tlc.local.model` | `Qwen2.5-Coder 1.5B` GGUF / IR / MLX per kind | `0.5B` / `1.5B` / `3B` |
-| `tlc.local.device` | `auto` | `auto` (see matrix), or `cpu`, `gpu`, `npu` |
-| `tlc.local.npuContextMaxLength` | `8192` | Context window used on the NPU; also caps prefix/suffix budgets. `0` = model's full context |
-| `tlc.local.llamaCppRelease` | `b11935` | llama.cpp release tag (vulkan build) |
-| `tlc.local.distroDir` | `""` | Unpacked engine distribution used instead of downloading (ovgenai runtime / llama.cpp build; ignored by mlx) |
-| `tlc.local.engineDir` | `""` | Engine directory (empty = extension storage; moving it relocates the engine) |
-| `tlc.local.downloadedModelsDir` | `""` | Models directory (empty = extension storage; moving it relocates) |
-| `tlc.local.modelCacheDir` | `""` | Model cache (cleared by `TLC: Reset Local Engine` → Clear model cache) |
-| `tlc.local.customModelPath` | `""` | Local model file instead of a download; applies only while `tlc.local.model` is `custom` |
-| `tlc.local.modelUrls` | `{}` | Per-model URL overrides (`{ "Qwen2.5-Coder 1.5B": "https://…" }`) |
-| `tlc.local.huggingfaceUrl` | `https://huggingface.co` | Model download mirror |
-| `tlc.local.githubUrl` | `https://github.com` | llama.cpp release mirror |
-| `tlc.local.openvinoUrl` | `https://storage.openvinotoolkit.org` | OpenVINO runtime mirror |
-| `tlc.local.apiKeyEnabled` | `true` | Require the per-session key from engine clients (off only for curl debugging) |
-| `tlc.openai.baseUrl` | `http://127.0.0.1:1234/v1` | Remote API base URL; changing it re-probes the server |
-| `tlc.openai.model` | `Qwen2.5-Coder-1.5B` | Remote model name |
-| `tlc.openai.apiKey` | `""` | Plaintext key (synced settings); wins over the secret-stored one |
-| `tlc.prefixContextMaxLength` | `8000` | Max characters before the cursor |
-| `tlc.suffixContextMaxLength` | `2000` | Max characters after the cursor |
-| `tlc.contextMaxLength` | `0` | Max combined context; `0` = filled from `/v1/models` |
-| `tlc.maxTokens` | `256` | Max tokens to generate |
-| `tlc.autoTrigger` | `true` | Auto-request after a typing pause |
-| `tlc.debounceMs` | `250` | Pause before an auto-request |
-| `tlc.pendingGraceMs` | `150` | How long typing waits for a pending request |
-| `tlc.cacheEnabled` | `true` | Re-serve the last completion (same position or typed extension) |
-| `tlc.cacheTtlMs` | `10000` | Cached completion lifetime |
-| `tlc.yieldToCopilot` | `true` | Disable TLC while Copilot inline suggestions are enabled; manual toggle wins |
-| `tlc.forbiddenFileNames` | `[".env"]` | Globs of files where completions are disabled |
+All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A supported-family model (partial match: qwen, mellum, …) is marked with a check in `TLC: Select Model`.
 
 ## Custom FIM templates
 

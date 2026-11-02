@@ -60,7 +60,7 @@ export interface EngineManagerSettings {
   githubUrl: string;
   openvinoUrl: string;
   modelPath: string;
-  modelUrls: Record<string, string>;
+  modelDownloadUrls: Record<string, string>;
   /** Path of the bundled ovgenai runner binary; undefined when the platform is unsupported. */
   ovgenaiRunnerPath?: string;
   /** Path of the bundled mlx runner binary; undefined outside macOS arm64. */
@@ -468,7 +468,7 @@ export class EngineManager {
     await mkdir(modelDir, { recursive: true });
     for (const file of missing) {
       const overrideKey = `${model.id}/${file}`;
-      const override = settings.modelUrls[overrideKey];
+      const override = settings.modelDownloadUrls[overrideKey];
       const url = override !== undefined && override.length > 0
         ? override
         : mlxModelFileUrl(model, file, settings.huggingfaceUrl);
@@ -577,7 +577,7 @@ export class EngineManager {
     await mkdir(modelDir, { recursive: true });
     for (const file of missing) {
       const overrideKey = `${model.id}/${file}`;
-      const override = settings.modelUrls[overrideKey];
+      const override = settings.modelDownloadUrls[overrideKey];
       const url = override !== undefined && override.length > 0
         ? override
         : irModelFileUrl(model, file, settings.huggingfaceUrl);
@@ -657,7 +657,7 @@ export class EngineManager {
     if (model === undefined) {
       throw new Error(`Unknown local model "${settings.modelId}".`);
     }
-    const override = settings.modelUrls[model.id];
+    const override = settings.modelDownloadUrls[model.id];
     const url = override !== undefined && override.length > 0
       ? override
       : localModelUrl(model.id, settings.huggingfaceUrl);
