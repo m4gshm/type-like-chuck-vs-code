@@ -13,11 +13,12 @@ import { pickSupportedModel, pickTemplateForModel } from './model_selection';
 import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 import { DISTRO_CHOICE_DOWNLOAD, EngineManager, EngineStatus, ENGINE_STATUS, ResetTarget } from './local_engine/engine_manager';
-import { DownloadProgress } from './local_engine/downloader';
 import { DEFAULT_LOCAL_MODEL, isLocalModelId } from './local_engine/model_catalog';
 import { effectiveLocalModel, localModelDiskDialog, localModelPickerItems, localModelSpec } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { probeCapability } from './local_engine/capability';
+import { EngineTaskRunner } from './engine_progress';
+import { TemplateFieldSync } from './template_fields';
 
 const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -152,7 +153,22 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       context.globalStorageUri.fsPath,
     );
-  let engineProgressListener: ((kind: 'engine' | 'model', progress: DownloadProgress) => void) | undefined;
+  const engineTasks = new EngineTaskRunner({
+    withProgress: (options, task) =>
+      vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: options.title, cancellable: options.cancellable },
+        task,
+      ),
+    offerRetry: (message, retry) => {
+      void vscode.window.showWarningMessage(message, 'Retry').then((choice) => {
+        if (choice === 'Retry') {
+          retry();
+        }
+      });
+    },
+    enginePhaseLabel: () => localEnginePhaseLabel(),
+    modelName: () => localModelName(),
+  });
   // The picked folder persists as tlc.local.distroDir so later starts skip the question.
   const askDistroOrDownload = async (kind: 'ovgenai' | 'llama.cpp'): Promise<string | typeof DISTRO_CHOICE_DOWNLOAD | undefined> => {
     const kindLabel = kind === 'ovgenai' ? 'OpenVINO GenAI runtime' : 'llama.cpp build';
@@ -204,7 +220,7 @@ export function activate(context: vscode.ExtensionContext): void {
       apiKeyEnabled: config().localApiKeyEnabled,
     }),
     onStatus: (status) => handleEngineStatus(status),
-    onProgress: (kind, progress) => engineProgressListener?.(kind, progress),
+    onProgress: engineTasks.onDownloadProgress,
     // Duplicated into the output channel: toasts auto-dismiss, the log stays.
     notify: (message) => {
       info(message);
@@ -270,7 +286,7 @@ export function activate(context: vscode.ExtensionContext): void {
         : status.status === ENGINE_STATUS.preparingModel
           ? `downloading ${localModelName()}…`
           : `starting ${localKindLabel()}: ${localModelName()}… (the first NPU start compiles the model — several minutes)`;
-      engineStageLabel = label;
+      engineTasks.stageLabel = label;
       statusBar.setEngine(`$(loading~spin) ${label}`);
       // Suppress completions while the engine is starting: otherwise typing
       // races the placeholder local endpoint and reports a confusing
@@ -279,83 +295,6 @@ export function activate(context: vscode.ExtensionContext): void {
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason(label);
     }
-  };
-
-  /** Runs a long engine task behind a progress notification with byte counts. */
-  const formatBytes = (bytes: number): string => {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1000 && unit < units.length - 1) {
-      value /= 1000;
-      unit += 1;
-    }
-    return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)}${units[unit]}`;
-  };
-  // Kept in sync by handleEngineStatus so the progress bar can show a
-  // meaningful stage before the first byte arrives.
-  let engineStageLabel = 'starting…';
-  let activeEngineTask: Promise<void> | undefined;
-  const runEngineTask = async (title: string, task: (signal: AbortSignal) => Promise<unknown>): Promise<void> => {
-    // Concurrent callers (startup + settings-change restart) share one
-    // notification and one underlying task instead of stacking messages.
-    if (activeEngineTask !== undefined) {
-      return activeEngineTask;
-    }
-    activeEngineTask = runEngineTaskOnce(title, task);
-    try {
-      await activeEngineTask;
-    } finally {
-      activeEngineTask = undefined;
-    }
-  };
-
-  const runEngineTaskOnce = async (title: string, task: (signal: AbortSignal) => Promise<unknown>): Promise<void> => {
-    const startedAt = Date.now();
-    let progress: DownloadProgress = { downloadedBytes: 0, totalBytes: undefined };
-    let progressKind: 'engine' | 'model' = 'engine';
-    engineProgressListener = (kind, p) => {
-      if (kind !== progressKind) {
-        // A new phase started: never show the previous phase's byte counts.
-        progress = { downloadedBytes: 0, totalBytes: p.totalBytes };
-        progressKind = kind;
-        return;
-      }
-      progress = p;
-    };
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable: true }, async (bar, token) => {
-      const cancel = new AbortController();
-      token.onCancellationRequested(() => cancel.abort());
-      const ticker = setInterval(() => {
-        const elapsed = Math.round((Date.now() - startedAt) / 1000);
-        const elapsedLabel = elapsed >= 10 ? ` (${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed)` : '';
-        // Until the first byte arrives the byte counter reads 0 — show the
-        // stage instead; "0B" confuses more than it informs.
-        if (progress.downloadedBytes === 0) {
-          bar.report({ message: `${engineStageLabel}${elapsedLabel}` });
-          return;
-        }
-        const total = progress.totalBytes;
-        const part = `${formatBytes(progress.downloadedBytes)}${total !== undefined ? ` / ${formatBytes(total)}` : ''}`;
-        const phaseLabel = progressKind === 'engine' ? localEnginePhaseLabel() : `model: ${localModelName()}`;
-        bar.report({ message: `${phaseLabel}: ${part}` });
-      }, 200);
-      try {
-        await task(cancel.signal);
-      } catch (err) {
-        if (!(err instanceof Error && err.name === 'AbortError')) {
-          const message = `TLC local engine: ${errMessage(err)}`;
-          void vscode.window.showWarningMessage(message, 'Retry').then((choice) => {
-            if (choice === 'Retry') {
-              void runEngineTask(title, task);
-            }
-          });
-        }
-      } finally {
-        clearInterval(ticker);
-        engineProgressListener = undefined;
-      }
-    });
   };
 
   /** Local model template hint: catalog spec (label + template id) for
@@ -393,7 +332,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const hint = localModelHint();
       await applyTemplateSuggestion(hint.modelId, hint.template);
       handleEngineStatus({ status: ENGINE_STATUS.starting });
-      await runEngineTask('TLC: preparing the local engine', (signal) => managerEnsureReady(signal));
+      await engineTasks.run('TLC: preparing the local engine', (signal) => managerEnsureReady(signal));
     } else {
       await engineManager.stop();
       client.setStdioSource(undefined);
@@ -692,7 +631,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await vscode.workspace.getConfiguration('tlc').update('local.engineKind', kind.value, vscode.ConfigurationTarget.Global);
         }
       }
-      await runEngineTask(`TLC: resetting the local ${chosen.target}`, (signal) => engineManager.reset(chosen.target, signal));
+      await engineTasks.run(`TLC: resetting the local ${chosen.target}`, (signal) => engineManager.reset(chosen.target, signal));
     }),
     vscode.commands.registerCommand('tlc.enableDisableCompletions', async () => {
       // Clicking the error icon retries the connection instead of toggling:
@@ -801,43 +740,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor(() => void updateCopilotPause()),
   );
 
-  // Template field rules:
-  // - marker/stop settings belong to the "custom" template only;
-  // - selecting a built-in template removes stored copies of its markers;
-  // - editing any field switches the selection to "custom".
-  let syncingTemplateFields = false;
-  const cleanupTemplateFields = async (selectedId: string | undefined): Promise<void> => {
-    if (selectedId === undefined || selectedId === 'custom') {
-      return;
-    }
-    const { template } = templates.registry.resolve(selectedId);
-    if (!template || template.id !== selectedId) {
-      return;
-    }
-    const cfg = vscode.workspace.getConfiguration('tlc');
-    const parseStop = (raw: string | undefined): string =>
-      (raw ?? '')
-        .split(',')
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0)
-        .join(',');
-    const stored: Array<[string, string, (raw: string | undefined) => string]> = [
-      ['prefix', template.markers.prefix, (raw) => raw ?? ''],
-      ['suffix', template.markers.suffix, (raw) => raw ?? ''],
-      ['middle', template.markers.middle, (raw) => raw ?? ''],
-      ['stop', template.reservedTokens.join(','), parseStop],
-    ];
-    syncingTemplateFields = true;
-    try {
-      for (const [key, builtinValue, normalize] of stored) {
-        if (normalize(cfg.get<string>(key)) === builtinValue) {
-          await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
-        }
-      }
-    } finally {
-      syncingTemplateFields = false;
-    }
-  };
+  const templateSync = new TemplateFieldSync({
+    registry: () => templates,
+    getSetting: (key) => vscode.workspace.getConfiguration('tlc').get<string>(key),
+    clearSetting: (key) => vscode.workspace.getConfiguration('tlc').update(key, undefined, vscode.ConfigurationTarget.Global),
+  });
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
@@ -856,13 +763,13 @@ export function activate(context: vscode.ExtensionContext): void {
       // client.refresh()) derives from the new settings.
       const previous = { ...config() };
       modelConfig.reload();
-      if (event.affectsConfiguration('tlc.promptTemplate') && !syncingTemplateFields) {
+      if (event.affectsConfiguration('tlc.promptTemplate') && !templateSync.active) {
         const selectedId = vscode.workspace.getConfiguration('tlc').get<string>('promptTemplate');
         if (selectedId !== 'custom') {
-          await cleanupTemplateFields(selectedId);
+          await templateSync.cleanup(selectedId);
         }
       } else if (
-        !syncingTemplateFields
+        !templateSync.active
         && ['prefix', 'suffix', 'middle', 'stop'].some((s) => event.affectsConfiguration(`tlc.${s}`))
       ) {
         if (config().promptTemplate !== 'custom') {
@@ -909,7 +816,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await applyTemplateSuggestion(hint.modelId, hint.template);
         }
         handleEngineStatus({ status: ENGINE_STATUS.starting });
-        await runEngineTask('TLC: restarting the local engine', (signal) => managerEnsureReady(signal));
+        await engineTasks.run('TLC: restarting the local engine', (signal) => managerEnsureReady(signal));
       }
       if (event.affectsConfiguration('tlc.openai.apiKey') || event.affectsConfiguration('tlc.apiKey')) {
         await syncApiKey();
@@ -1066,14 +973,14 @@ export function activate(context: vscode.ExtensionContext): void {
         ? config().customTemplate !== undefined
         : selected !== undefined && templates.registry.resolve(selected).found;
     if (usable) {
-      await cleanupTemplateFields(selected);
+      await templateSync.cleanup(selected);
       return;
     }
 
     const suggestion = pickTemplateForModel(config().model);
     if (suggestion !== undefined) {
       await applyTemplateSuggestion(config().model);
-      await cleanupTemplateFields(suggestion);
+      await templateSync.cleanup(suggestion);
       return;
     }
 
