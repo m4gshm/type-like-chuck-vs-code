@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
-          xvfb-run -a npm ci
+          xvfb-run -a npm install
           xvfb-run -a npm run build
           xvfb-run -a npm run package
       - name: upload the artifacts

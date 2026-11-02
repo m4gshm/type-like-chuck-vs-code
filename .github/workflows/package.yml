@@ -26,9 +26,8 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22.x
-          cache: npm
       - name: install dependencies
-        run: npm ci
+        run: npm install
       - name: static checks and unit tests
         run: |
           npm run check-types
