@@ -17,6 +17,14 @@ describe('deviceChain', () => {
     expect(deviceChain('npu', 'ovgenai')).toEqual(['npu', 'gpu', 'cpu']);
     expect(deviceChain('auto', 'ovgenai')).toEqual(['gpu', 'cpu']);
   });
+
+  it('starts the ovgenai auto chain on the npu only for NPU generation 4 or later', () => {
+    expect(deviceChain('auto', 'ovgenai', 3)).toEqual(['gpu', 'cpu']);
+    expect(deviceChain('auto', 'ovgenai', 4)).toEqual(['npu', 'gpu', 'cpu']);
+    expect(deviceChain('auto', 'ovgenai', 5)).toEqual(['npu', 'gpu', 'cpu']);
+    expect(deviceChain('auto', 'llama.cpp', 6)).toEqual(['gpu', 'cpu']);
+    expect(deviceChain('auto', 'ovgenai')).toEqual(['gpu', 'cpu']);
+  });
 });
 
 describe('llamaArgs', () => {

@@ -1,4 +1,4 @@
-export type LocalModelId = '0.5b' | '1.5b' | '3b';
+export type LocalModelId = 'Qwen2.5-Coder 0.5B' | 'Qwen2.5-Coder 1.5B' | 'Qwen2.5-Coder 3B';
 
 export interface LocalModelSpec {
   id: LocalModelId;
@@ -11,12 +11,12 @@ export interface LocalModelSpec {
   contextLength: number;
 }
 
-export const DEFAULT_LOCAL_MODEL: LocalModelId = '1.5b';
+export const DEFAULT_LOCAL_MODEL: LocalModelId = 'Qwen2.5-Coder 1.5B';
 export const DEFAULT_HF_BASE = 'https://huggingface.co';
 
 const CATALOG: Record<LocalModelId, LocalModelSpec> = {
-  '0.5b': {
-    id: '0.5b',
+  'Qwen2.5-Coder 0.5B': {
+    id: 'Qwen2.5-Coder 0.5B',
     label: 'Qwen2.5-Coder 0.5B',
     repo: 'bartowski/Qwen2.5-Coder-0.5B-GGUF',
     fileName: 'Qwen2.5-Coder-0.5B-Q4_K_M.gguf',
@@ -24,8 +24,8 @@ const CATALOG: Record<LocalModelId, LocalModelSpec> = {
     approximateBytes: 400_000_000,
     contextLength: 32_768,
   },
-  '1.5b': {
-    id: '1.5b',
+  'Qwen2.5-Coder 1.5B': {
+    id: 'Qwen2.5-Coder 1.5B',
     label: 'Qwen2.5-Coder 1.5B',
     repo: 'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF',
     fileName: 'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
@@ -33,8 +33,8 @@ const CATALOG: Record<LocalModelId, LocalModelSpec> = {
     approximateBytes: 1_100_000_000,
     contextLength: 32_768,
   },
-  '3b': {
-    id: '3b',
+  'Qwen2.5-Coder 3B': {
+    id: 'Qwen2.5-Coder 3B',
     label: 'Qwen2.5-Coder 3B',
     repo: 'bartowski/Qwen2.5-Coder-3B-GGUF',
     fileName: 'Qwen2.5-Coder-3B-Q4_K_M.gguf',
@@ -44,7 +44,7 @@ const CATALOG: Record<LocalModelId, LocalModelSpec> = {
   },
 };
 
-export const LOCAL_MODEL_IDS: LocalModelId[] = ['0.5b', '1.5b', '3b'];
+export const LOCAL_MODEL_IDS: LocalModelId[] = ['Qwen2.5-Coder 0.5B', 'Qwen2.5-Coder 1.5B', 'Qwen2.5-Coder 3B'];
 
 export function isLocalModelId(value: string): value is LocalModelId {
   return Object.prototype.hasOwnProperty.call(CATALOG, value);

@@ -35,12 +35,11 @@ interface Fixture {
 }
 
 const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManagerSettings => ({
-  modelId: '1.5b',
+  modelId: 'Qwen2.5-Coder 1.5B',
   device: 'auto',
   engineKind: 'llama.cpp',
   npuContextLength: 8192,
   releaseTag: 'b1',
-  engineBinary: '',
   distroDir: '',
   huggingfaceUrl: 'https://huggingface.co',
   githubUrl: 'https://github.com',
@@ -110,7 +109,7 @@ describe('EngineManager (llama.cpp engine)', () => {
       'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
     ]);
     expect(f.statuses.map((s) => s.status)).toEqual([ENGINE_STATUS.preparingEngine, ENGINE_STATUS.preparingModel, ENGINE_STATUS.starting, ENGINE_STATUS.ready]);
-    expect(status).toMatchObject({ status: 'ready', model: '1.5b', device: 'gpu' });
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 1.5B', device: 'gpu' });
     const args = f.spawned[0].child.args;
     expect(args.join(' ')).toContain('qwen2.5-coder-1.5b-instruct-q4_k_m.gguf');
     expect(args.indexOf('-ngl')).toBeGreaterThanOrEqual(0);
@@ -187,9 +186,8 @@ describe('EngineManager (llama.cpp engine)', () => {
 
   it('honors mirror base urls, per-model url overrides and a local model path', async () => {
     const mirrored = await makeFixture({}, {
-      modelId: '0.5b',
+      modelId: 'Qwen2.5-Coder 0.5B',
       releaseTag: 'b2',
-      engineBinary: '',
       huggingfaceUrl: 'https://hf-mirror.internal',
       githubUrl: 'https://ghmirror.internal',
     });
@@ -198,7 +196,7 @@ describe('EngineManager (llama.cpp engine)', () => {
     expect(mirrored.downloads[1].url).toBe('https://hf-mirror.internal/bartowski/Qwen2.5-Coder-0.5B-GGUF/resolve/main/Qwen2.5-Coder-0.5B-Q4_K_M.gguf');
 
     const overridden = await makeFixture({}, {
-      modelUrls: { '1.5b': 'https://example.org/moved-model.gguf' },
+      modelUrls: { 'Qwen2.5-Coder 1.5B': 'https://example.org/moved-model.gguf' },
     });
     await new EngineManager(overridden.host).ensureReady();
     expect(overridden.downloads.at(-1)?.url).toBe('https://example.org/moved-model.gguf');
@@ -215,7 +213,7 @@ describe('EngineManager (llama.cpp engine)', () => {
   it('uses a locally unpacked engine binary and skips the engine download', async () => {
     const localEngine = join(await mkdtempActual(join((await import('os')).tmpdir(), 'tlc-enginetest-')), 'llama-server.exe');
     await writeFile(localEngine, 'bin');
-    const f = await makeFixture({}, { engineBinary: localEngine });
+    const f = await makeFixture({}, { distroDir: localEngine });
     const status = await new EngineManager(f.host).ensureReady();
     expect(status).toMatchObject({ status: 'ready' });
     expect(f.downloads.length).toBe(1);
@@ -244,24 +242,50 @@ describe('EngineManager (llama.cpp engine)', () => {
   });
 
   it('reports an error when the local engine binary is missing', async () => {
-    const f = await makeFixture({}, { engineBinary: join('nowhere', 'llama-server.exe') });
-    await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/Local engine binary not found/);
+    const f = await makeFixture({}, { distroDir: join('nowhere', 'llama-server.exe') });
+    await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/unexpected layout/);
     expect(last(f.statuses).status).toBe('error');
   });
 
-  it('warns when the resolved model is not a Qwen2.5-Coder catalog entry', async () => {
+  it('uses a custom model id with an explicit model file and skips the catalog', async () => {
+    const localFile = join((await import('os')).tmpdir(), `tlc-custom-id-${Date.now()}.gguf`);
+    await writeFile(localFile, 'gguf');
+    const f = await makeFixture({}, { modelId: 'custom', modelPath: localFile });
+    const status = await new EngineManager(f.host).ensureReady();
+    expect(status).toMatchObject({ status: 'ready', model: 'custom', modelPath: localFile });
+    expect(f.downloads.filter((d) => d.url.includes('gguf'))).toHaveLength(0);
+    await new EngineManager(f.host).stop();
+    await rm(localFile, { force: true });
+  });
+
+  it('rejects the custom model id without a model path', async () => {
+    const f = await makeFixture({}, { modelId: 'custom', modelPath: '' });
+    await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/custom.*tlc\.local\.customModelPath/s);
+    expect(last(f.statuses).status).toBe('error');
+  });
+
+  it('warns only when a custom model path names no supported family', async () => {
     const localFile = join((await import('os')).tmpdir(), `tlc-custom-${Date.now()}.gguf`);
     await writeFile(localFile, 'gguf');
     const warns: string[] = [];
     const offline = await makeFixture({ warn: (m) => warns.push(m) }, { modelPath: localFile });
     await new EngineManager(offline.host).ensureReady();
-    expect(warns.some((w) => /not a Qwen2\.5-Coder catalog entry/.test(w))).toBe(true);
+    expect(warns.some((w) => /not validated for FIM completions/.test(w))).toBe(true);
     await rm(localFile, { force: true });
 
-    const catalog = await makeFixture({ warn: (m) => warns.push(m) });
-    const countBefore = warns.length;
+    const qwenFile = join((await import('os')).tmpdir(), `tlc-qwen-${Date.now()}.gguf`);
+    await writeFile(qwenFile, 'gguf');
+    const qwenWarns: string[] = [];
+    const qwen = await makeFixture({ warn: (m) => qwenWarns.push(m) }, { modelPath: qwenFile });
+    await new EngineManager(qwen.host).ensureReady();
+    expect(qwenWarns.some((w) => /not validated for FIM completions/.test(w))).toBe(false);
+    await new EngineManager(qwen.host).stop();
+    await rm(qwenFile, { force: true });
+
+    const catalog = await makeFixture({ warn: (m) => qwenWarns.push(m) });
+    const countBefore = qwenWarns.length;
     await new EngineManager(catalog.host).ensureReady();
-    expect(warns.slice(countBefore).some((w) => /not a Qwen2\.5-Coder catalog entry/.test(w))).toBe(false);
+    expect(qwenWarns.slice(countBefore).some((w) => /not validated for FIM completions/.test(w))).toBe(false);
     await new EngineManager(catalog.host).stop();
   });
 
@@ -270,7 +294,7 @@ describe('EngineManager (llama.cpp engine)', () => {
     const manager = new EngineManager(f.host);
     await manager.ensureReady();
     const base = f.host.settings;
-    f.host.settings = () => ({ ...base(), modelId: '3b' });
+    f.host.settings = () => ({ ...base(), modelId: 'Qwen2.5-Coder 3B' });
     await manager.restart();
     expect(f.downloads.filter((d) => d.url.includes('gguf')).map((d) => d.url)).toEqual([
       'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',

@@ -4,12 +4,17 @@
 // into binaries/<engine>/<platform>/ with the final names the extension
 // resolves at runtime, restoring the executable bit lost in release assets.
 //
+// --release: download-only mode for the F5 "release" launch configuration —
+// fetches the pinned release into binaries/ovgenai-release/<platform>/ and
+// never falls back to a local build.
+//
 // Backend version: pinned per repo below so a plugin build always pairs with
 // a runner release it was developed against (compatibility over freshness).
 // Override with RUNNER_VERSION=<tag> to fetch that tag from every backend;
-// an explicit override also disables the local-build fallback. Runners
-// already present on disk are not re-downloaded.
-import { existsSync, mkdirSync, createWriteStream, copyFileSync } from 'node:fs';
+// an explicit override also disables the local-build fallback. A downloaded
+// runner records its release in a <binary>.tag sidecar: it is re-downloaded
+// only when that version differs from the expected one.
+import { existsSync, mkdirSync, createWriteStream, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { chmod, rename } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -18,11 +23,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const OWNER = 'm4gshm';
+const releaseOnly = process.argv.includes('--release');
 const TARGETS = [
   // hostPlatform: the runner binary built by `task build` in the sibling backend repo
   // (build/<asset>) matches this target only on the host platform.
-  { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/win32-x64', asset: 'tlc-ovgenai-runner-win32-x64.exe', finalName: 'tlc-ovgenai-runner.exe', hostPlatform: 'win32' },
-  { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-x64', asset: 'tlc-ovgenai-runner-linux-x64', finalName: 'tlc-ovgenai-runner', hostPlatform: 'linux' },
+  { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/win32-x64', releaseDir: 'binaries/ovgenai-release/win32-x64', asset: 'tlc-ovgenai-runner-win32-x64.exe', finalName: 'tlc-ovgenai-runner.exe', hostPlatform: 'win32' },
+  { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-x64', releaseDir: 'binaries/ovgenai-release/linux-x64', asset: 'tlc-ovgenai-runner-linux-x64', finalName: 'tlc-ovgenai-runner', hostPlatform: 'linux' },
   { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin' },
 ];
 
@@ -65,7 +71,7 @@ const localRepoDir = (repo) => join(dirname(fileURLToPath(import.meta.url)), '..
 // This avoids needing a GitHub release for local builds and F5 runs.
 // Skipped when RUNNER_VERSION pins a release.
 function localBuild(target) {
-  if (versionOverride !== undefined) {
+  if (versionOverride !== undefined || releaseOnly) {
     return undefined;
   }
   const repoDir = localRepoDir(target.repo);
@@ -85,19 +91,35 @@ function localBuild(target) {
 }
 
 const assetsByRepo = new Map();
+// A recorded release tag means the binary came from a GitHub release; 'local'
+// or no tag means a local build (packaging keeps it, --release always wants
+// the pinned release).
+function onDiskTag(destination) {
+  const tagPath = `${destination}.tag`;
+  return existsSync(tagPath) ? readFileSync(tagPath, 'utf8').trim() : '';
+}
+const writeTag = (destination, tag) => writeFileSync(`${destination}.tag`, `${tag}\n`);
+
 for (const target of TARGETS) {
-  const destination = join(target.dir, target.finalName);
+  const dir = releaseOnly && target.releaseDir !== undefined ? target.releaseDir : target.dir;
+  const destination = join(dir, target.finalName);
+  const expected = version(target.repo);
   if (existsSync(destination)) {
-    console.log(`runner binary present: ${destination}`);
-    continue;
+    const diskTag = onDiskTag(destination);
+    if (expected === undefined || diskTag === expected || (!releaseOnly && (diskTag === 'local' || diskTag === ''))) {
+      console.log(`runner binary present: ${destination}`);
+      continue;
+    }
+    console.log(`runner binary on disk is ${diskTag === '' ? 'untagged' : diskTag}, expected ${expected} — re-downloading`);
   }
-  mkdirSync(target.dir, { recursive: true });
+  mkdirSync(dir, { recursive: true });
   const localBinary = localBuild(target);
   if (localBinary !== undefined) {
     copyFileSync(localBinary, destination);
     if (process.platform !== 'win32') {
       await chmod(destination, 0o755);
     }
+    writeTag(destination, 'local');
     console.log(`copied ${destination}`);
     continue;
   }
@@ -125,10 +147,11 @@ for (const target of TARGETS) {
     console.error(`Missing runner binary: ${target.asset} (not found among ${OWNER}/${target.repo} release assets).`);
     process.exit(1);
   }
-  console.log(`fetching ${target.asset} from ${OWNER}/${target.repo} release…`);
+  console.log(`fetching ${target.asset} from ${OWNER}/${target.repo} release ${expected ?? 'latest'}…`);
   await download(asset.browser_download_url, destination);
   if (process.platform !== 'win32') {
     await chmod(destination, 0o755);
   }
+  writeTag(destination, expected ?? 'latest');
   console.log(`fetched ${destination}`);
 }

@@ -60,18 +60,18 @@
       }
     },
     {
-      "label": "syncBackendRunner",
-      "type": "npm",
-      "script": "sync-runner",
-      "problemMatcher": []
-    },
-    {
-      // F5 preLaunch: compile the extension sources, then rebuild/copy the
-      // C++ runner binary so the debug session always runs the fresh build.
-      // Runs before the extension host starts, so no runner process holds the exe.
       "label": "preDebug",
       "type": "npm",
       "script": "sync-runner",
+      "problemMatcher": [],
+      "dependsOn": ["defaultBuildTask"]
+    },
+    {
+      // preLaunch of the "release" launch configuration: fetch the pinned
+      // backend release (download-only, no local build) next to the local one.
+      "label": "preDebugRelease",
+      "type": "npm",
+      "script": "sync-runner-release",
       "problemMatcher": [],
       "dependsOn": ["defaultBuildTask"]
     }

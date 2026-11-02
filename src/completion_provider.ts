@@ -197,7 +197,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
               return undefined;
             } else if (text !== undefined && text.length > 0) {
               const sliced = this.sliceByTyped(document, position, pendingHere.positionCharacter, text);
-              if (sliced !== undefined) {
+              if (sliced !== undefined && sliced.result.trim().length > 0) {
                 this.storeCache(document, position, sliced.result);
                 const pendingPrefix = this.prefixWord(document, new vscode.Position(pendingHere.line, pendingHere.positionCharacter));
                 this.deps.debug(`${requestId} completion pending completions ${pendingHere.requestId}: ${fileName} @ ${pendingHere.line}:${pendingHere.positionCharacter}${pendingPrefix ? ' "' + pendingPrefix + '"' : ''} -> ${sliced.result}`);
@@ -295,7 +295,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     try {
       const text = await request;
       this.deps.connectionWatchdog.reportSuccess();
-      if (text.length > 0) {
+      if (text.trim().length > 0) {
         this.storeCache(document, position, text);
       }
       if (token.isCancellationRequested) {
@@ -358,7 +358,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       return undefined;
     }
     const sliced = this.sliceByTyped(document, position, cache.character, cache.text, true);
-    if (sliced === undefined) {
+    if (sliced === undefined || sliced.result.trim().length === 0) {
       return undefined;
     }
     this.deps.debug(`completion served a partial cache hit: skipping ${sliced.typed.length} typed characters`);

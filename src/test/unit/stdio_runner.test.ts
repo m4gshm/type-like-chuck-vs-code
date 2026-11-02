@@ -38,7 +38,7 @@ class FakeChild extends EventEmitter {
 
 const baseOptions = (overrides: Partial<StdioRunnerStartOptions> = {}): StdioRunnerStartOptions => ({
   runnerPath: '/ext/binaries/ovgenai/linux-x64/tlc-ovgenai-runner',
-  modelPath: '/models/1.5b-nf4-ov',
+  modelPath: '/models/Qwen2.5-Coder-1.5B-nf4-sym-g-1-se-awq',
   device: 'NPU',
   ...overrides,
 });
@@ -58,7 +58,7 @@ describe('startStdioRunner', () => {
   it('resolves on the ready event and exposes the reported device', async () => {
     const children: FakeChild[] = [];
     const runner = await startStdioRunner(baseOptions(), { spawnImpl: spawnFake(children) });
-    expect(children[0].args).toEqual(['--model', '/models/1.5b-nf4-ov', '--device', 'NPU']);
+    expect(children[0].args).toEqual(['--model', '/models/Qwen2.5-Coder-1.5B-nf4-sym-g-1-se-awq', '--device', 'NPU']);
     expect(runner.device).toBe('NPU');
     await runner.stop();
   });
@@ -363,29 +363,28 @@ describe('probeRunnerVersion', () => {
 
 describe('ir model catalog', () => {
   it('exposes the OpenVINO nf4 repos with the full file set', () => {
-    const spec = irModel('1.5b');
+    const spec = irModel('Qwen2.5-Coder 1.5B');
     expect(spec.repo).toBe('m4gshm/Qwen2.5-Coder-1.5B-nf4-sym-g-1-se-awq');
     expect(spec.files).toContain('openvino_model.xml');
     expect(spec.files).toContain('openvino_model.bin');
     expect(spec.files).toContain('openvino_tokenizer.xml');
     expect(spec.files).toContain('openvino_detokenizer.bin');
-    // dirName is unique per model+format so families never collide; template
+    // The download dir is the repo name (unique per model+format); template
     // drives the FIM template suggestion.
-    expect(spec.dirName).toBe('1.5b-nf4-ov');
     expect(spec.template).toBe('qwen2');
   });
 
   it('builds resolve urls from the hf base', () => {
-    expect(irModelFileUrl(irModel('0.5b'), 'openvino_model.bin')).toBe('https://huggingface.co/m4gshm/Qwen2.5-Coder-0.5B-nf4-sym-g-1-se-awq/resolve/main/openvino_model.bin');
+    expect(irModelFileUrl(irModel('Qwen2.5-Coder 0.5B'), 'openvino_model.bin')).toBe('https://huggingface.co/m4gshm/Qwen2.5-Coder-0.5B-nf4-sym-g-1-se-awq/resolve/main/openvino_model.bin');
   });
 });
 
 describe('localModelSpec', () => {
   it('returns the catalog spec per engine kind', () => {
-    expect(localModelSpec('ovgenai', '1.5b')?.label).toContain('1.5B');
-    expect(localModelSpec('ovgenai', '1.5b')?.template).toBe('qwen2');
-    expect(localModelSpec('llama.cpp', '1.5b')?.label).toContain('1.5B');
-    expect(localModelSpec('mlx', '1.5b')?.template).toBe('qwen2');
+    expect(localModelSpec('ovgenai', 'Qwen2.5-Coder 1.5B')?.label).toContain('1.5B');
+    expect(localModelSpec('ovgenai', 'Qwen2.5-Coder 1.5B')?.template).toBe('qwen2');
+    expect(localModelSpec('llama.cpp', 'Qwen2.5-Coder 1.5B')?.label).toContain('1.5B');
+    expect(localModelSpec('mlx', 'Qwen2.5-Coder 1.5B')?.template).toBe('qwen2');
     expect(localModelSpec('ovgenai', 'made-up')).toBeUndefined();
   });
 });

@@ -139,27 +139,29 @@
               "Bundled OpenVINO GenAI runner with native IR models (Windows/Linux x64; NPU/GPU/CPU)",
               "Bundled MLX runner with 4-bit mlx-community models (macOS arm64; Metal)"
             ],
-            "description": "Local engine implementation (local mode only). The ovgenai runner ships with the extension and downloads the OpenVINO runtime libraries on first use. The mlx runner ships with the extension and needs no downloads at all. Default: `mlx` on macOS arm64, `llama.cpp` elsewhere (until this setting is set explicitly)."
+            "description": "Local engine implementation (local mode only). The ovgenai runner ships with the extension and downloads the OpenVINO runtime libraries on first use. The mlx runner ships with the extension and needs no downloads at all. Default: `mlx` on macOS arm64, `ovgenai` on Windows/Linux with an Intel CPU, `llama.cpp` elsewhere (until this setting is set explicitly)."
           },
           "tlc.local.model": {
             "type": "string",
             "order": 1,
-            "default": "1.5b",
+            "default": "Qwen2.5-Coder 1.5B",
             "enum": [
-              "0.5b",
-              "1.5b",
-              "3b"
+              "Qwen2.5-Coder 0.5B",
+              "Qwen2.5-Coder 1.5B",
+              "Qwen2.5-Coder 3B",
+              "custom"
             ],
-            "enumDescriptions": [
-              "Qwen2.5-Coder 0.5B (Q4_K_M GGUF, ~0.4 GB)",
-              "Qwen2.5-Coder 1.5B (Q4_K_M GGUF, ~1.1 GB)",
-              "Qwen2.5-Coder 3B (Q4_K_M GGUF, ~2.0 GB)"
-            ],
-            "description": "Local engine model (local mode only). Use \"TLC: Select Local Model\" to pick, or \"From disk…\" for a local model file/directory without downloading. The catalog ships Qwen2.5-Coder; each entry carries its own FIM template and download directory so other model families can be added without Qwen-specific assumptions."
+            "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download."
+          },
+          "tlc.local.customModelPath": {
+            "type": "string",
+            "order": 2,
+            "default": "",
+            "description": "Path to a local model file or directory to use instead of downloading (local mode only). A GGUF file for the llama.cpp engine; an OpenVINO IR model directory for ovgenai; an mlx model directory for mlx. When set, no model is downloaded."
           },
           "tlc.local.device": {
             "type": "string",
-            "order": 2,
+            "order": 3,
             "default": "auto",
             "enum": [
               "auto",
@@ -167,7 +169,7 @@
               "gpu",
               "npu"
             ],
-            "description": "Inference device for the local engine (local mode only). `auto` follows GPU → CPU; an explicit `npu` is supported by the ovgenai runner (falling back through GPU to CPU) and redirected to GPU with a warning for the llama.cpp engine. The mlx engine always runs on GPU (Metal), regardless of this setting. Use \"TLC: Select Local Device\"."
+            "description": "Inference device for the local engine (local mode only). `auto` follows GPU → CPU, except the ovgenai runner on an Intel NPU generation 4 or later, where `auto` starts on the NPU (falling back through GPU to CPU); an explicit `npu` is supported by the ovgenai runner (falling back through GPU to CPU) and redirected to GPU with a warning for the llama.cpp engine. The mlx engine always runs on GPU (Metal), regardless of this setting. Use \"TLC: Select Local Device\"."
           }
         }
       },
@@ -343,63 +345,51 @@
             "default": "b11935",
             "description": "llama.cpp release tag used for the local engine download (llama.cpp engine)."
           },
-          "tlc.local.engineBinary": {
+          "tlc.local.distroDir": {
             "type": "string",
             "order": 4,
             "default": "",
-            "description": "Path to a locally unpacked llama-server binary to use instead of downloading (local mode only). When set, no engine is downloaded."
-          },
-          "tlc.local.distroDir": {
-            "type": "string",
-            "order": 5,
-            "default": "",
-            "description": "Locally unpacked engine distribution to use instead of downloading (local mode only): an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build for llama.cpp. Ignored by the mlx kind. When set, no engine download happens; before the first download the extension offers picking such a folder."
+            "description": "Locally unpacked engine distribution to use instead of downloading (local mode only): an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build (or a path to a llama-server binary) for llama.cpp. Ignored by the mlx kind. When set, no engine download happens; before the first download the extension offers picking such a folder."
           },
           "tlc.local.engineDir": {
             "type": "string",
-            "order": 6,
+            "order": 5,
             "default": "",
             "description": "Directory for the downloaded engine (llama.cpp build or the OpenVINO GenAI runtime; local mode only). Empty uses the extension storage. Changing it moves the existing engine; \"TLC: Reset Local Engine…\" re-downloads."
           },
-          "tlc.local.modelDir": {
+          "tlc.local.downloadedModelsDir": {
             "type": "string",
-            "order": 7,
+            "order": 6,
             "default": "",
             "description": "Directory for the downloaded models (GGUF or OpenVINO IR; local mode only). Empty uses the extension storage. Changing it moves downloaded models."
           },
           "tlc.local.modelCacheDir": {
             "type": "string",
-            "order": 8,
+            "order": 7,
             "default": "",
             "description": "Directory for the local model cache (local mode only). Empty uses the extension storage."
           },
-          "tlc.local.modelPath": {
-            "type": "string",
-            "order": 9,
-            "default": "",
-            "description": "Path to a local model file or directory to use instead of downloading (local mode only). A GGUF file for the llama.cpp engine; an IR .xml file (with its .bin alongside) or a model directory for ovgenai; an mlx model directory for mlx. When set, no model is downloaded."
-          },
           "tlc.local.modelUrls": {
             "type": "object",
-            "order": 10,
+            "order": 8,
             "default": {},
-            "markdownDescription": "Per-model download URL overrides (local mode only), keyed by model id: `{ \"1.5b\": \"https://mirror/.../model.gguf\" }`. For the ovgenai engine, key individual IR files as `1.5b/openvino_model.bin` to override OpenVINO IR file URLs."
+            "markdownDescription": "Per-model download URL overrides (local mode only), keyed by model id: `{ \"Qwen2.5-Coder 1.5B\": \"https://mirror/.../model.gguf\" }`. For the ovgenai engine, key individual IR files as `Qwen2.5-Coder 1.5B/openvino_model.bin` to override OpenVINO IR file URLs."
           },
           "tlc.local.huggingfaceUrl": {
             "type": "string",
-            "order": 11,
+            "order": 9,
             "default": "https://huggingface.co",
             "description": "Base URL for model downloads (local mode only). Change it to an alternative Hugging Face endpoint or a mirror."
           },
           "tlc.local.githubUrl": {
             "type": "string",
-            "order": 12,
+            "order": 10,
             "default": "https://github.com",
             "description": "Base URL for llama.cpp release downloads (local mode only). Change it to a GitHub mirror."
           },
           "tlc.local.openvinoUrl": {
             "type": "string",
-            "order": 13,
+            "order": 11,
             "default": "https://storage.openvinotoolkit.org",
             "description": "Base URL for the OpenVINO GenAI runtime download used by the ovgenai engine (local mode only). Change it to a mirror of storage.openvinotoolkit.org."
           }
@@ -438,6 +428,7 @@
     "compile-tests": "tsc -p tsconfig.test.json",
     "watch": "node esbuild.js --watch",
     "sync-runner": "node scripts/sync-runner-binaries.mjs",
+    "sync-runner-release": "node scripts/fetch-runner-binaries.mjs --release",
     "unit": "vitest run",
     "coverage": "vitest run --coverage",
     "test": "npm run unit && npm run compile && npm run compile-tests && npm run vscode-test",

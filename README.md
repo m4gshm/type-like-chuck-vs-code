@@ -31,7 +31,7 @@ Universal inline (ghost text) code completions from any OpenAI-compatible API, w
 
 ## Security
 
-In local mode the local engine is reached only via the loopback interface with a randomly generated per-session key (never persisted), so other processes on the machine cannot use it. The resolved engine/model/cache directories are written to the TLC output channel; change them via `tlc.local.engineDir` / `tlc.local.modelDir` (existing downloads are moved to the new location). `TLC: Reset Local Engine` re-downloads the engine (choosing the engine kind first) or the model, or clears the cache. At startup TLC probes the platform (local GPU acceleration on Windows/Linux/macOS → none) and suggests the matching device with a reason; the suggestion is always shown until `tlc.local.device` is explicitly chosen (Apply Recommendation, `TLC: Select Local Device`, or a stored setting) or the offer is dismissed ("Don't Ask Again").
+In local mode the local engine is reached only via the loopback interface with a randomly generated per-session key (never persisted), so other processes on the machine cannot use it. The resolved engine/model/cache directories are written to the TLC output channel; change them via `tlc.local.engineDir` / `tlc.local.downloadedModelsDir` (existing downloads are moved to the new location). `TLC: Reset Local Engine` re-downloads the engine (choosing the engine kind first) or the model, or clears the cache. At startup TLC probes the platform (local GPU acceleration on Windows/Linux/macOS → none) and suggests the matching device with a reason; the suggestion is always shown until `tlc.local.device` is explicitly chosen (Apply Recommendation, `TLC: Select Local Device`, or a stored setting) or the offer is dismissed ("Don't Ask Again").
 
 ## Commands
 
@@ -55,18 +55,17 @@ In local mode the local engine is reached only via the loopback interface with a
 | Setting | Default | Description |
 | --- | --- | --- |
 | `tlc.mode` | `local` | Completion source: `local` (TLC-managed engine: llama.cpp or OpenVINO GenAI) or `remote` (OpenAI-compatible server at `tlc.openai.baseUrl`) |
-| `tlc.local.engineKind` | `mlx` on macOS arm64, `llama.cpp` elsewhere | Local engine implementation (local mode): `llama.cpp` (llama-server + GGUF, all platforms), `ovgenai` (bundled OpenVINO GenAI runner + IR models, Windows/Linux x64, NPU/GPU/CPU) or `mlx` (bundled MLX runner + 4-bit models, macOS arm64, Metal) |
-| `tlc.local.model` | `1.5b` | Local engine model (local mode): `0.5b`, `1.5b` or `3b` (Qwen2.5-Coder; GGUF for llama.cpp, OpenVINO IR int8 for ovgenai, MLX 4-bit for mlx) |
-| `tlc.local.device` | `auto` | Local engine inference device: `auto` (GPU → CPU), or `cpu`, `gpu`, `npu` (NPU: ovgenai runs it, llama.cpp redirects to GPU); a failed accelerated start falls back to CPU |
+| `tlc.local.engineKind` | `mlx` on macOS arm64, `ovgenai` on Windows/Linux Intel x64, `llama.cpp` elsewhere | Local engine implementation (local mode): `llama.cpp` (llama-server + GGUF, all platforms), `ovgenai` (bundled OpenVINO GenAI runner + IR models, Windows/Linux x64, NPU/GPU/CPU) or `mlx` (bundled MLX runner + 4-bit models, macOS arm64, Metal) |
+| `tlc.local.model` | `Qwen2.5-Coder 1.5B` | Local engine model (local mode): `Qwen2.5-Coder 0.5B`, `Qwen2.5-Coder 1.5B` or `Qwen2.5-Coder 3B` (GGUF for llama.cpp, OpenVINO IR nf4 for ovgenai, MLX 4-bit for mlx) |
+| `tlc.local.device` | `auto` | Local engine inference device: `auto` (GPU → CPU; for the ovgenai runner on an Intel NPU generation 4+ the chain starts on the NPU), or `cpu`, `gpu`, `npu` (NPU: ovgenai runs it, llama.cpp redirects to GPU); a failed accelerated start falls back down the device chain |
 | `tlc.local.npuContextMaxLength` | `8192` | Context window used on the NPU (local mode only). The NPU graph is compiled for this window: a smaller window compiles faster, generates faster and needs less memory; it also caps the prefix/suffix prompt budgets when the NPU is used. `0` uses the model's full context |
 | `tlc.local.llamaCppRelease` | `b11935` | llama.cpp release tag used for the engine download (vulkan build) |
-| `tlc.local.engineBinary` | `""` | Path to a locally unpacked llama-server binary used instead of downloading (empty = download) |
-| `tlc.local.distroDir` | `""` | Locally unpacked engine distribution used instead of downloading: an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build for llama.cpp (ignored by mlx; empty = download). Before the first download the extension asks whether to download or pick such a folder |
+| `tlc.local.distroDir` | `""` | Locally unpacked engine distribution used instead of downloading: an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build (or a path to a llama-server binary) for llama.cpp (ignored by mlx; empty = download). Before the first download the extension asks whether to download or pick such a folder |
 | `tlc.local.engineDir` | `""` | Directory for the downloaded engine (empty = extension storage; changing it moves the engine) |
-| `tlc.local.modelDir` | `""` | Directory for the downloaded models (empty = extension storage; changing it moves the models) |
+| `tlc.local.downloadedModelsDir` | `""` | Directory for the downloaded models (empty = extension storage; changing it moves the models) |
 | `tlc.local.modelCacheDir` | `""` | Directory for the local model cache (cleared by `TLC: Reset Local Engine` → Clear model cache; empty = extension storage) |
-| `tlc.local.modelPath` | `""` | Path to a local model file to use instead of downloading (empty = download): a GGUF file for llama.cpp, an IR `.xml` (with its `.bin` alongside) or model directory for ovgenai, an mlx model directory for mlx |
-| `tlc.local.modelUrls` | `{}` | Per-model download URL overrides, keyed by model id (`{ "1.5b": "https://mirror/.../model.gguf" }`); for the ovgenai kind, key individual IR files as `1.5b/openvino_model.bin` |
+| `tlc.local.customModelPath` | `""` | Path to a local model file to use instead of downloading (empty = download): a GGUF file for llama.cpp, an OpenVINO IR model directory for ovgenai, an mlx model directory for mlx |
+| `tlc.local.modelUrls` | `{}` | Per-model download URL overrides, keyed by model id (`{ "Qwen2.5-Coder 1.5B": "https://mirror/.../model.gguf" }`); for the ovgenai kind, key individual IR files as `Qwen2.5-Coder 1.5B/openvino_model.bin` |
 | `tlc.local.huggingfaceUrl` | `https://huggingface.co` | Base URL for model downloads (local mode only; change to a mirror) |
 | `tlc.local.githubUrl` | `https://github.com` | Base URL for llama.cpp release downloads (local mode only; change to a mirror) |
 | `tlc.local.openvinoUrl` | `https://storage.openvinotoolkit.org` | Base URL for the OpenVINO GenAI runtime download used by the ovgenai engine (local mode only; change to a mirror) |
@@ -118,8 +117,12 @@ The TLC output channel shows the engine's own log lines (`llama-server: …`) at
 
 ## Building and testing
 
+npm scripts are what CI runs: full builds and tests, nothing cached.
+`task` is the local entry — the same steps with incremental caching plus
+backend-binary imports for the host.
+
 ```bash
-npm ci
+npm install
 npm run compile      # esbuild bundle → dist/extension.js
 npm run check-types  # tsc --noEmit
 npm run unit         # unit tests (vitest)
@@ -142,10 +145,10 @@ them as GitHub release assets on `v*` tags.
 The plugin does not build the backend — it only imports the binaries:
 
 ```bash
-task -t tasks.yaml runner:import  # local: build & copy from ../type-like-chuck-backed-openvino/build
-task -t tasks.yaml runner:fetch   # CI: download from the backend repo's latest release
-                                  # (pin a version via RUNNER_VERSION=<tag> or the RUNNER_VERSION var in tasks.yaml)
-task -t tasks.yaml package        # full .vsix, importing the binaries if missing
+task runner:import   # local: build & copy from the backend repos (ovgenai + mlx)
+task runner:fetch    # download from the backend repos' releases
+                     # (pin a version via RUNNER_VERSION=<tag> or the RUNNER_VERSION var in Taskfile.yaml)
+task package         # full .vsix (delegates to npm run package)
 ```
 
 They land in `binaries/ovgenai/<platform>/` (plus `binaries/mlx/darwin-arm64/`

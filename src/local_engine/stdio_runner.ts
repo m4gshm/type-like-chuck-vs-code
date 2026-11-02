@@ -15,6 +15,8 @@ export interface StdioRunnerStartOptions {
   libraryDirs?: string[];
   /** Ready-wait limit; Infinity waits forever (NPU graph compilation can take unbounded time). */
   readyTimeoutMs?: number;
+  /** Cancels the ready wait: the child is killed and the start rejects with AbortError. */
+  signal?: AbortSignal;
   onUnexpectedExit?: (message: string) => void;
   onStderr?: (line: string) => void;
 }
@@ -166,7 +168,7 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     requests.clear();
   });
 
-  const readyInfo = await waitForReady(options.readyTimeoutMs ?? 600_000);
+  const readyInfo = await waitForReady(options.readyTimeoutMs ?? 600_000, options.signal);
 
   function handleLine(line: string): void {
     if (line.length === 0) {
@@ -204,12 +206,18 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     }
   }
 
-  function waitForReady(timeoutMs: number): Promise<{ model: string; device: string; ctx: number }> {
+  function waitForReady(timeoutMs: number, signal?: AbortSignal): Promise<{ model: string; device: string; ctx: number }> {
     return new Promise((resolve, reject) => {
       const cleanup = (): void => {
         clearInterval(checkDead);
         clearTimeout(timer);
         lines.off('line', onLine);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = (): void => {
+        cleanup();
+        child.kill();
+        reject(new DOMException('Canceled', 'AbortError'));
       };
       const timer = Number.isFinite(timeoutMs)
         ? setTimeout(() => {
@@ -223,6 +231,11 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
           reject(exited);
         }
       }, 100);
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
       // Non-JSON stdout lines (e.g. OpenVINO logs from old runner builds) are
       // skipped: keep scanning until a real event arrives.
       const onLine = (line: string): void => {

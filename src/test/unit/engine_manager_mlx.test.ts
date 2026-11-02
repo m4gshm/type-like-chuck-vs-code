@@ -44,12 +44,11 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const downloads: Fixture['downloads'] = [];
   const spawned: FakeRunnerChild[] = [];
   const base: EngineManagerSettings = {
-    modelId: '1.5b',
+    modelId: 'Qwen2.5-Coder 1.5B',
     device: 'gpu',
     engineKind: 'mlx',
     npuContextLength: 8192,
     releaseTag: 'b1',
-    engineBinary: '',
     distroDir: '',
     huggingfaceUrl: 'https://huggingface.co',
     githubUrl: 'https://github.com',
@@ -64,7 +63,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const engineRoot = join(root, 'engine');
   await mkdir(modelDir, { recursive: true });
   await mkdir(engineRoot, { recursive: true });
-  const modelPath = join(modelDir, '1.5b-mlx');
+  const modelPath = join(modelDir, 'mlx-community', 'Qwen2.5-Coder-1.5B-Instruct-4bit');
   await mkdir(modelPath, { recursive: true });
   for (const file of MLX_FILES) {
     await writeFile(join(modelPath, file), 'data');
@@ -106,10 +105,9 @@ describe('EngineManager (mlx engine)', () => {
     const f = await makeFixture();
     const manager = new EngineManager(f.host);
     const status = await manager.ensureReady();
-    expect(status).toMatchObject({ status: 'ready', model: '1.5b', device: 'gpu', baseUrl: '', apiKey: undefined });
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 1.5B', device: 'gpu', baseUrl: '', apiKey: undefined });
     expect(f.downloads).toHaveLength(0);
-    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('1.5b-mlx'), '--ctx', '32768']);
-    expect(f.spawned[0].args).not.toContain('--device');
+    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('Qwen2.5-Coder-1.5B-Instruct-4bit'), '--ctx', '32768']);    expect(f.spawned[0].args).not.toContain('--device');
     expect(manager.stdioRunner()).toBeDefined();
     await manager.stop();
   });
@@ -122,7 +120,7 @@ describe('EngineManager (mlx engine)', () => {
   });
 
   it('downloads missing mlx model files from the mlx-community repo', async () => {
-    const f = await makeFixture({ modelId: '0.5b' });
+    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B' });
     const manager = new EngineManager(f.host);
     await manager.ensureReady();
     expect(f.downloads.length).toBeGreaterThan(0);
@@ -131,16 +129,16 @@ describe('EngineManager (mlx engine)', () => {
   });
 
   it('reset(model) re-downloads the mlx model directory', async () => {
-    const f = await makeFixture({ modelId: '0.5b' });
+    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B' });
     const manager = new EngineManager(f.host);
     await manager.ensureReady();
     const downloadsBefore = f.downloads.length;
     const { rmSync } = await import('fs');
-    rmSync(join(f.root, 'models', '0.5b-mlx'), { recursive: true, force: true });
+    rmSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-Instruct-4bit'), { recursive: true, force: true });
     await manager.reset('model');
     expect(f.downloads.length).toBeGreaterThan(downloadsBefore);
     const { existsSync } = await import('fs');
-    expect(existsSync(join(f.root, 'models', '0.5b-mlx', 'model.safetensors'))).toBe(true);
+    expect(existsSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-Instruct-4bit', 'model.safetensors'))).toBe(true);
     await manager.stop();
   });
 });

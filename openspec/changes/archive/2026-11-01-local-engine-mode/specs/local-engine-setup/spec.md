@@ -44,10 +44,10 @@ Every download (engine or model) SHALL show a VS Code progress notification with
 - **THEN** the download is aborted, partial files are discarded, and local mode reports that the engine/model is not ready
 
 ### Requirement: Configurable local directories
-The engine directory, model directory, and model cache directory SHALL be configurable via settings (`tlc.local.engineDir`, `tlc.local.modelDir`, `tlc.local.modelCacheDir`); an empty value SHALL resolve to a default location inside the extension's global storage. The resolved directories SHALL be written to the TLC output channel. When a directory setting changes, the existing content SHALL be moved to the new location (if the new location is empty) so nothing is re-downloaded unnecessarily.
+The engine directory, model directory, and model cache directory SHALL be configurable via settings (`tlc.local.engineDir`, `tlc.local.downloadedModelsDir`, `tlc.local.modelCacheDir`); an empty value SHALL resolve to a default location inside the extension's global storage. The resolved directories SHALL be written to the TLC output channel. When a directory setting changes, the existing content SHALL be moved to the new location (if the new location is empty) so nothing is re-downloaded unnecessarily.
 
 #### Scenario: Custom model directory
-- **WHEN** the user sets `tlc.local.modelDir` to a folder on another drive
+- **WHEN** the user sets `tlc.local.downloadedModelsDir` to a folder on another drive
 - **THEN** the previously downloaded model file is moved there, the output channel logs the new path, and no re-download happens
 
 #### Scenario: New location already populated
@@ -66,7 +66,7 @@ A `TLC: Reset Local Engine…` command SHALL let the user re-download the engine
 - **THEN** the model cache directory is emptied and the engine (if running) is restarted so the cache is rebuilt
 
 ### Requirement: Custom download sources and offline model
-The download sources SHALL be overridable: `tlc.local.huggingfaceUrl` and `tlc.local.githubUrl` SHALL replace the base URLs of model and engine downloads (e.g. for mirrors), and `tlc.local.modelUrls` SHALL override the full URL per model id (for moved repositories). When a standard proxy environment variable (`HTTPS_PROXY` / `HTTP_PROXY`) is set, downloads SHALL go through it. The user SHALL be able to skip downloads entirely by providing a local GGUF file via `tlc.local.modelPath`; the extension SHALL use that file as-is.
+The download sources SHALL be overridable: `tlc.local.huggingfaceUrl` and `tlc.local.githubUrl` SHALL replace the base URLs of model and engine downloads (e.g. for mirrors), and `tlc.local.modelUrls` SHALL override the full URL per model id (for moved repositories). When a standard proxy environment variable (`HTTPS_PROXY` / `HTTP_PROXY`) is set, downloads SHALL go through it. The user SHALL be able to skip downloads entirely by providing a local GGUF file via `tlc.local.customModelPath`; the extension SHALL use that file as-is.
 
 #### Scenario: Mirror endpoint
 - **WHEN** the user sets `tlc.local.huggingfaceUrl` to an alternative endpoint
@@ -77,7 +77,7 @@ The download sources SHALL be overridable: `tlc.local.huggingfaceUrl` and `tlc.l
 - **THEN** that exact URL is downloaded instead of the catalog entry
 
 #### Scenario: Local model copy
-- **WHEN** `tlc.local.modelPath` points to an existing GGUF file
+- **WHEN** `tlc.local.customModelPath` points to an existing GGUF file
 - **THEN** the engine starts with that file and no download happens
 
 #### Scenario: Proxy environment

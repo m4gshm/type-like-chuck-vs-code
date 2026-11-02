@@ -29,9 +29,9 @@ tasks:
   deps:
     desc: Install npm dependencies
     cmds:
-      - npm ci
+      - npm install
     sources:
-      - package-lock.json
+      - package.json
     generates:
       - node_modules/.package-lock.json
 
@@ -91,7 +91,7 @@ tasks:
         elif [ '{{OS}}' = 'darwin' ]; then
           echo "macOS is not an ovgenai target — skipping the ovgenai build (runner:fetch covers it from the release)"
         else
-          task -t '{{.BACKEND_REPO}}/tasks.yaml' build && task -t '{{.BACKEND_REPO}}/tasks.yaml' linux
+          task -d '{{.BACKEND_REPO}}' build
         fi
       - |
         if [ -f '{{.BACKEND_REPO}}/build/tlc-ovgenai-runner-linux-x64' ]; then
@@ -105,7 +105,7 @@ tasks:
           echo "mlx backend repo '{{.BACKEND_MLX}}' not found — skipping local import (use runner:fetch)"
           exit 0
         fi
-        task -t '{{.BACKEND_MLX}}/tasks.yaml' build
+        task -d '{{.BACKEND_MLX}}' build
       - |
         if [ -f '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' ]; then
           mkdir -p binaries/mlx/darwin-arm64
@@ -129,23 +129,10 @@ tasks:
       - binaries/ovgenai/linux-x64/tlc-ovgenai-runner
       - binaries/mlx/darwin-arm64/tlc-mlx-runner
 
-  # --- packaging ---------------------------------------------------------------------
-
   package:
-    desc: Build the .vsix (imports runner binaries if missing)
+    desc: Build the .vsix (delegates to npm run package)
     cmds:
-      - task: runner:import
-      - task: runner:fetch
-      - npm run vscode:prepublish
-      - node scripts/make-icon.mjs
-      - npx vsce package --no-dependencies
-    sources:
-      - dist/extension.js
-      - binaries/ovgenai/**/*
-      - binaries/mlx/**/*
-      - package.json
-    generates:
-      - '*.vsix'
+      - npm run package
 
   clean:
     desc: Remove build artifacts

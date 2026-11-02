@@ -2,7 +2,22 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Extension",
+      "name": "Run Extension (backend release)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/extension.js"
+      ],
+      "env": {
+        "TLC_RUNNER_DIR": "ovgenai-release"
+      },
+      "preLaunchTask": "preDebugRelease"
+    },
+    {
+      "name": "Run Extension (local backend build)",
       "type": "extensionHost",
       "request": "launch",
       "args": [

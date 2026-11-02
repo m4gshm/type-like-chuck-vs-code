@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readConfig, ExtensionConfig, LocalDevice } from './config';
+import { readConfig, ExtensionConfig, LocalDevice, LocalEngineKind } from './config';
 import { ApiKeyStorage } from './api_key_storage';
 import { CompletionsClient, ModelInfo } from './completions_client';
 import { CompletionProvider } from './completion_provider';
@@ -14,7 +14,8 @@ import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 import { DISTRO_CHOICE_DOWNLOAD, EngineManager, EngineStatus, ENGINE_STATUS, ResetTarget } from './local_engine/engine_manager';
 import { DownloadProgress } from './local_engine/downloader';
-import { localModelDiskDialog, localModelPickerItems, localModelSpec } from './local_engine/model_picker';
+import { DEFAULT_LOCAL_MODEL, isLocalModelId } from './local_engine/model_catalog';
+import { effectiveLocalModel, localModelDiskDialog, localModelPickerItems, localModelSpec } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { probeCapability } from './local_engine/capability';
 
@@ -35,7 +36,10 @@ function bundledOvgenaiRunnerPath(extensionPath: string, platform: NodeJS.Platfo
     return undefined;
   }
   const binary = platform === 'win32' ? 'tlc-ovgenai-runner.exe' : 'tlc-ovgenai-runner';
-  return `${extensionPath}/binaries/ovgenai/${dir}/${binary}`;
+  // TLC_RUNNER_DIR selects the binaries/<engine> folder; the F5 "release" launch
+  // configuration points it at the pinned backend release download.
+  const engineDir = process.env.TLC_RUNNER_DIR?.trim() || 'ovgenai';
+  return `${extensionPath}/binaries/${engineDir}/${dir}/${binary}`;
 }
 
 /** Path of the bundled mlx runner; defined on macOS arm64 only. */
@@ -140,7 +144,7 @@ export function activate(context: vscode.ExtensionContext): void {
     resolveEnginePaths(
       {
         engineDir: config().localEngineDir,
-        modelDir: config().localModelDir,
+        modelDir: config().localDownloadedModelsDir,
         modelCacheDir: config().localModelCacheDir,
       },
       context.globalStorageUri.fsPath,
@@ -185,12 +189,13 @@ export function activate(context: vscode.ExtensionContext): void {
       engineKind: config().localEngineKind,
       npuContextLength: config().localNpuContextMaxLength,
       releaseTag: config().localLlamaCppRelease,
-      engineBinary: config().localEngineBinary,
       distroDir: config().localDistroDir,
       huggingfaceUrl: config().localHuggingfaceUrl,
       githubUrl: config().localGithubUrl,
       openvinoUrl: config().localOpenvinoUrl,
-      modelPath: config().localModelPath,
+      // The custom path applies only while the model setting is "custom":
+      // a stale path must not silently override a catalog model choice.
+      modelPath: config().localModel === 'custom' ? config().localCustomModelPath : '',
       modelUrls: config().localModelUrls,
       ovgenaiRunnerPath: bundledOvgenaiRunnerPath(context.extensionPath),
       mlxRunnerPath: bundledMlxRunnerPath(context.extensionPath),
@@ -355,12 +360,25 @@ export function activate(context: vscode.ExtensionContext): void {
    * catalog models; for From-disk models the family is matched by the path
    * name since the catalog id may be stale. */
   const localModelHint = (): { modelId: string; template?: string } => {
-    const modelPath = config().localModelPath;
+    const modelPath = config().localModel === 'custom' ? config().localCustomModelPath : '';
     if (modelPath.length > 0) {
       return { modelId: modelPath };
     }
     const spec = localModelSpec(config().localEngineKind, config().localModel);
     return spec !== undefined ? { modelId: spec.label, template: spec.template } : { modelId: config().localModel };
+  };
+
+  /** Opens the From-disk model file dialog for the engine kind; returns the picked path. */
+  const pickLocalModelFromDisk = async (kind: LocalEngineKind): Promise<string | undefined> => {
+    const dialog = localModelDiskDialog(kind);
+    const file = await vscode.window.showOpenDialog({
+      canSelectFiles: dialog.canSelectFiles,
+      canSelectFolders: dialog.canSelectFolders,
+      canSelectMany: false,
+      filters: dialog.filters,
+      title: 'TLC: Select Local Model From Disk',
+    });
+    return file?.[0]?.fsPath;
   };
 
   const applyMode = async (): Promise<void> => {
@@ -595,22 +613,19 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const tlc = vscode.workspace.getConfiguration('tlc');
       if (chosen.value === 'disk') {
-        const dialog = localModelDiskDialog(kind);
-        const file = await vscode.window.showOpenDialog({
-          canSelectFiles: dialog.canSelectFiles,
-          canSelectFolders: dialog.canSelectFolders,
-          canSelectMany: false,
-          filters: dialog.filters,
-          title: 'TLC: Select Local Model From Disk',
-        });
-        if (file?.[0]) {
-          await tlc.update('local.modelPath', file[0].fsPath, vscode.ConfigurationTarget.Global);
+        const file = await pickLocalModelFromDisk(kind);
+        if (file !== undefined) {
+          // Path first (it restarts the engine with the file), then the
+          // "custom" id points back at the same file.
+          await tlc.update('local.customModelPath', file, vscode.ConfigurationTarget.Global);
+          await tlc.update('local.model', 'custom', vscode.ConfigurationTarget.Global);
         }
         return;
       }
-      // A catalog model replaces any offline modelPath override.
-      await tlc.update('local.modelPath', undefined, vscode.ConfigurationTarget.Global);
+      // A catalog model replaces any offline modelPath override; the id is
+      // applied first so a single restart picks up both changes.
       await tlc.update('local.model', chosen.value, vscode.ConfigurationTarget.Global);
+      await tlc.update('local.customModelPath', undefined, vscode.ConfigurationTarget.Global);
     }),
     vscode.commands.registerCommand('tlc.selectLocalDevice', async () => {
       const kind = config().localEngineKind;
@@ -654,7 +669,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // The kind decides what gets downloaded next, so pick it here; the
         // download-or-existing-folder question follows for the chosen kind.
         const kinds = [
-          { label: '$(device-desktop) llama.cpp', detail: 'GGUF models via llama-server (vulkan GPU / OpenVINO NPU build)', value: 'llama.cpp' },
+          { label: '$(device-desktop) llama.cpp', detail: 'GGUF models via llama-server (vulkan GPU, CPU fallback)', value: 'llama.cpp' },
           ...(bundledOvgenaiRunnerPath(context.extensionPath) !== undefined
             ? [{ label: '$(circuit-board) OpenVINO GenAI', detail: 'Native IR models on Intel NPU/GPU/CPU', value: 'ovgenai' }]
             : []),
@@ -838,11 +853,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const previousMode = config().mode;
       const previousEngineDirs = {
         engineDir: config().localEngineDir,
-        modelDir: config().localModelDir,
+        modelDir: config().localDownloadedModelsDir,
         modelCacheDir: config().localModelCacheDir,
       };
       const previousLocal = {
         model: config().localModel,
+        modelPath: config().localCustomModelPath,
         device: config().localDevice,
         apiKeyEnabled: config().localApiKeyEnabled,
         npuContextLength: config().localNpuContextMaxLength,
@@ -871,17 +887,28 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const modeChanged = event.affectsConfiguration('tlc.mode') && config().mode !== previousMode;
       const dirsChanged = config().localEngineDir !== previousEngineDirs.engineDir
-        || config().localModelDir !== previousEngineDirs.modelDir
+        || config().localDownloadedModelsDir !== previousEngineDirs.modelDir
         || config().localModelCacheDir !== previousEngineDirs.modelCacheDir;
       const localTargetChanged = config().mode === 'local'
-        && (event.affectsConfiguration('tlc.local.model') && config().localModel !== previousLocal.model
+        && (effectiveLocalModel(config().localModel, config().localCustomModelPath) !== effectiveLocalModel(previousLocal.model, previousLocal.modelPath)
           || event.affectsConfiguration('tlc.local.device') && config().localDevice !== previousLocal.device
           || event.affectsConfiguration('tlc.local.apiKeyEnabled') && config().localApiKeyEnabled !== previousLocal.apiKeyEnabled
           || event.affectsConfiguration('tlc.local.npuContextMaxLength') && config().localNpuContextMaxLength !== previousLocal.npuContextLength);
       if (dirsChanged) {
         await syncEngineDirectories();
       }
-      if (modeChanged) {
+      if (event.affectsConfiguration('tlc.local.model') && config().localModel === 'custom' && config().localCustomModelPath.length === 0) {
+        // "custom" is meaningless without a file: ask for one immediately and
+        // revert to the previous catalog model when the dialog is canceled.
+        const picked = await pickLocalModelFromDisk(config().localEngineKind);
+        if (picked !== undefined) {
+          await vscode.workspace.getConfiguration('tlc').update('local.customModelPath', picked, vscode.ConfigurationTarget.Global);
+        } else {
+          const revert = previousLocal.model.length > 0 && previousLocal.model !== 'custom' ? previousLocal.model : DEFAULT_LOCAL_MODEL;
+          await vscode.workspace.getConfiguration('tlc').update('local.model', revert, vscode.ConfigurationTarget.Global);
+          warn(`TLC local engine: model "custom" was canceled — reset to ${revert}.`);
+        }
+      } else if (modeChanged) {
         await applyMode();
       } else if (localTargetChanged) {
         if (config().mode === 'local') {
@@ -1014,7 +1041,23 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  // A stale local.model value (renamed catalog ids, hand-edited settings)
+  // would fail the engine start; reset it to the default once, with a notice.
+  const normalizeLocalModelSetting = async (): Promise<void> => {
+    const c = vscode.workspace.getConfiguration('tlc');
+    const stored = c.get<string>('local.model', '');
+    if (stored === 'custom' && c.get<string>('local.customModelPath', '').length === 0) {
+      await c.update('local.model', DEFAULT_LOCAL_MODEL, vscode.ConfigurationTarget.Global);
+      warn('TLC local engine: model "custom" has no tlc.local.customModelPath — reset to the default model.');
+    } else if (stored.length > 0 && stored !== 'custom' && !isLocalModelId(stored)) {
+      await c.update('local.model', undefined, vscode.ConfigurationTarget.Global);
+      warn(`TLC local engine: model "${stored}" is not a catalog entry — reset to the default (${DEFAULT_LOCAL_MODEL}).`);
+      void vscode.window.showWarningMessage(`TLC: local model "${stored}" is unknown — reset to ${DEFAULT_LOCAL_MODEL}.`);
+    }
+  };
+
   void (async () => {
+    await normalizeLocalModelSetting();
     await syncApiKey();
     await syncEngineDirectories();
     if (config().mode === 'local') {

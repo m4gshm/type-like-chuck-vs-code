@@ -165,6 +165,25 @@ describe('CompletionProvider', () => {
     expect(range.end.character).toBe(1); // insertion point before "\n"
   });
 
+  it('does not cache a whitespace-only completion: the next invocation requests afresh', async () => {
+    const { deps, calls } = makeDeps(async () => ({ text: '  \n' }));
+    const provider = new CompletionProvider(deps);
+    const token = new FakeToken();
+    const doc = fakeDocument(['']);
+
+    const first = provider.provideInlineCompletionItems(doc as never, new Position(0, 0) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    await first;
+    expect(calls()).toBe(1);
+
+    // A cached result would be served without a new call (see the exact-position
+    // cache test); whitespace-only results must not enter the cache.
+    const second = provider.provideInlineCompletionItems(doc as never, new Position(0, 0) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    await second;
+    expect(calls()).toBe(2);
+  });
+
   it('re-serves the cached completion at the exact cursor position without new API calls', async () => {
     const { deps, calls } = makeDeps(async () => ({ text: 'function foo' }));
     const provider = new CompletionProvider(deps);

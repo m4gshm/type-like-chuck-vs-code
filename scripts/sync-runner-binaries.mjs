@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Builds the backend runner repo for the host platform and copies the fresh
-// binary into binaries/<engine>/<platform>/ with the name the extension
-// resolves at runtime — so F5 testing always runs the current backend.
+// Puts the backend runner binary into binaries/<engine>/<platform>/ under the
+// name the extension resolves at runtime. Reuses a binary already on disk
+// (downloaded from the pinned release or built earlier); pass --build (or set
+// SYNC_RUNNER_BUILD=1) to rebuild the backend repo and copy the fresh binary
+// — for testing backend changes over F5.
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -19,6 +21,13 @@ const target = TARGETS.find((t) => t.platform === process.platform);
 if (target === undefined) {
   console.error(`No runner target for platform ${process.platform}`);
   process.exit(1);
+}
+
+const destination = join(root, target.dir, target.finalName);
+const forceBuild = process.argv.includes('--build') || process.env.SYNC_RUNNER_BUILD === '1';
+if (!forceBuild && existsSync(destination)) {
+  console.log(`runner binary present: ${target.dir}/${target.finalName} (use --build to rebuild from the backend repo)`);
+  process.exit(0);
 }
 
 const backendRoot = join(root, '..', target.repo);
@@ -40,7 +49,6 @@ if (!existsSync(built)) {
   process.exit(1);
 }
 
-const destination = join(root, target.dir, target.finalName);
 mkdirSync(dirname(destination), { recursive: true });
 // The source exe was just linked/used and may be briefly locked; retry.
 for (let attempt = 1; ; attempt++) {

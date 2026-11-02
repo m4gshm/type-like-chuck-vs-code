@@ -37,18 +37,17 @@ interface Fixture {
   root: string;
 }
 
-const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {}): Promise<Fixture> => {
+const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {}, npuGeneration = 0): Promise<Fixture> => {
   const root = await mkdtemp(join(tmpdir(), 'tlc-ovgenai-test-'));
   const statuses: EngineStatus[] = [];
   const downloads: Fixture['downloads'] = [];
   const spawned: FakeRunnerChild[] = [];
   const base: EngineManagerSettings = {
-    modelId: '1.5b',
+    modelId: 'Qwen2.5-Coder 1.5B',
     device: 'auto',
     engineKind: 'ovgenai',
     npuContextLength: 8192,
     releaseTag: 'b1',
-    engineBinary: '',
     distroDir: '',
     huggingfaceUrl: 'https://huggingface.co',
     githubUrl: 'https://github.com',
@@ -68,7 +67,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const libDir = join(engineRoot, `openvino_genai_ubuntu22_${OV_GENAI_VERSION}_x86_64`, 'runtime', 'lib', 'intel64');
   await mkdir(libDir, { recursive: true });
   await writeFile(join(libDir, 'libopenvino.so'), 'lib');
-  const modelPath = join(modelDir, '1.5b-nf4-ov');
+  const modelPath = join(modelDir, 'OpenVINO', 'Qwen2.5-Coder-1.5B-Instruct-int8-ov');
   await mkdir(modelPath, { recursive: true });
   for (const file of ['openvino_model.xml', 'openvino_model.bin', 'openvino_tokenizer.xml', 'openvino_tokenizer.bin', 'openvino_detokenizer.xml', 'openvino_detokenizer.bin', 'tokenizer.json']) {
     await writeFile(join(modelPath, file), 'data');
@@ -100,6 +99,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
     // Avoids the real --version probe: the fake engine child never closes, and
     // the probe process would otherwise become spawned[0].
     probeRunnerVersion: async () => ({ app: 'test-runner', ovGenai: OV_GENAI_VERSION }),
+    npuGeneration: async () => npuGeneration,
   };
   return { host, statuses, downloads, spawned, root };
 };
@@ -113,9 +113,9 @@ describe('EngineManager (ovgenai engine)', () => {
     const f = await makeFixture();
     const manager = new EngineManager(f.host);
     const status = await manager.ensureReady();
-    expect(status).toMatchObject({ status: 'ready', model: '1.5b', device: 'gpu', baseUrl: '', apiKey: undefined });
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 1.5B', device: 'gpu', baseUrl: '', apiKey: undefined });
     expect(f.downloads).toHaveLength(0);
-    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('1.5b-nf4-ov'), '--device', 'GPU', '--ctx', '32768', '--prop', expect.stringMatching(/^CACHE_DIR=.*gpu-blobs$/)]);
+    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('Qwen2.5-Coder-1.5B-Instruct-int8-ov'), '--device', 'GPU', '--ctx', '32768', '--prop', expect.stringMatching(/^CACHE_DIR=.*gpu-blobs$/)]);
     expect(manager.stdioRunner()).toBeDefined();
     await manager.stop();
   });
@@ -126,8 +126,8 @@ describe('EngineManager (ovgenai engine)', () => {
     await manager.ensureReady();
     const before = f.spawned.length;
     const settings = f.host.settings();
-    (settings as { modelId: string }).modelId = '0.5b';
-    const modelPath = join(f.root, 'models', '0.5b-nf4-ov');
+    (settings as { modelId: string }).modelId = 'Qwen2.5-Coder 0.5B';
+    const modelPath = join(f.root, 'models', 'OpenVINO', 'Qwen2.5-Coder-0.5B-Instruct-int8-ov');
     const { mkdir: mk, writeFile: wf } = await import('fs/promises');
     await mk(modelPath, { recursive: true });
     for (const file of ['openvino_model.xml', 'openvino_model.bin', 'openvino_tokenizer.xml', 'openvino_tokenizer.bin', 'openvino_detokenizer.xml', 'openvino_detokenizer.bin', 'tokenizer.json']) {
@@ -139,17 +139,30 @@ describe('EngineManager (ovgenai engine)', () => {
     await manager.stop();
   });
 
+  it('starts the auto device chain on the NPU for an Intel NPU generation 4 or later', async () => {
+    const f = await makeFixture({}, 4);
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(status).toMatchObject({ status: 'ready', device: 'npu' });
+    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('nf4-sym-g-1-se-awq'), '--device', 'NPU', '--ctx', '8192', '--prop', expect.stringMatching(/^CACHE_DIR=.*npu-blobs$/)]);
+    await manager.stop();
+  });
+
   it('falls back through gpu to cpu when npu fails to start', async () => {
-    const f = await makeFixture({ device: 'npu' });
-    const failed: string[] = [];
+    const f = await makeFixture({ device: 'npu' });    const failed: string[] = [];
     f.host.spawnImpl = ((_path: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
       const child = new FakeRunnerChild(args, opts.env);
       f.spawned.push(child);
       const device = args[args.indexOf('--device') + 1];
+      const modelPath = args[args.indexOf('--model') + 1];
       if (device === 'NPU') {
+        expect(modelPath).toContain('nf4-sym-g-1-se-awq');
         expect(args[args.indexOf('--prop') + 1]).toMatch(/^CACHE_DIR=.*npu-blobs$/);
       } else if (device === 'GPU') {
+        expect(modelPath).toContain('Instruct-int8-ov');
         expect(args[args.indexOf('--prop') + 1]).toMatch(/^CACHE_DIR=.*gpu-blobs$/);
+      } else {
+        expect(modelPath).toContain('Instruct-int8-ov');
       }
       setTimeout(() => {
         if (device !== 'CPU') {
@@ -181,8 +194,25 @@ describe('EngineManager (ovgenai engine)', () => {
     f.host.askDistroOrDownload = async () => undefined;
     const manager = new EngineManager(f.host);
     await expect(manager.ensureReady()).rejects.toMatchObject({ name: 'AbortError' });
-    expect(f.statuses.map((s) => s.status)).toEqual([ENGINE_STATUS.awaitingInput]);
+    expect(f.statuses.map((s) => s.status)).toEqual([ENGINE_STATUS.awaitingInput, ENGINE_STATUS.error]);
     expect(f.downloads).toHaveLength(0);
+  });
+
+  it('cancels the runner start while waiting for readiness', { timeout: 20_000 }, async () => {
+    const f = await makeFixture();
+    f.host.spawnImpl = ((_path: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+      const child = new FakeRunnerChild(args, opts.env);
+      f.spawned.push(child);
+      return child as never;
+    }) as never;
+    const manager = new EngineManager(f.host);
+    const controller = new AbortController();
+    const pending = manager.ensureReady(controller.signal);
+    await vi.waitFor(() => expect(f.spawned.length).toBe(1), { timeout: 10_000, interval: 20 });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(f.spawned[0].killed).toBe(true);
+    expect(last(f.statuses)).toMatchObject({ status: 'error', message: 'start canceled' });
   });
 
   it('uses the folder picked in the distro question instead of downloading', async () => {

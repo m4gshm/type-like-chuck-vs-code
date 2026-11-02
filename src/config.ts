@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import { cpus } from 'os';
 import { CustomTemplateDefinition } from './templates/types';
+import { defaultEngineKind } from './local_engine/capability';
 
 export type TlcMode = 'remote' | 'local';
 export type LocalDevice = 'auto' | 'cpu' | 'gpu' | 'npu';
@@ -16,14 +18,13 @@ export interface ExtensionConfig {
   localNpuContextMaxLength: number;
   localLlamaCppRelease: string;
   localEngineDir: string;
-  localEngineBinary: string;
   localDistroDir: string;
-  localModelDir: string;
+  localDownloadedModelsDir: string;
   localModelCacheDir: string;
   localHuggingfaceUrl: string;
   localGithubUrl: string;
   localOpenvinoUrl: string;
-  localModelPath: string;
+  localCustomModelPath: string;
   localModelUrls: Record<string, string>;
   localApiKeyEnabled: boolean;
   promptTemplate: string | undefined;
@@ -64,15 +65,12 @@ export function readConfig(): ExtensionConfig {
   const device = rawDevice === 'gpu' || rawDevice === 'npu' || rawDevice === 'cpu' ? rawDevice : 'auto';
   const rawKind = c.get<string>('local.engineKind', 'llama.cpp');
   const engineKind: LocalEngineKind = rawKind === 'ovgenai' ? 'ovgenai' : rawKind === 'mlx' ? 'mlx' : 'llama.cpp';
-  // Platform default: the user has not chosen an engine kind explicitly —
-  // macOS arm64 gets the self-contained mlx runner, everything else llama.cpp.
+  // While the setting is untouched the default follows the capability
+  // matrix: mlx on Apple Silicon, ovgenai on Intel x64, llama.cpp elsewhere.
   const kindTouched = c.inspect<string>('local.engineKind')?.globalValue !== undefined
     || c.inspect<string>('local.engineKind')?.workspaceValue !== undefined;
-  const effectiveKind: LocalEngineKind = !kindTouched
-    && engineKind === 'llama.cpp'
-    && process.platform === 'darwin'
-    && process.arch === 'arm64'
-    ? 'mlx'
+  const effectiveKind: LocalEngineKind = !kindTouched && engineKind === 'llama.cpp'
+    ? defaultEngineKind(process.platform, process.arch, cpus()[0]?.model ?? '')
     : engineKind;
   const npuLimitRaw = c.get<number>('local.npuContextMaxLength', 8192);
   // Only the ovgenai runner actually runs on the NPU (llama.cpp redirects an
@@ -88,19 +86,18 @@ export function readConfig(): ExtensionConfig {
     apiKey: c.get<string>('openai.apiKey', c.get<string>('apiKey', '')),
     mode,
     localEngineKind: effectiveKind,
-    localModel: c.get<string>('local.model', '1.5b'),
+    localModel: c.get<string>('local.model', 'Qwen2.5-Coder 1.5B'),
     localDevice: device,
     localNpuContextMaxLength: npuLimitRaw,
     localLlamaCppRelease: c.get<string>('local.llamaCppRelease', 'b11935'),
     localEngineDir: c.get<string>('local.engineDir', ''),
-    localEngineBinary: c.get<string>('local.engineBinary', ''),
     localDistroDir: c.get<string>('local.distroDir', ''),
-    localModelDir: c.get<string>('local.modelDir', ''),
+    localDownloadedModelsDir: c.get<string>('local.downloadedModelsDir', ''),
     localModelCacheDir: c.get<string>('local.modelCacheDir', ''),
     localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', 'https://huggingface.co'),
     localGithubUrl: c.get<string>('local.githubUrl', 'https://github.com'),
     localOpenvinoUrl: c.get<string>('local.openvinoUrl', 'https://storage.openvinotoolkit.org'),
-    localModelPath: c.get<string>('local.modelPath', ''),
+    localCustomModelPath: c.get<string>('local.customModelPath', ''),
     localModelUrls: c.get<Record<string, string>>('local.modelUrls', {}),
     localApiKeyEnabled: c.get<boolean>('local.apiKeyEnabled', true),
     promptTemplate: c.get<string>('promptTemplate'),

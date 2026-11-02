@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOCAL_MODEL, isLocalModelId, LOCAL_MODEL_IDS, localModel, localModelUrl } from '../../local_engine/model_catalog';
 
 describe('local model catalog', () => {
-  it('offers 0.5b, 1.5b and 3b', () => {
-    expect(LOCAL_MODEL_IDS).toEqual(['0.5b', '1.5b', '3b']);
-    expect(DEFAULT_LOCAL_MODEL).toBe('1.5b');
+  it('offers 0.5B, 1.5B and 3B', () => {
+    expect(LOCAL_MODEL_IDS).toEqual(['Qwen2.5-Coder 0.5B', 'Qwen2.5-Coder 1.5B', 'Qwen2.5-Coder 3B']);
+    expect(DEFAULT_LOCAL_MODEL).toBe('Qwen2.5-Coder 1.5B');
   });
 
   it('builds huggingface urls matching the file names', () => {
@@ -18,7 +18,7 @@ describe('local model catalog', () => {
   });
 
   it('supports mirror base urls', () => {
-    expect(localModelUrl('0.5b', 'https://hf-mirror.internal/')).toBe(
+    expect(localModelUrl('Qwen2.5-Coder 0.5B', 'https://hf-mirror.internal/')).toBe(
       'https://hf-mirror.internal/bartowski/Qwen2.5-Coder-0.5B-GGUF/resolve/main/Qwen2.5-Coder-0.5B-Q4_K_M.gguf',
     );
   });
@@ -28,12 +28,12 @@ describe('local model catalog', () => {
       const model = localModel(id);
       expect(model.approximateBytes).toBeGreaterThan(0);
       expect(model.contextLength).toBeGreaterThan(0);
-      expect(model.label.toLowerCase()).toContain(id);
+      expect(model.label).toContain(id);
     }
   });
 
   it('guards arbitrary strings', () => {
-    expect(isLocalModelId('1.5b')).toBe(true);
+    expect(isLocalModelId('Qwen2.5-Coder 1.5B')).toBe(true);
     expect(isLocalModelId('7b')).toBe(false);
   });
 });
