@@ -5,8 +5,10 @@ describe('defaultEngineKind (untouched setting)', () => {
   it.each([
     ['win32', 'x64', 'Intel(R) Core(TM) Ultra 7 155H', 'ovgenai'],
     ['linux', 'x64', 'Intel(R) Xeon(R) Gold 6248', 'ovgenai'],
+    ['linux', 'arm64', 'Intel(R) Core(TM) Ultra 7', 'ovgenai'],
     ['win32', 'x64', 'AMD Ryzen 9 7950X', 'llama.cpp'],
     ['win32', 'arm64', 'Intel(R) Core(TM) i7', 'llama.cpp'],
+    ['linux', 'arm64', 'Ampere(R) Altra(R) Max', 'llama.cpp'],
     ['darwin', 'arm64', 'Apple M3', 'mlx'],
     ['darwin', 'x64', 'Intel(R) Core(TM) i9', 'llama.cpp'],
   ] as Array<[NodeJS.Platform, string, string, string]>)('resolves %s/%s (%s) to %s', (platform, arch, cpu, kind) => {
@@ -27,10 +29,16 @@ describe('npuDeviceGeneration (pure map)', () => {
 describe('recommend (pure matrix)', () => {
   it.each([
     ['win32', 'arm64'],
-    ['linux', 'arm64'],
-  ] as Array<[NodeJS.Platform, string]>)('recommends llama.cpp on %s/%s (non-x64, non-darwin)', (platform, arch) => {
+  ] as Array<[NodeJS.Platform, string]>)('recommends llama.cpp on %s/%s (no bundled runner)', (platform, arch) => {
     const result = recommend(platform, arch, 'Intel(R) Core(TM) i7', 0);
     expect(result).toMatchObject({ kind: 'local', engineKind: 'llama.cpp', device: 'auto' });
+  });
+
+  it('recommends ovgenai on linux arm64 with an Intel CPU, llama.cpp otherwise', () => {
+    expect(recommend('linux', 'arm64', 'Intel(R) Core(TM) Ultra 7', 0))
+      .toMatchObject({ kind: 'local', engineKind: 'ovgenai', device: 'auto' });
+    expect(recommend('linux', 'arm64', 'Ampere(R) Altra(R) Max', 0))
+      .toMatchObject({ kind: 'local', engineKind: 'llama.cpp', device: 'auto' });
   });
 
   it('recommends ovgenai with NPU on Intel x64 when the NPU is generation 4 or later', () => {

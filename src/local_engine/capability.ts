@@ -16,6 +16,9 @@ export function defaultEngineKind(platform: NodeJS.Platform, arch: string, cpuMo
   if (platform === 'darwin') {
     return arch === 'arm64' ? 'mlx' : 'llama.cpp';
   }
+  if (platform === 'linux' && arch === 'arm64' && /intel/i.test(cpuModel)) {
+    return 'ovgenai';
+  }
   return (platform === 'win32' || platform === 'linux') && arch === 'x64' && /intel/i.test(cpuModel)
     ? 'ovgenai'
     : 'llama.cpp';

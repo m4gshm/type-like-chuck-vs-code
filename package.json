@@ -136,10 +136,10 @@
             ],
             "enumDescriptions": [
               "llama.cpp llama-server with GGUF models (default; all platforms)",
-              "Bundled OpenVINO GenAI runner with native IR models (Windows/Linux x64; NPU/GPU/CPU)",
+              "Bundled OpenVINO GenAI runner with native IR models (Windows/Linux x64, Linux arm64 Intel; NPU/GPU/CPU)",
               "Bundled MLX runner with 4-bit mlx-community models (macOS arm64; Metal)"
             ],
-            "description": "Local engine implementation (local mode only). The ovgenai runner ships with the extension and downloads the OpenVINO runtime libraries on first use. The mlx runner ships with the extension and needs no downloads at all. Default: `mlx` on macOS arm64, `ovgenai` on Windows/Linux with an Intel CPU, `llama.cpp` elsewhere (until this setting is set explicitly)."
+            "description": "Local engine implementation (local mode only). The ovgenai runner ships with the extension and downloads the OpenVINO runtime libraries on first use. The mlx runner ships with the extension and needs no downloads at all. Default: `mlx` on macOS arm64, `ovgenai` on Windows/Linux x64 and Linux arm64 with an Intel CPU, `llama.cpp` elsewhere (until this setting is set explicitly)."
           },
           "tlc.local.model": {
             "type": "string",

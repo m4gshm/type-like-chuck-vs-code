@@ -24,8 +24,8 @@ function ovgenaiPlatformDir(platform: NodeJS.Platform, arch: string): string | u
   if (platform === 'win32' && arch === 'x64') {
     return 'win32-x64';
   }
-  if (platform === 'linux' && arch === 'x64') {
-    return 'linux-x64';
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
+    return arch === 'x64' ? 'linux-x64' : 'linux-arm64';
   }
   return undefined;
 }
