@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -58,7 +58,14 @@ jobs:
           test "$code" -eq 2 || { echo "runner from vsix exited with $code"; exit 1; }
       - name: upload vsix artifact
         uses: actions/upload-artifact@v5
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         with:
           name: tlc-vsix
           path: '*.vsix'
           retention-days: 30
+      - name: create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '*.vsix'
+          generate_release_notes: true
