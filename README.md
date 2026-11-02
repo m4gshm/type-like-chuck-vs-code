@@ -56,6 +56,22 @@ In local mode the local engine is reached only via the loopback interface with a
 | --- | --- | --- |
 | `tlc.mode` | `local` | Completion source: `local` (TLC-managed engine: llama.cpp or OpenVINO GenAI) or `remote` (OpenAI-compatible server at `tlc.openai.baseUrl`) |
 | `tlc.local.engineKind` | `mlx` on macOS arm64, `ovgenai` on Windows/Linux Intel x64 and Linux arm64 Intel, `llama.cpp` elsewhere | Local engine implementation (local mode): `llama.cpp` (llama-server + GGUF, all platforms), `ovgenai` (bundled OpenVINO GenAI runner + IR models, Windows/Linux x64 and Linux arm64, NPU/GPU/CPU) or `mlx` (bundled MLX runner + 4-bit models, macOS arm64, Metal) |
+
+Default engine kind and device by platform (untouched settings):
+
+| Platform / arch | CPU | Default kind | Default device |
+| --- | --- | --- | --- |
+| macOS arm64 | Apple Silicon | `mlx` | `gpu` (Metal, the device setting is ignored) |
+| macOS x64 | any | `llama.cpp` | `auto` (GPU → CPU) |
+| Windows x64 | Intel | `ovgenai` | `auto` → **NPU** on an Intel NPU of generation 4+, otherwise GPU → CPU |
+| Windows x64 | AMD / other | `llama.cpp` | `auto` (GPU → CPU) |
+| Windows arm64 | any | `llama.cpp` | `auto` (GPU → CPU; no OpenVINO GenAI runtime for this platform) |
+| Linux x64 | Intel | `ovgenai` | `auto` → NPU on gen 4+, otherwise GPU → CPU |
+| Linux x64 | AMD / other | `llama.cpp` | `auto` (GPU → CPU) |
+| Linux arm64 | Intel | `ovgenai` | `auto` (GPU → CPU) |
+| Linux arm64 | non-Intel (Ampere, Graviton…) | `llama.cpp` | `auto` (GPU → CPU) |
+
+The NPU lead of the `auto` chain (ovgenai only) by Intel NPU generation: gen 4+ (Lunar Lake `0x643E`, Panther Lake `0xB03E`, Wildcat Lake `0xFD3E`, Nova Lake `0xD71D`) → NPU → GPU → CPU with the nf4 models and the NPU context cap; gen 3 or older (Meteor Lake `0x7D1D`, Arrow Lake `0xAD1D`) or no NPU → GPU → CPU; an explicit `npu` in llama.cpp is warned about and resolved to GPU.
 | `tlc.local.model` | `Qwen2.5-Coder 1.5B` | Local engine model (local mode): `Qwen2.5-Coder 0.5B`, `Qwen2.5-Coder 1.5B` or `Qwen2.5-Coder 3B` (GGUF for llama.cpp, OpenVINO IR nf4 for ovgenai, MLX 4-bit for mlx) |
 | `tlc.local.device` | `auto` | Local engine inference device: `auto` (GPU → CPU; for the ovgenai runner on an Intel NPU generation 4+ the chain starts on the NPU), or `cpu`, `gpu`, `npu` (NPU: ovgenai runs it, llama.cpp redirects to GPU); a failed accelerated start falls back down the device chain |
 | `tlc.local.npuContextMaxLength` | `8192` | Context window used on the NPU (local mode only). The NPU graph is compiled for this window: a smaller window compiles faster, generates faster and needs less memory; it also caps the prefix/suffix prompt budgets when the NPU is used. `0` uses the model's full context |
