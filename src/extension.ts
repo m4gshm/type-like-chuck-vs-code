@@ -19,6 +19,8 @@ import { effectiveLocalModel, localModelDiskDialog, localModelPickerItems, local
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { probeCapability } from './local_engine/capability';
 
+const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 /** Platform label under binaries/ovgenai; undefined when no runner is bundled. */
 function ovgenaiPlatformDir(platform: NodeJS.Platform, arch: string): string | undefined {
   if (platform === 'win32' && arch === 'x64') {
@@ -110,6 +112,7 @@ export function activate(context: vscode.ExtensionContext): void {
     () => config().maxTokens,
     (message) => console.log(`[TLC:cause] ${message}`),
     (message) => trace(message),
+
   );
 
   const complectionState = new CompletionState(context.globalState);
@@ -341,7 +344,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await task(cancel.signal);
       } catch (err) {
         if (!(err instanceof Error && err.name === 'AbortError')) {
-          const message = `TLC local engine: ${err instanceof Error ? err.message : String(err)}`;
+          const message = `TLC local engine: ${errMessage(err)}`;
           void vscode.window.showWarningMessage(message, 'Retry').then((choice) => {
             if (choice === 'Retry') {
               void runEngineTask(title, task);
@@ -473,6 +476,23 @@ export function activate(context: vscode.ExtensionContext): void {
     return models;
   };
 
+  /** Behaves like "TLC: Test Connection": probe the server and surface the outcome. */
+  const reportServerReachability = async (): Promise<void> => {
+    try {
+      const models = await checkServerModels();
+      const current = config().model;
+      const onList = models.some((m) => m.id === current);
+      void vscode.window.showInformationMessage(
+        `TLC: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
+        + (onList ? `Current model: ${current}.` : `Model updated from the server (was "${current}").`),
+      );
+    } catch (err) {
+      const message = `TLC: cannot reach ${config().baseUrl}: ${errMessage(err)}`;
+      connectionWatchdog.reportFailure(message);
+      void vscode.window.showWarningMessage(message);
+    }
+  };
+
   const selector: vscode.DocumentSelector = { pattern: '**' };
   const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, complectionProvider);
 
@@ -556,29 +576,13 @@ export function activate(context: vscode.ExtensionContext): void {
       await client.setApiKey(config().apiKey.length > 0 ? config().apiKey : undefined);
       void vscode.window.showInformationMessage('TLC API key cleared.');
     }),
-    vscode.commands.registerCommand('tlc.testConnection', async () => {
-      try {
-        const models = await checkServerModels();
-        const current = config().model;
-        const onList = models.some((m) => m.id === current);
-        void vscode.window.showInformationMessage(
-          `TLC: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
-          + (onList
-            ? `Current model: ${current}.`
-            : `Model updated from the server (was "${current}").`),
-        );
-      } catch (err) {
-        const message = `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`;
-        connectionWatchdog.reportFailure(message);
-        void vscode.window.showWarningMessage(message);
-      }
-    }),
+    vscode.commands.registerCommand('tlc.testConnection', () => reportServerReachability()),
     vscode.commands.registerCommand('tlc.selectModel', async () => {
       let models: ModelInfo[] = [];
       try {
         models = await client.listModels();
       } catch (err) {
-        warn(`Cannot list models from ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+        warn(`Cannot list models from ${config().baseUrl}: ${errMessage(err)}`);
         void vscode.window.showWarningMessage(
           `Cannot fetch the model list from ${config().baseUrl}. You can still enter the model id manually.`,
         );
@@ -703,7 +707,7 @@ export function activate(context: vscode.ExtensionContext): void {
           );
         } catch (err) {
           connectionWatchdog.reportFailure(
-            `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            `TLC: cannot reach ${config().baseUrl}: ${errMessage(err)}`,
           );
         } finally {
           statusBar.setBusy(false);
@@ -850,20 +854,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       // Refresh the cached config first: everything below (including
       // client.refresh()) derives from the new settings.
-      const previousMode = config().mode;
-      const previousEngineDirs = {
-        engineDir: config().localEngineDir,
-        modelDir: config().localDownloadedModelsDir,
-        modelCacheDir: config().localModelCacheDir,
-      };
-      const previousLocal = {
-        model: config().localModel,
-        modelPath: config().localCustomModelPath,
-        device: config().localDevice,
-        engineKind: config().localEngineKind,
-        apiKeyEnabled: config().localApiKeyEnabled,
-        npuContextLength: config().localNpuContextMaxLength,
-      };
+      const previous = { ...config() };
       modelConfig.reload();
       if (event.affectsConfiguration('tlc.promptTemplate') && !syncingTemplateFields) {
         const selectedId = vscode.workspace.getConfiguration('tlc').get<string>('promptTemplate');
@@ -886,16 +877,16 @@ export function activate(context: vscode.ExtensionContext): void {
         client.refresh();
       }
 
-      const modeChanged = event.affectsConfiguration('tlc.mode') && config().mode !== previousMode;
-      const dirsChanged = config().localEngineDir !== previousEngineDirs.engineDir
-        || config().localDownloadedModelsDir !== previousEngineDirs.modelDir
-        || config().localModelCacheDir !== previousEngineDirs.modelCacheDir;
+      const modeChanged = event.affectsConfiguration('tlc.mode') && config().mode !== previous.mode;
+      const dirsChanged = config().localEngineDir !== previous.localEngineDir
+        || config().localDownloadedModelsDir !== previous.localDownloadedModelsDir
+        || config().localModelCacheDir !== previous.localModelCacheDir;
       const localTargetChanged = config().mode === 'local'
-        && (effectiveLocalModel(config().localModel, config().localCustomModelPath) !== effectiveLocalModel(previousLocal.model, previousLocal.modelPath)
-          || event.affectsConfiguration('tlc.local.device') && config().localDevice !== previousLocal.device
-        || event.affectsConfiguration('tlc.local.engineKind') && config().localEngineKind !== previousLocal.engineKind
-          || event.affectsConfiguration('tlc.local.apiKeyEnabled') && config().localApiKeyEnabled !== previousLocal.apiKeyEnabled
-          || event.affectsConfiguration('tlc.local.npuContextMaxLength') && config().localNpuContextMaxLength !== previousLocal.npuContextLength);
+        && (effectiveLocalModel(config().localModel, config().localCustomModelPath) !== effectiveLocalModel(previous.localModel, previous.localCustomModelPath)
+          || config().localDevice !== previous.localDevice
+          || config().localEngineKind !== previous.localEngineKind
+          || config().localApiKeyEnabled !== previous.localApiKeyEnabled
+          || config().localNpuContextMaxLength !== previous.localNpuContextMaxLength);
       if (dirsChanged) {
         await syncEngineDirectories();
       }
@@ -906,7 +897,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (picked !== undefined) {
           await vscode.workspace.getConfiguration('tlc').update('local.customModelPath', picked, vscode.ConfigurationTarget.Global);
         } else {
-          const revert = previousLocal.model.length > 0 && previousLocal.model !== 'custom' ? previousLocal.model : DEFAULT_LOCAL_MODEL;
+          const revert = previous.localModel.length > 0 && previous.localModel !== 'custom' ? previous.localModel : DEFAULT_LOCAL_MODEL;
           await vscode.workspace.getConfiguration('tlc').update('local.model', revert, vscode.ConfigurationTarget.Global);
           warn(`TLC local engine: model "custom" was canceled — reset to ${revert}.`);
         }
@@ -934,19 +925,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // commits on Enter/blur: behave like "TLC: Test Connection" and surface
       // the outcome to the user. Local mode never contacts the remote server.
       if (baseUrlChanged && config().mode === 'remote') {
-        try {
-          const models = await checkServerModels();
-          const current = config().model;
-          const onList = models.some((m) => m.id === current);
-          void vscode.window.showInformationMessage(
-            `TLC: ${config().baseUrl} is reachable (${models.length} model${models.length === 1 ? '' : 's'}). `
-            + (onList ? `Current model: ${current}.` : `Model updated from the server (was "${current}").`),
-          );
-        } catch (err) {
-          const message = `TLC: cannot reach ${config().baseUrl}: ${err instanceof Error ? err.message : String(err)}`;
-          connectionWatchdog.reportFailure(message);
-          void vscode.window.showWarningMessage(message);
-        }
+        await reportServerReachability();
       }
     }),
   );
@@ -960,7 +939,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     void checkServerModels().catch((err: unknown) => {
       connectionWatchdog.reportFailure(
-        `Cannot reach the completions API (${config().baseUrl}): ${err instanceof Error ? err.message : String(err)}`,
+        `Cannot reach the completions API (${config().baseUrl}): ${errMessage(err)}`,
       );
     });
   }, MODEL_POLL_INTERVAL_MS);
