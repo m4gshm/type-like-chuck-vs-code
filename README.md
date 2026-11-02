@@ -12,7 +12,7 @@ Inline (ghost text) code completions from any OpenAI-compatible API, with config
   - `mlx` — macOS arm64 only: MLX 4-bit models on Metal, self-contained, no downloads.
 - **Remote mode** — any OpenAI-compatible endpoint (LM Studio, llama.cpp, vLLM, Ollama), `GET /v1/models` is polled so server-side model changes are picked up, and the template follows the model family.
 - **Automatic + manual trigger** — completions after a typing pause (250 ms) or immediately on `Ctrl+Alt+Space` / `Alt+\` (bypasses the cache and pending reuse).
-- **Built-in FIM templates** (Qwen2.5-Coder, Mellum) plus custom markers, editable right in the settings.
+- **Built-in FIM templates** (Qwen2.5-Coder) plus custom markers, editable right in the settings.
 - **Safe by default** — API key in secret storage, completions disabled in files like `.env`, and the local engine listens on loopback with a per-session key other processes cannot use.
 - **Coexists with Copilot** — with `tlc.yieldToCopilot` TLC disables itself while Copilot's inline suggestions are enabled and re-enables after (a manual toggle always wins).
 
@@ -22,19 +22,7 @@ Inline (ghost text) code completions from any OpenAI-compatible API, with config
 2. Local: choose the model with `TLC: Select Local Model` and the device with `TLC: Select Local Device` — the default already matches your platform (see the matrix below).
 3. Remote: pick model from `TLC: Select Model`; set `tlc.promptTemplate` if not auto-detected.
 
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `TLC: Trigger Completion Now` | Request immediately (no cache, no debounce) |
-| `TLC: Select Mode` | Switch local engine ↔ remote server |
-| `TLC: Select Model` | Pick the remote model from `/v1/models` |
-| `TLC: Select Local Model` | Pick the local model: 0.5B / 1.5B / 3B |
-| `TLC: Select Local Device` | Pick the local device: auto / GPU / CPU / NPU |
-| `TLC: Reset Local Engine` | Re-download the engine or model, clear the cache |
-| `TLC: Test Connection` | Probe `tlc.openai.baseUrl`, apply the model list (remote) |
-| `TLC: Set API Key` / `Clear API Key` | Store/remove the key in secret storage |
-| `TLC: Enable/Disable Completions` | Toggle per workspace (also via the status bar item) |
+All commands are discoverable in the command palette under the `TLC:` prefix.
 
 ## Local engine defaults
 
@@ -56,11 +44,11 @@ The NPU part of the `auto` chain (ovgenai only) is decided by Intel NPU generati
 
 A failed accelerated start falls back down the device chain automatically; a start failure that hits CPU doesn't loop.
 
-All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A supported-family model (partial match: qwen, mellum, …) is marked with a check in `TLC: Select Model`.
+All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A model from a supported family is marked with a check in `TLC: Select Model`.
 
 ## Custom FIM templates
 
-`tlc.promptTemplate` selects a built-in template (`qwen2`, `qwen3`, `lfm2`, `mellum`) or `custom`. In `custom` mode the FIM markers (prefix/suffix/middle) and `stop` tokens are edited right in the corresponding settings. Selecting a built-in resets the custom fields; editing any of them switches the selection to `custom`. On a model change a better-matching built-in family is applied automatically (unless `custom`); an unknown template id falls back to the default with a warning.
+`tlc.promptTemplate` selects a built-in template for a known model family (MVP focus: Qwen2.5-Coder) or `custom`. In `custom` mode the FIM markers (prefix/suffix/middle) and `stop` tokens are edited right in the corresponding settings. Selecting a built-in resets the custom fields; editing any of them switches the selection to `custom`. On a model change a better-matching built-in family is applied automatically (unless `custom`); an unknown template id falls back to the default with a warning.
 
 ## Debugging
 
