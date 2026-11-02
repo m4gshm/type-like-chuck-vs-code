@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readConfig, ExtensionConfig, LocalDevice, LocalEngineKind } from './config';
+import { readConfig, ExtensionConfig } from './config';
 import { ApiKeyStorage } from './api_key_storage';
 import { CompletionsClient, ModelInfo } from './completions_client';
 import { CompletionProvider } from './completion_provider';
@@ -9,49 +9,21 @@ import { ModelConfig } from './model_config';
 import { StatusBar } from './status_bar';
 import { ConnectionWatchdog } from './connection_watchdog';
 import { buildTemplateRegistry, ResolvedTemplates } from './templates';
-import { pickSupportedModel, pickTemplateForModel } from './model_selection';
+import { pickTemplateForModel } from './model_selection';
 import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
-import { DISTRO_CHOICE_DOWNLOAD, EngineManager, EngineStatus, ENGINE_STATUS, ResetTarget } from './local_engine/engine_manager';
-import { DEFAULT_LOCAL_MODEL, isLocalModelId } from './local_engine/model_catalog';
-import { effectiveLocalModel, localModelDiskDialog, localModelPickerItems, localModelSpec } from './local_engine/model_picker';
+import { DISTRO_CHOICE_DOWNLOAD, EngineManager, ENGINE_STATUS } from './local_engine/engine_manager';
+import { DEFAULT_LOCAL_MODEL } from './local_engine/model_catalog';
+import { effectiveLocalModel, localModelSpec } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
-import { probeCapability } from './local_engine/capability';
+import { bundledMlxRunnerPath, bundledOvgenaiRunnerPath } from './local_engine/bundled_runners';
 import { EngineTaskRunner } from './engine_progress';
 import { TemplateFieldSync } from './template_fields';
+import { LocalModeStatusUi } from './local_mode_status';
+import { normalizeLocalModelSetting, offerLocalEngine, offerRecommendedLocalEngine } from './startup_prompts';
+import { registerTlcCommands, pickLocalModelFromDisk, presentModelQuickPick, TlcCommandDeps } from './commands';
 
 const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
-/** Platform label under binaries/ovgenai; undefined when no runner is bundled. */
-function ovgenaiPlatformDir(platform: NodeJS.Platform, arch: string): string | undefined {
-  if (platform === 'win32' && arch === 'x64') {
-    return 'win32-x64';
-  }
-  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
-    return arch === 'x64' ? 'linux-x64' : 'linux-arm64';
-  }
-  return undefined;
-}
-
-function bundledOvgenaiRunnerPath(extensionPath: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | undefined {
-  const dir = ovgenaiPlatformDir(platform, arch);
-  if (dir === undefined) {
-    return undefined;
-  }
-  const binary = platform === 'win32' ? 'tlc-ovgenai-runner.exe' : 'tlc-ovgenai-runner';
-  // TLC_RUNNER_DIR selects the binaries/<engine> folder; the F5 "release" launch
-  // configuration points it at the pinned backend release download.
-  const engineDir = process.env.TLC_RUNNER_DIR?.trim() || 'ovgenai';
-  return `${extensionPath}/binaries/${engineDir}/${dir}/${binary}`;
-}
-
-/** Path of the bundled mlx runner; defined on macOS arm64 only. */
-function bundledMlxRunnerPath(extensionPath: string, platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | undefined {
-  if (platform !== 'darwin' || arch !== 'arm64') {
-    return undefined;
-  }
-  return `${extensionPath}/binaries/mlx/darwin-arm64/tlc-mlx-runner`;
-}
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('TLC', { log: true });
@@ -75,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
       warn: warn,
       info: info,
       notify: (message) => void vscode.window.showInformationMessage(message),
-      chooseModel: (models) => presentModelQuickPick(models),
+      chooseModel: (models) => presentModelQuickPick(commandDeps, models),
       onModelChanged: (modelId) => applyTemplateSuggestion(modelId),
     },
     readConfig(),
@@ -97,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     await vscode.workspace.getConfiguration('tlc').update('promptTemplate', suggestion, vscode.ConfigurationTarget.Global);
+    console.error('TLCDBG applyTemplateSuggestion ->', suggestion, '\n', new Error().stack);
     templates = buildTemplateRegistry(suggestion, config().customTemplate);
     void vscode.window.showInformationMessage(
       `TLC: template "${suggestion}" selected to match model "${modelId}".`,
@@ -219,7 +192,7 @@ export function activate(context: vscode.ExtensionContext): void {
       mlxRunnerPath: bundledMlxRunnerPath(context.extensionPath),
       apiKeyEnabled: config().localApiKeyEnabled,
     }),
-    onStatus: (status) => handleEngineStatus(status),
+    onStatus: (status) => localModeUi.handle(status),
     onProgress: engineTasks.onDownloadProgress,
     // Duplicated into the output channel: toasts auto-dismiss, the log stays.
     notify: (message) => {
@@ -236,66 +209,24 @@ export function activate(context: vscode.ExtensionContext): void {
    * points at a dead local URL (never at the remote server); once ready it
    * points at the engine and uses its per-session API key.
    */
-  /** Human labels for the current local engine kind and model (progress + status bar). */
-  const localKindLabel = (): string => {
-    const kind = config().localEngineKind;
-    return kind === 'ovgenai' ? 'ovgenai runner' : kind === 'mlx' ? 'mlx runner' : 'llama-server';
-  };
-  const localModelName = (): string => localModelSpec(config().localEngineKind, config().localModel)?.label ?? 'model';
-  // The ovgenai "engine" download is the OpenVINO runtime, not the bundled runner.
-  const localEnginePhaseLabel = (): string =>
-    config().localEngineKind === 'ovgenai' ? 'OpenVINO runtime' : localKindLabel();
-
-  const handleEngineStatus = (status: EngineStatus): void => {
-    if (status.status === ENGINE_STATUS.ready) {
-      // Re-enable completions suppressed while the engine was starting.
-      complectionState.setConnectionBlocked(false);
-      statusBar.setConnectionReason(undefined);
-      const runner = engineManager.stdioRunner();
-      if (runner !== undefined) {
-        // ovgenai/mlx: completions flow through the stdio pipe, not an endpoint.
-        client.setStdioSource((prompt, maxTokens, stop, signal) => runner.stream(prompt, maxTokens, stop, signal));
-        client.setModelLabel(status.model);
-        statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
-        info(`TLC local engine ready: ${config().localEngineKind} runner model=${status.modelPath} device=${status.device}`);
-        connectionWatchdog.reportSuccess();
-      } else {
-        localEndpoint = status.baseUrl;
-        client.refresh();
-        void client.setApiKey(status.apiKey);
-        connectionWatchdog.reportSuccess();
-        statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
-        info(`TLC local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
-      }
-    } else if (status.status === ENGINE_STATUS.error) {
-      client.setStdioSource(undefined);
-      client.setModelLabel(undefined);
-      localEndpoint = '';
-      client.refresh();
-      // Block completions too: the placeholder endpoint would only produce a
-      // misleading "Cannot reach the completions API" connection error.
-      complectionState.setConnectionBlocked(true);
-      statusBar.setConnectionReason(status.message);
-      statusBar.setEngine(`$(error) engine: ${status.message}`);
-      warn(`TLC local engine error: ${status.message}`);
-    } else {
-      const label = status.status === ENGINE_STATUS.awaitingInput
-        ? status.prompt
-        : status.status === ENGINE_STATUS.preparingEngine
-        ? `downloading ${localEnginePhaseLabel()}…`
-        : status.status === ENGINE_STATUS.preparingModel
-          ? `downloading ${localModelName()}…`
-          : `starting ${localKindLabel()}: ${localModelName()}… (the first NPU start compiles the model — several minutes)`;
+  const localModeUi = new LocalModeStatusUi({
+    statusBar,
+    state: complectionState,
+    client,
+    watchdog: connectionWatchdog,
+    stdioRunner: () => engineManager.stdioRunner(),
+    engineKind: () => config().localEngineKind,
+    modelLabel: () => localModelSpec(config().localEngineKind, config().localModel)?.label ?? 'model',
+    setEndpoint: (url) => {
+      localEndpoint = url;
+    },
+    stage: (label) => {
       engineTasks.stageLabel = label;
-      statusBar.setEngine(`$(loading~spin) ${label}`);
-      // Suppress completions while the engine is starting: otherwise typing
-      // races the placeholder local endpoint and reports a confusing
-      // "Cannot reach the completions API (http://127.0.0.1:0/v1)" connection
-      // error instead of quietly waiting for the engine to come up.
-      complectionState.setConnectionBlocked(true);
-      statusBar.setConnectionReason(label);
-    }
-  };
+    },
+    log: { info, warn },
+  });
+  const localEnginePhaseLabel = (): string => localModeUi.enginePhaseLabel();
+  const localModelName = (): string => localModelSpec(config().localEngineKind, config().localModel)?.label ?? 'model';
 
   /** Local model template hint: catalog spec (label + template id) for
    * catalog models; for From-disk models the family is matched by the path
@@ -309,19 +240,6 @@ export function activate(context: vscode.ExtensionContext): void {
     return spec !== undefined ? { modelId: spec.label, template: spec.template } : { modelId: config().localModel };
   };
 
-  /** Opens the From-disk model file dialog for the engine kind; returns the picked path. */
-  const pickLocalModelFromDisk = async (kind: LocalEngineKind): Promise<string | undefined> => {
-    const dialog = localModelDiskDialog(kind);
-    const file = await vscode.window.showOpenDialog({
-      canSelectFiles: dialog.canSelectFiles,
-      canSelectFolders: dialog.canSelectFolders,
-      canSelectMany: false,
-      filters: dialog.filters,
-      title: 'TLC: Select Local Model From Disk',
-    });
-    return file?.[0]?.fsPath;
-  };
-
   const applyMode = async (): Promise<void> => {
     if (config().mode === 'local') {
       localEndpoint = '';
@@ -331,7 +249,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // catalog models, name-matched for From-disk), unless custom.
       const hint = localModelHint();
       await applyTemplateSuggestion(hint.modelId, hint.template);
-      handleEngineStatus({ status: ENGINE_STATUS.starting });
+      localModeUi.handle({ status: ENGINE_STATUS.starting });
       await engineTasks.run('TLC: preparing the local engine', (signal) => managerEnsureReady(signal));
     } else {
       await engineManager.stop();
@@ -435,237 +353,33 @@ export function activate(context: vscode.ExtensionContext): void {
   const selector: vscode.DocumentSelector = { pattern: '**' };
   const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, complectionProvider);
 
-  /**
-   * Shows the model QuickPick (server models with supported-family marks
-   * plus a manual-entry item) and returns the chosen model id, if any.
-   */
-  const presentModelQuickPick = async (models: ModelInfo[]): Promise<{ id: string; contextLength?: number } | undefined> => {
-    const supported = pickSupportedModel(models.map((m) => m.id));
-    const items: Array<vscode.QuickPickItem & { model: ModelInfo }> = models.map((m) => ({
-      label: m.id,
-      description:
-        m.id === supported
-          ? '$(check) supported'
-          : m.id === config().model
-            ? '$(check) current'
-            : undefined,
-      detail: m.contextLength !== undefined ? `context: ${m.contextLength}` : undefined,
-      model: m,
-    }));
-    items.push({
-      label: '$(pencil) Enter model id manually…',
-      detail: `Current: ${config().model}`,
-      model: { id: '' },
-    });
-
-    const chosen = await vscode.window.showQuickPick(items, {
-      title: 'TLC: Select Model',
-      placeHolder: 'Model to use for completions (fetched from the server\'s /v1/models)',
-      matchOnDescription: true,
-    });
-    if (chosen === undefined) {
-      return undefined;
-    }
-    if (chosen.model.id.length > 0) {
-      return { id: chosen.model.id, contextLength: chosen.model.contextLength };
-    }
-    const manual = await vscode.window.showInputBox({
-      title: 'TLC: Model Id',
-      prompt: 'Model name sent in completion requests',
-      value: config().model,
-    });
-    return manual === undefined ? undefined : { id: manual };
+  const commandDeps: TlcCommandDeps = {
+    extensionPath: context.extensionPath,
+    config,
+    client,
+    modelConfig,
+    apiKeyStorage,
+    complectionState,
+    complectionProvider,
+    statusBar,
+    connectionWatchdog,
+    engineTasks,
+    engineManager,
+    checkServerModels,
+    reportServerReachability,
+    setApiKey: (key) => client.setApiKey(key),
+    clearCopilotAutoDisabled: () => {
+      copilotAutoDisabled = false;
+    },
+    warn,
   };
-
   context.subscriptions.push(
     output,
     statusBar,
     providerRegistration,
-    vscode.commands.registerCommand('tlc.triggerCompletion', () => {
-      if (complectionState.isEnabled()) {
-        complectionProvider.resetThrottle();
-      }
-      // When TLC is disabled the generic trigger lets another provider (e.g.
-      // Copilot) answer on the same keys.
-      void vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
-    }),
-    vscode.commands.registerCommand('tlc.setApiKey', async () => {
-      const key = await vscode.window.showInputBox({
-        prompt: 'API key for the completions API (leave empty for servers that need none)',
-        password: true,
-      });
-      if (key === undefined) {
-        return;
-      }
-      if (key.length === 0) {
-        await apiKeyStorage.clear();
-      } else {
-        await apiKeyStorage.set(key);
-      }
-      if (config().apiKey.length > 0) {
-        void vscode.window.showWarningMessage(
-          'TLC: tlc.openai.apiKey is set in the settings and takes precedence over the secret-stored key.',
-        );
-      }
-      await client.setApiKey(config().apiKey.length > 0 ? config().apiKey : key.length === 0 ? undefined : key);
-      void vscode.window.showInformationMessage('TLC API key updated.');
-    }),
-    vscode.commands.registerCommand('tlc.clearApiKey', async () => {
-      await apiKeyStorage.clear();
-      await client.setApiKey(config().apiKey.length > 0 ? config().apiKey : undefined);
-      void vscode.window.showInformationMessage('TLC API key cleared.');
-    }),
-    vscode.commands.registerCommand('tlc.testConnection', () => reportServerReachability()),
-    vscode.commands.registerCommand('tlc.selectModel', async () => {
-      let models: ModelInfo[] = [];
-      try {
-        models = await client.listModels();
-      } catch (err) {
-        warn(`Cannot list models from ${config().baseUrl}: ${errMessage(err)}`);
-        void vscode.window.showWarningMessage(
-          `Cannot fetch the model list from ${config().baseUrl}. You can still enter the model id manually.`,
-        );
-      }
-
-      const chosen = await presentModelQuickPick(models);
-      if (chosen !== undefined) {
-        await modelConfig.setModel(chosen.id, chosen.contextLength);
-      }
-    }),
-    vscode.commands.registerCommand('tlc.selectMode', async () => {
-      const chosen = await vscode.window.showQuickPick(
-        [
-          { label: '$(cloud) Remote server', detail: `OpenAI-compatible API at ${config().baseUrl}`, value: 'remote' },
-          { label: '$(device-desktop) Local engine', detail: 'TLC-managed llama.cpp (downloaded on demand, optional NPU/GPU)', value: 'local' },
-        ],
-        { title: 'TLC: Select Mode', placeHolder: `Current: ${config().mode}` },
-      );
-      if (chosen !== undefined && chosen.value !== config().mode) {
-        await vscode.workspace.getConfiguration('tlc').update('mode', chosen.value, vscode.ConfigurationTarget.Global);
-      }
-    }),
-    vscode.commands.registerCommand('tlc.selectLocalModel', async () => {
-      const kind = config().localEngineKind;
-      const chosen = await vscode.window.showQuickPick(
-        localModelPickerItems(kind, config().localModel),
-        { title: 'TLC: Select Local Model', placeHolder: 'Model downloaded for the local engine' },
-      );
-      if (chosen === undefined) {
-        return;
-      }
-      const tlc = vscode.workspace.getConfiguration('tlc');
-      if (chosen.value === 'disk') {
-        const file = await pickLocalModelFromDisk(kind);
-        if (file !== undefined) {
-          // Path first (it restarts the engine with the file), then the
-          // "custom" id points back at the same file.
-          await tlc.update('local.customModelPath', file, vscode.ConfigurationTarget.Global);
-          await tlc.update('local.model', 'custom', vscode.ConfigurationTarget.Global);
-        }
-        return;
-      }
-      // A catalog model replaces any offline modelPath override; the id is
-      // applied first so a single restart picks up both changes.
-      await tlc.update('local.model', chosen.value, vscode.ConfigurationTarget.Global);
-      await tlc.update('local.customModelPath', undefined, vscode.ConfigurationTarget.Global);
-    }),
-    vscode.commands.registerCommand('tlc.selectLocalDevice', async () => {
-      const kind = config().localEngineKind;
-      const items = kind === 'mlx'
-        ? [
-            { label: '$(zap) GPU (MLX, Metal)', value: 'gpu' as LocalDevice },
-          ]
-        : [
-            { label: '$(zap) Auto (GPU → CPU)', value: 'auto' as LocalDevice },
-            { label: kind === 'ovgenai' ? 'NPU (Intel Core Ultra, OpenVINO GenAI runner)' : 'NPU (uses GPU for llama.cpp)', value: 'npu' as LocalDevice },
-            { label: kind === 'ovgenai' ? 'GPU (OpenVINO GenAI runner)' : 'GPU (vulkan build)', value: 'gpu' as LocalDevice },
-            { label: 'CPU', value: 'cpu' as LocalDevice },
-          ];
-      const chosen = await vscode.window.showQuickPick(
-        items.map((i) => ({
-          label: i.label,
-          description: config().localDevice === i.value ? '$(check) current' : undefined,
-          value: i.value,
-        })),
-        { title: 'TLC: Select Local Device' },
-      );
-      if (chosen !== undefined) {
-        await vscode.workspace.getConfiguration('tlc').update('local.device', chosen.value, vscode.ConfigurationTarget.Global);
-      }
-    }),
-    vscode.commands.registerCommand('tlc.resetLocalEngine', async () => {
-      const targets: Array<{ label: string; detail: string; target: ResetTarget }> = [
-        { label: 'Re-download engine', detail: 'Deletes the downloaded engine (llama.cpp build or OpenVINO runtime) and downloads it again, choosing the engine kind first', target: 'engine' },
-        { label: 'Re-download model', detail: 'Deletes the selected model (GGUF or OpenVINO IR) and downloads it again', target: 'model' },
-        { label: 'Clear model cache', detail: 'Deletes the model cache; it is rebuilt on the next start', target: 'cache' },
-      ];
-      const chosen = await vscode.window.showQuickPick(targets, { title: 'TLC: Reset Local Engine' });
-      if (chosen === undefined) {
-        return;
-      }
-      if (config().mode !== 'local') {
-        void vscode.window.showInformationMessage('TLC: switch to the local engine mode first (TLC: Select Mode).');
-        return;
-      }
-      if (chosen.target === 'engine') {
-        // The kind decides what gets downloaded next, so pick it here; the
-        // download-or-existing-folder question follows for the chosen kind.
-        const kinds = [
-          { label: '$(zap) Auto', detail: 'Best match for the platform (mlx on Apple Silicon, OpenVINO GenAI on Intel, llama.cpp elsewhere)', value: 'auto' },
-          { label: '$(device-desktop) llama.cpp', detail: 'GGUF models via llama-server (vulkan GPU, CPU fallback)', value: 'llama.cpp' },
-          ...(bundledOvgenaiRunnerPath(context.extensionPath) !== undefined
-            ? [{ label: '$(circuit-board) OpenVINO GenAI', detail: 'Native IR models on Intel NPU/GPU/CPU', value: 'ovgenai' }]
-            : []),
-          ...(bundledMlxRunnerPath(context.extensionPath) !== undefined
-            ? [{ label: '$(beam) MLX', detail: 'MLX 4-bit models on Apple Metal', value: 'mlx' }]
-            : []),
-        ];
-        const kind = await vscode.window.showQuickPick(
-          kinds.map((k) => ({ ...k, description: config().localEngineKind === k.value ? '$(check) current' : undefined })),
-          { title: 'TLC: Reset Local Engine — Engine Kind' },
-        );
-        if (kind === undefined) {
-          return;
-        }
-        if (kind.value !== config().localEngineKind) {
-          await vscode.workspace.getConfiguration('tlc').update('local.engineKind', kind.value, vscode.ConfigurationTarget.Global);
-        }
-      }
-      await engineTasks.run(`TLC: resetting the local ${chosen.target}`, (signal) => engineManager.reset(chosen.target, signal));
-    }),
-    vscode.commands.registerCommand('tlc.enableDisableCompletions', async () => {
-      // Clicking the error icon retries the connection instead of toggling:
-      // the user's intent there is "fix it", not "disable".
-      if (connectionWatchdog.isFailing()) {
-        connectionWatchdog.reset();
-        statusBar.setBusy(true);
-        try {
-          const models = await checkServerModels();
-          void vscode.window.showInformationMessage(
-            `TLC: ${config().baseUrl} is reachable again (${models.length} model${models.length === 1 ? '' : 's'}).`,
-          );
-        } catch (err) {
-          connectionWatchdog.reportFailure(
-            `TLC: cannot reach ${config().baseUrl}: ${errMessage(err)}`,
-          );
-        } finally {
-          statusBar.setBusy(false);
-        }
-        return;
-      }
-      // Manual toggle wins: cancel any auto-disable/auto-re-enable watch.
-      connectionWatchdog.reset();
-      // A manual toggle is the user's choice: Copilot must not undo it later.
-      copilotAutoDisabled = false;
-      const enabled = !complectionState.isEnabled();
-      await complectionState.setEnabled(enabled);
-      if (!enabled) {
-        complectionProvider.onDisabled();
-      }
-      statusBar.refresh();
-      void vscode.window.showInformationMessage(enabled ? 'TLC completions enabled.' : 'TLC completions disabled.');
-    }),
+    ...registerTlcCommands(commandDeps),
   );
+
 
   /** Effective API key: the tlc.apiKey setting wins over secret storage. */
   const effectiveApiKey = async (): Promise<string | undefined> => {
@@ -800,8 +514,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration('tlc.local.model') && config().localModel === 'custom' && config().localCustomModelPath.length === 0) {
         // "custom" is meaningless without a file: ask for one immediately and
         // revert to the previous catalog model when the dialog is canceled.
-        const picked = await pickLocalModelFromDisk(config().localEngineKind);
-        if (picked !== undefined) {
+        const picked = await pickLocalModelFromDisk(config().localEngineKind);        if (picked !== undefined) {
           await vscode.workspace.getConfiguration('tlc').update('local.customModelPath', picked, vscode.ConfigurationTarget.Global);
         } else {
           const revert = previous.localModel.length > 0 && previous.localModel !== 'custom' ? previous.localModel : DEFAULT_LOCAL_MODEL;
@@ -815,7 +528,7 @@ export function activate(context: vscode.ExtensionContext): void {
           const hint = localModelHint();
           await applyTemplateSuggestion(hint.modelId, hint.template);
         }
-        handleEngineStatus({ status: ENGINE_STATUS.starting });
+        localModeUi.handle({ status: ENGINE_STATUS.starting });
         await engineTasks.run('TLC: restarting the local engine', (signal) => managerEnsureReady(signal));
       }
       if (event.affectsConfiguration('tlc.openai.apiKey') || event.affectsConfiguration('tlc.apiKey')) {
@@ -860,102 +573,45 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   const LOCAL_ENGINE_OFFER_DISMISSED = 'localEngineOfferDismissed';
-  const offerLocalEngine = async (): Promise<void> => {
-    if (context.globalState.get<boolean>(LOCAL_ENGINE_OFFER_DISMISSED) || config().mode === 'local') {
-      return;
-    }
-    const choice = await vscode.window.showInformationMessage(
-      `TLC: no completion server is reachable at ${config().baseUrl}. `
-      + 'Set up the built-in local engine (downloads llama.cpp and a Qwen2.5-Coder model)?',
-      'Set Up Local Engine',
-      'Not Now',
-      "Don't Ask Again",
-    );
-    if (choice === 'Set Up Local Engine') {
-      await vscode.workspace.getConfiguration('tlc').update('mode', 'local', vscode.ConfigurationTarget.Global);
-    } else if (choice === "Don't Ask Again") {
-      await context.globalState.update(LOCAL_ENGINE_OFFER_DISMISSED, true);
-    }
-  };
-
   const LOCAL_ENGINE_RECO_DISMISSED = 'localEngineRecommendationDismissed';
   const settingChosen = (key: string): boolean => {
     const inspect = vscode.workspace.getConfiguration('tlc').inspect(key);
     return [inspect?.globalValue, inspect?.workspaceValue, inspect?.workspaceFolderValue, inspect?.defaultLanguageValue].some((v) => v !== undefined) === true;
   };
-  const deviceChosen = (): boolean => settingChosen('local.device');
-  const kindChosen = (): boolean => settingChosen('local.engineKind');
-  const offerRecommendedLocalEngine = async (): Promise<void> => {
-    const dismissed = context.globalState.get<boolean>(LOCAL_ENGINE_RECO_DISMISSED) === true;
-    const rec = await probeCapability({ platform: process.platform, arch: process.arch });
-    if (rec.kind === 'local') {
-      info(`TLC local engine recommendation: ${rec.engineKind} (${rec.device}). ${rec.reason}.`);
-      if (dismissed) {
-        return;
-      }
-      if (kindChosen()) {
-        return;
-      }
-      const current = config();
-      if (deviceChosen() && current.localDevice === rec.device && current.localEngineKind === rec.engineKind) {
-        return;
-      }
-      const header = deviceChosen()
-        ? `TLC: recommended local engine`
-        : 'TLC: no local engine selected — the best match';
-      const choice = await vscode.window.showInformationMessage(
-        `${header} — ${rec.engineKind} (${rec.device === 'auto' ? 'auto device' : `${rec.device.toUpperCase()} device`}). ${rec.reason}`,
-        'Apply Recommendation',
-        "Don't Ask Again",
-      );
-      if (choice === 'Apply Recommendation') {
-        await vscode.workspace.getConfiguration('tlc').update('local.engineKind', rec.engineKind, vscode.ConfigurationTarget.Global);
-        await vscode.workspace.getConfiguration('tlc').update('local.device', rec.device, vscode.ConfigurationTarget.Global);
-      } else if (choice === "Don't Ask Again") {
-        await context.globalState.update(LOCAL_ENGINE_RECO_DISMISSED, true);
-      }
-    } else {
-      info(`TLC local engine recommendation: remote API. ${rec.reason}.`);
-      if (dismissed || deviceChosen()) {
-        return;
-      }
-      const choice = await vscode.window.showInformationMessage(
-        `TLC: no local engine is selected and no local acceleration is available on this platform (${rec.reason}); the remote API will be used.`,
-        "Don't Ask Again",
-      );
-      if (choice === "Don't Ask Again") {
-        await context.globalState.update(LOCAL_ENGINE_RECO_DISMISSED, true);
-      }
-    }
-  };
-
-  // A stale local.model value (renamed catalog ids, hand-edited settings)
-  // would fail the engine start; reset it to the default once, with a notice.
-  const normalizeLocalModelSetting = async (): Promise<void> => {
-    const c = vscode.workspace.getConfiguration('tlc');
-    const stored = c.get<string>('local.model', '');
-    if (stored === 'custom' && c.get<string>('local.customModelPath', '').length === 0) {
-      await c.update('local.model', DEFAULT_LOCAL_MODEL, vscode.ConfigurationTarget.Global);
-      warn('TLC local engine: model "custom" has no tlc.local.customModelPath — reset to the default model.');
-    } else if (stored.length > 0 && stored !== 'custom' && !isLocalModelId(stored)) {
-      await c.update('local.model', undefined, vscode.ConfigurationTarget.Global);
-      warn(`TLC local engine: model "${stored}" is not a catalog entry — reset to the default (${DEFAULT_LOCAL_MODEL}).`);
-      void vscode.window.showWarningMessage(`TLC: local model "${stored}" is unknown — reset to ${DEFAULT_LOCAL_MODEL}.`);
-    }
-  };
+  const ask = async (message: string, ...items: string[]): Promise<string | undefined> => vscode.window.showInformationMessage(message, ...items);
 
   void (async () => {
-    await normalizeLocalModelSetting();
+    await normalizeLocalModelSetting({
+      storedModel: vscode.workspace.getConfiguration('tlc').get<string>('local.model', ''),
+      customModelPath: vscode.workspace.getConfiguration('tlc').get<string>('local.customModelPath', ''),
+      defaultModel: DEFAULT_LOCAL_MODEL,
+      updateModel: async (value) => vscode.workspace.getConfiguration('tlc').update('local.model', value, vscode.ConfigurationTarget.Global),
+      warn,
+      notify: (message) => void vscode.window.showWarningMessage(message),
+    });
     await syncApiKey();
     await syncEngineDirectories();
     if (config().mode === 'local') {
       // Block completions before the engine-status handler runs: between
       // activation and applyMode there is a window where the placeholder
       // endpoint would leak requests (and a 401 from the OpenAI SDK's default
-      // host). handleEngineStatus(ready) lifts the block.
+      // host). The engine-status ready branch lifts the block.
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason('starting…');
-      await offerRecommendedLocalEngine();
+      await offerRecommendedLocalEngine({
+        dismissed: context.globalState.get<boolean>(LOCAL_ENGINE_RECO_DISMISSED) === true,
+        kindChosen: settingChosen('local.engineKind'),
+        deviceChosen: settingChosen('local.device'),
+        currentDevice: config().localDevice,
+        currentKind: config().localEngineKind,
+        ask,
+        info,
+        applyRecommendation: async (kind, device) => {
+          await vscode.workspace.getConfiguration('tlc').update('local.engineKind', kind, vscode.ConfigurationTarget.Global);
+          await vscode.workspace.getConfiguration('tlc').update('local.device', device, vscode.ConfigurationTarget.Global);
+        },
+        dismiss: async () => context.globalState.update(LOCAL_ENGINE_RECO_DISMISSED, true),
+      });
       void applyMode();
       return;
     }
@@ -964,7 +620,14 @@ export function activate(context: vscode.ExtensionContext): void {
     } catch {
       // Server not reachable at startup: keep the configured model and offer
       // the built-in engine instead of failing silently.
-      void offerLocalEngine();
+      void offerLocalEngine({
+        mode: config().mode,
+        baseUrl: config().baseUrl,
+        dismissed: context.globalState.get<boolean>(LOCAL_ENGINE_OFFER_DISMISSED) === true,
+        ask,
+        setMode: async (mode) => vscode.workspace.getConfiguration('tlc').update('mode', mode, vscode.ConfigurationTarget.Global),
+        dismiss: async () => context.globalState.update(LOCAL_ENGINE_OFFER_DISMISSED, true),
+      });
     }
 
     const selected = config().promptTemplate;
