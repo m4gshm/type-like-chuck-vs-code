@@ -52,7 +52,8 @@ export class LocalModeStatusUi {
         // ovgenai/mlx: completions flow through the stdio pipe, not an endpoint.
         this.host.client.setStdioSource((prompt, maxTokens, stop, signal) => runner.stream(prompt, maxTokens, stop, signal));
         this.host.client.setModelLabel(status.model);
-        this.host.statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
+        this.host.statusBar.setEngine(undefined);
+        this.host.statusBar.setEngineDetail(`${status.model} (${status.device})`);
         this.host.log.info(`TLC local engine ready: ${this.host.engineKind()} runner model=${status.modelPath} device=${status.device}`);
         this.host.watchdog.reportSuccess();
       } else {
@@ -60,7 +61,8 @@ export class LocalModeStatusUi {
         this.host.client.refresh();
         void this.host.client.setApiKey(status.apiKey);
         this.host.watchdog.reportSuccess();
-        this.host.statusBar.setEngine(`$(check) ${status.model} (${status.device})`);
+        this.host.statusBar.setEngine(undefined);
+        this.host.statusBar.setEngineDetail(`${status.model} (${status.device})`);
         this.host.log.info(`TLC local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
       }
     } else if (status.status === ENGINE_STATUS.error) {
@@ -68,6 +70,7 @@ export class LocalModeStatusUi {
       this.host.client.setModelLabel(undefined);
       this.host.setEndpoint('');
       this.host.client.refresh();
+      this.host.statusBar.setEngineDetail(undefined);
       // Block completions too: the placeholder endpoint would only produce a
       // misleading "Cannot reach the completions API" connection error.
       this.host.state.setConnectionBlocked(true);

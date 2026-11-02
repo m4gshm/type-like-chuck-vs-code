@@ -1,5 +1,4 @@
 import { DEFAULT_LOCAL_MODEL, isLocalModelId } from './local_engine/model_catalog';
-import { probeCapability } from './local_engine/capability';
 
 interface AskFn {
   (message: string, ...items: string[]): Promise<string | undefined>;
@@ -35,57 +34,7 @@ export const offerLocalEngine = async (host: {
   }
 };
 
-export const offerRecommendedLocalEngine = async (host: {
-  dismissed: boolean;
-  kindChosen: boolean;
-  deviceChosen: boolean;
-  currentDevice: string;
-  currentKind: string;
-  probe?: () => Promise<import('./local_engine/capability').RecommendedPath>;
-  ask: AskFn;
-  info: LogFn;
-  applyRecommendation: (kind: 'llama.cpp' | 'ovgenai' | 'mlx', device: 'npu' | 'gpu' | 'auto') => Promise<void>;
-  dismiss: () => Promise<void>;
-}): Promise<void> => {
-  const rec = await (host.probe ?? probeCapability)({ platform: process.platform, arch: process.arch });
-  if (rec.kind === 'local') {
-    host.info(`TLC local engine recommendation: ${rec.engineKind} (${rec.device}). ${rec.reason}.`);
-    if (host.dismissed) {
-      return;
-    }
-    if (host.kindChosen) {
-      return;
-    }
-    if (host.deviceChosen && host.currentDevice === rec.device && host.currentKind === rec.engineKind) {
-      return;
-    }
-    const header = host.deviceChosen
-      ? `TLC: recommended local engine`
-      : 'TLC: no local engine selected — the best match';
-    const choice = await host.ask(
-      `${header} — ${rec.engineKind} (${rec.device === 'auto' ? 'auto device' : `${rec.device.toUpperCase()} device`}). ${rec.reason}`,
-      'Apply Recommendation',
-      "Don't Ask Again",
-    );
-    if (choice === 'Apply Recommendation') {
-      await host.applyRecommendation(rec.engineKind!, rec.device!);
-    } else if (choice === "Don't Ask Again") {
-      await host.dismiss();
-    }
-  } else {
-    host.info(`TLC local engine recommendation: remote API. ${rec.reason}.`);
-    if (host.dismissed || host.deviceChosen) {
-      return;
-    }
-    const choice = await host.ask(
-      `TLC: no local engine is selected and no local acceleration is available on this platform (${rec.reason}); the remote API will be used.`,
-      "Don't Ask Again",
-    );
-    if (choice === "Don't Ask Again") {
-      await host.dismiss();
-    }
-  }
-};
+export const offerRecommendedLocalEngine = undefined;
 
 /** A stale local.model value (renamed catalog ids, hand-edited settings)
  * would fail the engine start; reset it to the default once, with a notice. */

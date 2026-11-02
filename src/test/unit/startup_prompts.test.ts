@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { normalizeLocalModelSetting, offerLocalEngine, offerRecommendedLocalEngine } from '../../startup_prompts';
+import { normalizeLocalModelSetting, offerLocalEngine } from '../../startup_prompts';
 
 const askQueue = (answers: string[]) => {
   const asked: string[] = [];
@@ -23,41 +23,6 @@ describe('offerLocalEngine', () => {
     expect(modes).toEqual(['local']);
     await offerLocalEngine({ mode: 'remote', baseUrl: 'http://x/v1', dismissed: false, ask, setMode: async () => undefined, dismiss: async () => { dismissed = true; } });
     expect(dismissed).toBe(true);
-  });
-});
-
-describe('offerRecommendedLocalEngine', () => {
-  const mlxProbe = async () => ({ kind: 'local' as const, engineKind: 'mlx' as const, device: 'gpu' as const, reason: 'Metal' });
-  const baseHost = () => ({
-    dismissed: false,
-    kindChosen: false,
-    deviceChosen: false,
-    currentDevice: 'auto',
-    currentKind: 'llama.cpp',
-    probe: mlxProbe,
-    ask: askQueue([]).ask,
-    info: vi.fn(),
-    applyRecommendation: vi.fn(async () => undefined),
-    dismiss: vi.fn(async () => undefined),
-  });
-
-  it('applies the platform recommendation when nothing is chosen', async () => {
-    const host = { ...baseHost(), ask: askQueue(['Apply Recommendation']).ask };
-    await offerRecommendedLocalEngine(host);
-    expect(host.applyRecommendation).toHaveBeenCalledWith('mlx', 'gpu');
-  });
-
-  it('skips the question when the engine kind is explicitly set', async () => {
-    const host = { ...baseHost(), kindChosen: true };
-    await offerRecommendedLocalEngine(host);
-    expect(host.ask).not.toHaveBeenCalled();
-    expect(host.applyRecommendation).not.toHaveBeenCalled();
-  });
-
-  it('persists dismissal when declined', async () => {
-    const host = { ...baseHost(), ask: askQueue(["Don't Ask Again"]).ask };
-    await offerRecommendedLocalEngine(host);
-    expect(host.dismiss).toHaveBeenCalled();
   });
 });
 

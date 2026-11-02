@@ -12,6 +12,7 @@ export class StatusBar {
   private hasError = false;
   private connectionReason: string | undefined;
   private engine: string | undefined;
+  private engineDetail: string | undefined;
 
   constructor(state: CompletionState) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -47,6 +48,12 @@ export class StatusBar {
     this.refresh();
   }
 
+  /** Model + device info shown in the tooltip while the local engine is ready. */
+  setEngineDetail(detail: string | undefined): void {
+    this.engineDetail = detail;
+    this.refresh();
+  }
+
   refresh(): void {
     const enabled = this.state.isEnabled();
     this.item.text = !enabled
@@ -58,13 +65,16 @@ export class StatusBar {
           : this.busy
             ? BUSY_TEXT
             : ENABLED_TEXT;
-    this.item.tooltip = this.connectionReason !== undefined
+    const baseTooltip = this.connectionReason !== undefined
       ? `${this.connectionReason}\n\n${enabled
         ? 'TLC keeps retrying; completions pause if the server stays unreachable. Click to toggle.'
         : 'TLC is paused. Click to re-enable.'}`
       : enabled
         ? 'TLC completions enabled (click to toggle)'
         : 'TLC completions disabled (click to toggle)';
+    this.item.tooltip = enabled && this.engine === undefined && this.engineDetail !== undefined
+      ? `${this.engineDetail}\nClick to toggle`
+      : baseTooltip;
     this.item.command = 'tlc.enableDisableCompletions';
   }
 

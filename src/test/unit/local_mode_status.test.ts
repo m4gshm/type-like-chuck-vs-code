@@ -5,6 +5,7 @@ const makeHost = () => {
   let runner: { stream(): AsyncIterable<string> } | undefined;
   const recorded = {
     engine: [] as Array<string | undefined>,
+    details: [] as Array<string | undefined>,
     reasons: [] as Array<string | undefined>,
     blocked: [] as boolean[],
     endpoint: [] as Array<string | undefined>,
@@ -16,6 +17,7 @@ const makeHost = () => {
   const host = {
     statusBar: {
       setEngine: (t: string | undefined) => recorded.engine.push(t),
+      setEngineDetail: (d: string | undefined) => recorded.details.push(d),
       setConnectionReason: (r: string | undefined) => recorded.reasons.push(r),
       setBusy: () => undefined,
       refresh: () => undefined,
@@ -48,7 +50,7 @@ describe('LocalModeStatusUi', () => {
     expect(recorded.blocked).toEqual([false]);
     expect(recorded.endpoint).toEqual([]);
     expect(recorded.successes).toBe(1);
-    expect(recorded.engine.at(-1)).toBe('$(check) m (gpu)');
+    expect(recorded.details.at(-1)).toBe('m (gpu)');
   });
 
   it('switches the endpoint when a server-based engine is ready', () => {

@@ -79,6 +79,24 @@ describe('StatusBar', () => {
     bar.refresh();
     expect(itemTooltip()).toBe('TLC completions disabled (click to toggle)');
   });
+
+  it('shows the engine detail in the tooltip while the local engine is ready', () => {
+    const state = new CompletionState(new FakeMemento() as never);
+    const bar = new StatusBar(state);
+
+    bar.setEngineDetail('Qwen2.5-Coder 1.5B (npu)');
+    expect(itemText()).toBe('$(tlc-cowboy)');
+    expect(itemTooltip()).toBe('Qwen2.5-Coder 1.5B (npu)\nClick to toggle');
+
+    // A transient label (spinner/error) wins over the detail text.
+    bar.setEngine('$(loading~spin) starting…');
+    expect(itemText()).toBe('$(loading~spin) starting…');
+
+    // Cleared detail leaves the plain tooltip.
+    bar.setEngine(undefined);
+    bar.setEngineDetail(undefined);
+    expect(itemTooltip()).toBe('TLC completions enabled (click to toggle)');
+  });
 });
 
 describe('CompletionState', () => {

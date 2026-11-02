@@ -18,6 +18,13 @@ export function localModelSpec(kind: LocalEngineKind, id: string): { label: stri
     : undefined;
 }
 
+/** Catalog label without the device-specific IR format suffix (the actual
+ * format is resolved per device at engine start: nf4 for NPU, int8 for GPU/CPU). */
+export function localModelDisplayName(kind: LocalEngineKind, id: string): string {
+  const label = localModelSpec(kind, id)?.label ?? 'model';
+  return label.replace(/ \(OpenVINO IR, (?:nf4|int8)\)$/, '');
+}
+
 export interface LocalModelPickItem {
   label: string;
   description?: string;

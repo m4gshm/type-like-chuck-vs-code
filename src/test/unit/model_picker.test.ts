@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveLocalModel, localModelDiskDialog, localModelPickerItems } from '../../local_engine/model_picker';
+import { effectiveLocalModel, localModelDiskDialog, localModelDisplayName, localModelPickerItems } from '../../local_engine/model_picker';
 
 describe('effectiveLocalModel', () => {
   it('prefers an explicit modelPath over the catalog id', () => {
     expect(effectiveLocalModel('custom', 'C:\\models\\m.gguf')).toBe('path:C:\\models\\m.gguf');
     expect(effectiveLocalModel('Qwen2.5-Coder 1.5B', '')).toBe('id:Qwen2.5-Coder 1.5B');
     expect(effectiveLocalModel('Qwen2.5-Coder 1.5B', 'C:\\models\\m.gguf')).toBe('id:Qwen2.5-Coder 1.5B');
+  });
+});
+
+describe('localModelDisplayName', () => {
+  it('drops the device-specific IR format suffix', () => {
+    expect(localModelDisplayName('ovgenai', 'Qwen2.5-Coder 1.5B')).toBe('Qwen2.5-Coder 1.5B');
+    expect(localModelDisplayName('llama.cpp', 'Qwen2.5-Coder 1.5B')).toBe('Qwen2.5-Coder 1.5B');
+    expect(localModelDisplayName('ovgenai', 'custom')).toBe('model');
   });
 });
 

@@ -14,19 +14,20 @@ import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
 import { DISTRO_CHOICE_DOWNLOAD, EngineManager, ENGINE_STATUS } from './local_engine/engine_manager';
 import { DEFAULT_LOCAL_MODEL } from './local_engine/model_catalog';
-import { effectiveLocalModel, localModelSpec } from './local_engine/model_picker';
+import { effectiveLocalModel, localModelDisplayName, localModelSpec } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
 import { bundledMlxRunnerPath, bundledOvgenaiRunnerPath } from './local_engine/bundled_runners';
 import { EngineTaskRunner } from './engine_progress';
 import { TemplateFieldSync } from './template_fields';
 import { LocalModeStatusUi } from './local_mode_status';
-import { normalizeLocalModelSetting, offerLocalEngine, offerRecommendedLocalEngine } from './startup_prompts';
+import { probeCapability } from './local_engine/capability';
+import { normalizeLocalModelSetting, offerLocalEngine } from './startup_prompts';
 import { registerTlcCommands, pickLocalModelFromDisk, presentModelQuickPick, TlcCommandDeps } from './commands';
 
 const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel('TLC', { log: true });
+  const output = vscode.window.createOutputChannel('Type like Chuck', { log: true });
   const warn = (message: string): void => output.warn(message);
   const info = (message: string): void => output.info(message);
   const debug = (message: string): void => output.debug(message);
@@ -69,7 +70,6 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     await vscode.workspace.getConfiguration('tlc').update('promptTemplate', suggestion, vscode.ConfigurationTarget.Global);
-    console.error('TLCDBG applyTemplateSuggestion ->', suggestion, '\n', new Error().stack);
     templates = buildTemplateRegistry(suggestion, config().customTemplate);
     void vscode.window.showInformationMessage(
       `TLC: template "${suggestion}" selected to match model "${modelId}".`,
@@ -216,7 +216,7 @@ export function activate(context: vscode.ExtensionContext): void {
     watchdog: connectionWatchdog,
     stdioRunner: () => engineManager.stdioRunner(),
     engineKind: () => config().localEngineKind,
-    modelLabel: () => localModelSpec(config().localEngineKind, config().localModel)?.label ?? 'model',
+    modelLabel: () => localModelDisplayName(config().localEngineKind, config().localModel),
     setEndpoint: (url) => {
       localEndpoint = url;
     },
@@ -226,7 +226,7 @@ export function activate(context: vscode.ExtensionContext): void {
     log: { info, warn },
   });
   const localEnginePhaseLabel = (): string => localModeUi.enginePhaseLabel();
-  const localModelName = (): string => localModelSpec(config().localEngineKind, config().localModel)?.label ?? 'model';
+  const localModelName = (): string => localModelDisplayName(config().localEngineKind, config().localModel);
 
   /** Local model template hint: catalog spec (label + template id) for
    * catalog models; for From-disk models the family is matched by the path
@@ -262,6 +262,7 @@ export function activate(context: vscode.ExtensionContext): void {
       complectionState.setConnectionBlocked(false);
       statusBar.setConnectionReason(undefined);
       statusBar.setEngine(undefined);
+      statusBar.setEngineDetail(undefined);
       await syncApiKey();
     }
   };
@@ -573,11 +574,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   const LOCAL_ENGINE_OFFER_DISMISSED = 'localEngineOfferDismissed';
-  const LOCAL_ENGINE_RECO_DISMISSED = 'localEngineRecommendationDismissed';
-  const settingChosen = (key: string): boolean => {
-    const inspect = vscode.workspace.getConfiguration('tlc').inspect(key);
-    return [inspect?.globalValue, inspect?.workspaceValue, inspect?.workspaceFolderValue, inspect?.defaultLanguageValue].some((v) => v !== undefined) === true;
-  };
   const ask = async (message: string, ...items: string[]): Promise<string | undefined> => vscode.window.showInformationMessage(message, ...items);
 
   void (async () => {
@@ -598,20 +594,14 @@ export function activate(context: vscode.ExtensionContext): void {
       // host). The engine-status ready branch lifts the block.
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason('starting…');
-      await offerRecommendedLocalEngine({
-        dismissed: context.globalState.get<boolean>(LOCAL_ENGINE_RECO_DISMISSED) === true,
-        kindChosen: settingChosen('local.engineKind'),
-        deviceChosen: settingChosen('local.device'),
-        currentDevice: config().localDevice,
-        currentKind: config().localEngineKind,
-        ask,
-        info,
-        applyRecommendation: async (kind, device) => {
-          await vscode.workspace.getConfiguration('tlc').update('local.engineKind', kind, vscode.ConfigurationTarget.Global);
-          await vscode.workspace.getConfiguration('tlc').update('local.device', device, vscode.ConfigurationTarget.Global);
-        },
-        dismiss: async () => context.globalState.update(LOCAL_ENGINE_RECO_DISMISSED, true),
-      });
+      // engineKind/device "auto" already resolve to the best hardware match;
+      // just log the capability probe for diagnostics.
+      const rec = await probeCapability({ platform: process.platform, arch: process.arch });
+      if (rec.kind === 'local') {
+        info(`TLC local engine: ${rec.engineKind} (${rec.device}) — ${rec.reason}.`);
+      } else {
+        info(`TLC local engine: no local acceleration (${rec.reason}).`);
+      }
       void applyMode();
       return;
     }
