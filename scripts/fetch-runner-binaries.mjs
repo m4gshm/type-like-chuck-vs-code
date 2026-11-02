@@ -35,7 +35,7 @@ const TARGETS = [
 
 const githubToken = process.env.GITHUB_TOKEN;
 const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubToken}` } : {};
-const versionOverride = process.env.RUNNER_VERSION?.trim();
+const versionOverride = process.env.RUNNER_VERSION?.trim() || undefined;
 const DEFAULT_RUNNER_VERSIONS = {
   'type-like-chuck-backed-openvino': 'v0.1.0',
 };

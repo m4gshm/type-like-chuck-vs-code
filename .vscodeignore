@@ -1,17 +1,25 @@
+# Everything the packaged extension does not need at runtime.
+# Extension runtime needs: dist/, fonts/, binaries/ovgenai/, icon.png,
+# package.json, README.md, LICENSE.txt.
 .vscode/**
+.vscodeignore
+.github/**
+.opencode/**
+.task/**
+coverage/**
+openspec/**
+binaries/ovgenai-release/**
+scripts/**
 src/**
 out/**
-node_modules/**
+*.ts
+tsconfig*.json
 esbuild.js
-tsconfig.json
-tsconfig.test.json
-vitest.config.ts
-.vscode-test.mjs
-tests/**
-**/*.map
-**/*.ts
-openspec/**
-.cache/**
-build/**
 .gitignore
-coverage
+.vscode-test.mjs
+AGENTS.md
+Taskfile.yaml
+eslint.config.mjs
+font_glyph_preview.png
+icon.svg
+NUL
