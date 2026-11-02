@@ -33,7 +33,7 @@ export type EngineStatus =
   | { status: typeof ENGINE_STATUS.awaitingInput; prompt: string }
   | { status: typeof ENGINE_STATUS.preparingEngine }
   | { status: typeof ENGINE_STATUS.preparingModel }
-  | { status: typeof ENGINE_STATUS.starting }
+  | { status: typeof ENGINE_STATUS.starting; /** Only the NPU compiles the model graph; the hint is shown just for it. */ npuCompile?: boolean }
   | { status: typeof ENGINE_STATUS.ready; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device: LocalDevice }
   | { status: typeof ENGINE_STATUS.error; message: string };
 
@@ -230,7 +230,7 @@ export class EngineManager {
 
       const serverPath = await this.ensureLlamaEngine(paths, settings);
       const modelPath = await this.ensureGgufModel(paths, model, settings);
-      this.host.onStatus({ status: ENGINE_STATUS.starting });
+      this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: false });
 
       const startOne = (active: (typeof devices)[number]): Promise<RunningEngine> => {
         const args = withModelPlaceholder(llamaArgs(contextLength, active), modelPath);
@@ -347,6 +347,7 @@ export class EngineManager {
       lastModelPath = modelPath;
       try {
         this.host.log(`ovgenai: loading ${model?.label ?? settings.modelPath} on ${activeDevice.toUpperCase()} (${modelPath})`);
+        this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: activeDevice === 'npu' });
         runner = await startStdioRunner(
           {
             runnerPath,
@@ -466,13 +467,13 @@ export class EngineManager {
     }
     this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(modelDir, { recursive: true });
-    for (const file of missing) {
+    for (const [index, file] of missing.entries()) {
       const url = mlxModelFileUrl(model, file, settings.huggingfaceUrl);
       await (this.host.download ?? downloadFile)({
         url,
         destination: join(modelDir, file),
         signal: this.activeSignal,
-        onProgress: (p) => this.host.onProgress?.('model', p),
+        onProgress: (p) => this.host.onProgress?.('model', { ...p, fileName: file, fileIndex: index + 1, fileCount: missing.length }),
       });
     }
     return modelDir;
@@ -571,13 +572,13 @@ export class EngineManager {
     }
     this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(modelDir, { recursive: true });
-    for (const file of missing) {
+    for (const [index, file] of missing.entries()) {
       const url = irModelFileUrl(model, file, settings.huggingfaceUrl);
       await (this.host.download ?? downloadFile)({
         url,
         destination: join(modelDir, file),
         signal: this.activeSignal,
-        onProgress: (p) => this.host.onProgress?.('model', p),
+        onProgress: (p) => this.host.onProgress?.('model', { ...p, fileName: file, fileIndex: index + 1, fileCount: missing.length }),
       });
     }
     return modelDir;

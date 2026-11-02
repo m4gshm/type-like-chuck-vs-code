@@ -60,11 +60,13 @@ export class EngineTaskRunner {
     const startedAt = Date.now();
     let progress: DownloadProgress = { downloadedBytes: 0, totalBytes: undefined };
     let progressKind: 'engine' | 'model' = 'engine';
+    let lastFile: string | undefined;
     this.listener = (kind, p) => {
-      if (kind !== progressKind) {
-        // A new phase started: never show the previous phase's byte counts.
-        progress = { downloadedBytes: 0, totalBytes: p.totalBytes };
+      if (kind !== progressKind || (p.fileName !== undefined && p.fileName !== lastFile)) {
+        // A new phase or a new file started: never show the previous counters.
+        progress = { ...p, downloadedBytes: 0 };
         progressKind = kind;
+        lastFile = p.fileName;
         return;
       }
       progress = p;
@@ -83,8 +85,11 @@ export class EngineTaskRunner {
         }
         const total = progress.totalBytes;
         const part = `${formatBytes(progress.downloadedBytes)}${total !== undefined ? ` / ${formatBytes(total)}` : ''}`;
+        const file = progress.fileName !== undefined
+          ? ` — ${progress.fileName}${progress.fileCount !== undefined ? ` (file ${progress.fileIndex}/${progress.fileCount})` : ''}`
+          : '';
         const phaseLabel = progressKind === 'engine' ? this.host.enginePhaseLabel() : `model: ${this.host.modelName()}`;
-        bar.report({ message: `${phaseLabel}: ${part}` });
+        bar.report({ message: `${phaseLabel}${file}: ${part}` });
       }, 200);
       try {
         await task(cancel.signal);

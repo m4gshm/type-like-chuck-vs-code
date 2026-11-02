@@ -8,8 +8,13 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 
 type ProxyAgentInstance = InstanceType<typeof HttpsProxyAgent>;
 
-export interface DownloadProgress {  downloadedBytes: number;
+export interface DownloadProgress {
+  downloadedBytes: number;
   totalBytes: number | undefined;
+  /** Set when a model consists of several files downloaded in sequence. */
+  fileName?: string;
+  fileIndex?: number;
+  fileCount?: number;
 }
 
 export interface DownloadOptions {

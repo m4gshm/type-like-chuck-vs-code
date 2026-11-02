@@ -20,7 +20,6 @@ import { bundledMlxRunnerPath, bundledOvgenaiRunnerPath } from './local_engine/b
 import { EngineTaskRunner } from './engine_progress';
 import { TemplateFieldSync } from './template_fields';
 import { LocalModeStatusUi } from './local_mode_status';
-import { probeCapability } from './local_engine/capability';
 import { normalizeLocalModelSetting, offerLocalEngine } from './startup_prompts';
 import { BRAND } from './brand';
 import { registerTlcCommands, pickLocalModelFromDisk, presentModelQuickPick, TlcCommandDeps } from './commands';
@@ -595,14 +594,9 @@ export function activate(context: vscode.ExtensionContext): void {
       // host). The engine-status ready branch lifts the block.
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason('starting…');
-      // engineKind/device "auto" already resolve to the best hardware match;
-      // just log the capability probe for diagnostics.
-      const rec = await probeCapability({ platform: process.platform, arch: process.arch });
-      if (rec.kind === 'local') {
-        info(`${BRAND} local engine: ${rec.engineKind} (${rec.device}) — ${rec.reason}.`);
-      } else {
-        info(`${BRAND} local engine: no local acceleration (${rec.reason}).`);
-      }
+      // Log the effective selection; the actual device (auto resolution and
+      // fallbacks) is reported by the ready line once the engine is up.
+      info(`${BRAND} local engine: kind=${config().localEngineKind} device=${config().localDevice} model=${config().localModel}.`);
       void applyMode();
       return;
     }

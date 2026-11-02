@@ -53,17 +53,17 @@ describe('EngineTaskRunner', () => {
     expect(vi.mocked(host.offerRetry).mock.calls[0][0]).toContain('download failed');
   });
 
-  it('reports byte counts and the model phase while downloading', async () => {
+  it('reports byte counts, the file name and the model phase while downloading', async () => {
     const { host, bars } = makeHost();
     const runner = new EngineTaskRunner(host as never);
     runner.stageLabel = 'starting…';
     const task = async () => {
-      runner.onDownloadProgress('model', { downloadedBytes: 0, totalBytes: 3000 });
-      runner.onDownloadProgress('model', { downloadedBytes: 1500, totalBytes: 3000 });
+      runner.onDownloadProgress('model', { downloadedBytes: 0, totalBytes: 3000, fileName: 'openvino_model.bin', fileIndex: 2, fileCount: 4 });
+      runner.onDownloadProgress('model', { downloadedBytes: 1500, totalBytes: 3000, fileName: 'openvino_model.bin', fileIndex: 2, fileCount: 4 });
       await flush(450);
     };
     await runner.run('t', task);
     await flush(200);
-    expect(bars.some((b) => b.includes(': 1.5KB / 3.0KB'))).toBe(true);
+    expect(bars.some((b) => b.includes('openvino_model.bin (file 2/4)') && b.includes(': 1.5KB / 3.0KB'))).toBe(true);
   });
 });
