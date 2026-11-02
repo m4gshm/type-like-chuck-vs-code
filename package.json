@@ -128,18 +128,20 @@
           "tlc.local.engineKind": {
             "type": "string",
             "order": 0,
-            "default": "llama.cpp",
+            "default": "auto",
             "enum": [
+              "auto",
               "llama.cpp",
               "ovgenai",
               "mlx"
             ],
             "enumDescriptions": [
-              "llama.cpp llama-server with GGUF models (default; all platforms)",
+              "Best match for the platform: mlx on macOS arm64, ovgenai on Intel x64 (NPU generation 4 or later → NPU device, otherwise GPU via iGPU/Arc with CPU fallback), llama.cpp elsewhere",
+              "llama.cpp llama-server with GGUF models (all platforms)",
               "Bundled OpenVINO GenAI runner with native IR models (Windows/Linux x64, Linux arm64 Intel; NPU/GPU/CPU)",
               "Bundled MLX runner with 4-bit mlx-community models (macOS arm64; Metal)"
             ],
-            "description": "Local engine implementation (local mode only). The ovgenai runner ships with the extension and downloads the OpenVINO runtime libraries on first use. The mlx runner ships with the extension and needs no downloads at all. Default: `mlx` on macOS arm64, `ovgenai` on Windows/Linux x64 and Linux arm64 with an Intel CPU, `llama.cpp` elsewhere (until this setting is set explicitly)."
+            "description": "Local engine implementation (local mode only). `auto` follows the hardware: `mlx` on macOS arm64, `ovgenai` on Windows/Linux x64 and Linux arm64 with an Intel CPU, `llama.cpp` elsewhere. The ovgenai runner downloads the OpenVINO runtime libraries on first use. The mlx runner needs no downloads at all. Use \"TLC: Select Local Engine\"."
           },
           "tlc.local.model": {
             "type": "string",

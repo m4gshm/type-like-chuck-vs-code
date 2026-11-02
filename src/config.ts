@@ -62,13 +62,11 @@ export function readConfig(): ExtensionConfig {
   // prompt budgets in local mode when the NPU is explicitly selected.
   const mode = rawMode === 'remote' ? 'remote' : 'local';
   const device = rawDevice === 'gpu' || rawDevice === 'npu' || rawDevice === 'cpu' ? rawDevice : 'auto';
-  const rawKind = c.get<string>('local.engineKind', 'llama.cpp');
+  const rawKind = c.get<string>('local.engineKind', 'auto');
   const engineKind: LocalEngineKind = rawKind === 'ovgenai' ? 'ovgenai' : rawKind === 'mlx' ? 'mlx' : 'llama.cpp';
-  // While the setting is untouched the default follows the capability
-  // matrix: mlx on Apple Silicon, ovgenai on Intel x64, llama.cpp elsewhere.
-  const kindTouched = c.inspect<string>('local.engineKind')?.globalValue !== undefined
-    || c.inspect<string>('local.engineKind')?.workspaceValue !== undefined;
-  const effectiveKind: LocalEngineKind = !kindTouched && engineKind === 'llama.cpp'
+  // "auto" (the default) resolves to the capability matrix: mlx on Apple
+  // Silicon, ovgenai on Intel x64, llama.cpp elsewhere.
+  const effectiveKind: LocalEngineKind = rawKind === 'auto' && engineKind === 'llama.cpp'
     ? defaultEngineKind(process.platform, process.arch, cpus()[0]?.model ?? '')
     : engineKind;
   const npuLimitRaw = c.get<number>('local.npuContextMaxLength', 8192);

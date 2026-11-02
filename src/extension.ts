@@ -668,6 +668,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // The kind decides what gets downloaded next, so pick it here; the
         // download-or-existing-folder question follows for the chosen kind.
         const kinds = [
+          { label: '$(zap) Auto', detail: 'Best match for the platform (mlx on Apple Silicon, OpenVINO GenAI on Intel, llama.cpp elsewhere)', value: 'auto' },
           { label: '$(device-desktop) llama.cpp', detail: 'GGUF models via llama-server (vulkan GPU, CPU fallback)', value: 'llama.cpp' },
           ...(bundledOvgenaiRunnerPath(context.extensionPath) !== undefined
             ? [{ label: '$(circuit-board) OpenVINO GenAI', detail: 'Native IR models on Intel NPU/GPU/CPU', value: 'ovgenai' }]
@@ -859,6 +860,7 @@ export function activate(context: vscode.ExtensionContext): void {
         model: config().localModel,
         modelPath: config().localCustomModelPath,
         device: config().localDevice,
+        engineKind: config().localEngineKind,
         apiKeyEnabled: config().localApiKeyEnabled,
         npuContextLength: config().localNpuContextMaxLength,
       };
@@ -891,6 +893,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const localTargetChanged = config().mode === 'local'
         && (effectiveLocalModel(config().localModel, config().localCustomModelPath) !== effectiveLocalModel(previousLocal.model, previousLocal.modelPath)
           || event.affectsConfiguration('tlc.local.device') && config().localDevice !== previousLocal.device
+        || event.affectsConfiguration('tlc.local.engineKind') && config().localEngineKind !== previousLocal.engineKind
           || event.affectsConfiguration('tlc.local.apiKeyEnabled') && config().localApiKeyEnabled !== previousLocal.apiKeyEnabled
           || event.affectsConfiguration('tlc.local.npuContextMaxLength') && config().localNpuContextMaxLength !== previousLocal.npuContextLength);
       if (dirsChanged) {
