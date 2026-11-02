@@ -196,7 +196,6 @@ export function activate(context: vscode.ExtensionContext): void {
       // The custom path applies only while the model setting is "custom":
       // a stale path must not silently override a catalog model choice.
       modelPath: config().localModel === 'custom' ? config().localCustomModelPath : '',
-      modelDownloadUrls: config().localModelDownloadUrls,
       ovgenaiRunnerPath: bundledOvgenaiRunnerPath(context.extensionPath),
       mlxRunnerPath: bundledMlxRunnerPath(context.extensionPath),
       apiKeyEnabled: config().localApiKeyEnabled,

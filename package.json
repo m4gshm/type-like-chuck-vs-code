@@ -369,12 +369,6 @@
             "default": "",
             "description": "Directory for the local model cache (local mode only). Empty uses the extension storage."
           },
-          "tlc.local.modelDownloadUrls": {
-            "type": "object",
-            "order": 8,
-            "default": {},
-            "markdownDescription": "Per-model download URL overrides (local mode only), keyed by model id, replacing the URL the model is downloaded from (e.g. a mirror for a moved repository): `{ \"Qwen2.5-Coder 1.5B\": \"https://mirror/.../model.gguf\" }`. A bare model id applies to the llama.cpp GGUF download only; for the ovgenai engine, key individual IR files as `Qwen2.5-Coder 1.5B/openvino_model.bin`, and for mlx — `Qwen2.5-Coder 1.5B/<file>` per model file, so entries never collide across engine kinds."
-          },
           "tlc.local.huggingfaceUrl": {
             "type": "string",
             "order": 9,

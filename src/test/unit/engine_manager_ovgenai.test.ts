@@ -53,7 +53,6 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
     githubUrl: 'https://github.com',
     openvinoUrl: 'https://storage.openvinotoolkit.org',
     modelPath: '',
-    modelDownloadUrls: {},
     ovgenaiRunnerPath: '/ext/binaries/ovgenai/linux-x64/tlc-ovgenai-runner',
     apiKeyEnabled: true,
     ...settingsOverrides,

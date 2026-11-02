@@ -21,7 +21,6 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     localGithubUrl: 'https://github.com',
     localOpenvinoUrl: 'https://storage.openvinotoolkit.org',
     localCustomModelPath: '',
-    localModelDownloadUrls: {},
     localApiKeyEnabled: true,
     promptTemplate: undefined,
     customTemplate: undefined,

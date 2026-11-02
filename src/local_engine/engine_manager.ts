@@ -60,7 +60,6 @@ export interface EngineManagerSettings {
   githubUrl: string;
   openvinoUrl: string;
   modelPath: string;
-  modelDownloadUrls: Record<string, string>;
   /** Path of the bundled ovgenai runner binary; undefined when the platform is unsupported. */
   ovgenaiRunnerPath?: string;
   /** Path of the bundled mlx runner binary; undefined outside macOS arm64. */
@@ -467,11 +466,7 @@ export class EngineManager {
     this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(modelDir, { recursive: true });
     for (const file of missing) {
-      const overrideKey = `${model.id}/${file}`;
-      const override = settings.modelDownloadUrls[overrideKey];
-      const url = override !== undefined && override.length > 0
-        ? override
-        : mlxModelFileUrl(model, file, settings.huggingfaceUrl);
+      const url = mlxModelFileUrl(model, file, settings.huggingfaceUrl);
       await (this.host.download ?? downloadFile)({
         url,
         destination: join(modelDir, file),
@@ -576,11 +571,7 @@ export class EngineManager {
     this.host.onStatus({ status: ENGINE_STATUS.preparingModel });
     await mkdir(modelDir, { recursive: true });
     for (const file of missing) {
-      const overrideKey = `${model.id}/${file}`;
-      const override = settings.modelDownloadUrls[overrideKey];
-      const url = override !== undefined && override.length > 0
-        ? override
-        : irModelFileUrl(model, file, settings.huggingfaceUrl);
+      const url = irModelFileUrl(model, file, settings.huggingfaceUrl);
       await (this.host.download ?? downloadFile)({
         url,
         destination: join(modelDir, file),
@@ -657,10 +648,7 @@ export class EngineManager {
     if (model === undefined) {
       throw new Error(`Unknown local model "${settings.modelId}".`);
     }
-    const override = settings.modelDownloadUrls[model.id];
-    const url = override !== undefined && override.length > 0
-      ? override
-      : localModelUrl(model.id, settings.huggingfaceUrl);
+    const url = localModelUrl(model.id, settings.huggingfaceUrl);
     const modelPath = join(paths.modelDir, model.fileName);
     if (existsSync(modelPath)) {
       return modelPath;
