@@ -3,12 +3,8 @@ name: Package
 on:
   workflow_dispatch:
   push:
-    branches: [main, draft]
-    paths:
-      - 'src/**'
-      - 'package.json'
-      - 'scripts/fetch-runner-binaries.mjs'
-      - '.github/workflows/package.yml'
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
