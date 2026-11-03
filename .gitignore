@@ -11,3 +11,4 @@ build/
 binaries/
 .task/
 NUL
+.DS_Store

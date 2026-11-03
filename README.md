@@ -50,6 +50,26 @@ All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*
 
 `tlc.promptTemplate` selects a built-in template for a known model family (MVP focus: Qwen2.5-Coder) or `custom`. In `custom` mode the FIM markers (prefix/suffix/middle) and `stop` tokens are edited right in the corresponding settings. Selecting a built-in resets the custom fields; editing any of them switches the selection to `custom`. On a model change a better-matching built-in family is applied automatically (unless `custom`); an unknown template id falls back to the default with a warning.
 
+## Runner protocol (local engines)
+
+Both native runners — the OpenVINO GenAI runner ([type-like-chuck-backed-openvino](https://github.com/m4gshm/type-like-chuck-backed-openvino)) and the MLX runner ([type-like-chuck-backed-mlx](https://github.com/m4gshm/type-like-chuck-backed-mlx)) — speak the same NDJSON stdio protocol; each README documents its runner-specific spawn options.
+
+The extension spawns `tlc-ovgenai-runner --model <dir> --device CPU|GPU|NPU [--ctx N] [--prop KEY=VALUE ...]` or `tlc-mlx-runner --model <dir> [--ctx N]` and exchanges newline-delimited JSON over stdin/stdout.
+
+Events on stdout (one JSON object per line):
+- `{"type":"version","app":"..."}` in response to `--version` (exit 0, no model load);
+- `{"type":"ready","model":...,"device":...,"ctx":N}` after the model loads;
+- `{"type":"token","text":"..."}` per generated piece (no id — only one generation is active);
+- `{"type":"done","id":N,"finishReason":"stop"|"length"|"cancel"}`;
+- `{"type":"error","id":N|null,"message":"..."}`.
+
+Requests on stdin:
+- `{"type":"generate","id":N,"prompt":"...","maxTokens":N,"stop":[...]}` — generate requests are queued and served one at a time in arrival order;
+- `{"type":"cancel","id":N}` — cancels the active generation, or a queued one by id (the cancelled queued request is answered immediately with `finishReason:"cancel"`);
+- `{"type":"shutdown"}` — drains the queue answering every pending request with `finishReason:"cancel"`, cancels the active generation and exits.
+
+Logs go to stderr only; a failed generation is reported with a single `error` event (no `done` follows). Exit codes: 0 = normal, 1 = model load failure, 2 = usage/loader error.
+
 ## Debugging
 
 The TLC output channel shows the engine's own log lines (`llama-server: …`) at the **Trace** level — set the channel filter to Trace.
