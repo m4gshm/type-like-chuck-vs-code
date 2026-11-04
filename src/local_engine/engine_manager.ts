@@ -10,7 +10,7 @@ import { pickTemplateForModel } from '../model_selection';
 import { extractArchive } from './extract';
 import { llamaArgs, startEngine, RunningEngine, RunnerDeps, withModelPlaceholder } from './engine_runner';
 import { IrFormat, irModel, irModelFileUrl } from './ir_model_catalog';
-import { isLocalModelId, LocalModelSpec, localModel, localModelUrl } from './model_catalog';
+import { isLocalModelId, LOCAL_MODEL_IDS, LocalModelId, LocalModelSpec, localModel, localModelUrl } from './model_catalog';
 import { mlxModel, mlxModelFileUrl } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { OV_GENAI_VERSION, ovGenaiLibDir, ovGenaiTbbDir, resolveOvGenaiAsset, runnerOvGenaiVersion } from './ov_runtime';
@@ -72,6 +72,14 @@ export interface EngineManagerSettings {
 /** Marker `askDistroOrDownload` returns when the user opts into downloading. */
 export const DISTRO_CHOICE_DOWNLOAD = 'download';
 
+/** One entry of the "which model to download" picker. */
+export interface ModelDownloadChoice {
+  id: LocalModelId;
+  label: string;
+  detail: string;
+  downloaded: boolean;
+}
+
 export interface EngineManagerHost extends RunnerDeps {
   platform: NodeJS.Platform;
   arch: string;
@@ -89,6 +97,10 @@ export interface EngineManagerHost extends RunnerDeps {
   npuGeneration?: typeof npuGeneration;
   /** Returns a picked distro folder, DISTRO_CHOICE_DOWNLOAD, or undefined when dismissed. */
   askDistroOrDownload?: (kind: 'ovgenai' | 'llama.cpp') => Promise<string | typeof DISTRO_CHOICE_DOWNLOAD | undefined>;
+  /** Offered when the configured catalog model is not downloaded yet; returns the picked id, or undefined when dismissed. */
+  askModelDownload?: (currentId: string, choices: ModelDownloadChoice[]) => Promise<string | undefined>;
+  /** Persists a model picked for download (tlc.local.model). */
+  setLocalModel?: (id: string) => Promise<void>;
 }
 
 export class EngineManager {
@@ -97,6 +109,8 @@ export class EngineManager {
   private runningDevice: LocalDevice | undefined;
   private startPromise: Promise<EngineStatus> | undefined;
   private crashTimes: number[] = [];
+  /** The model-download question is asked once per start: device-fallback retries must not re-ask. */
+  private modelDownloadAsked = false;
 
   constructor(private readonly host: EngineManagerHost) {}
 
@@ -202,6 +216,7 @@ export class EngineManager {
   private async start(): Promise<EngineStatus> {
     try {
       await this.stop();
+      this.modelDownloadAsked = false;
       const paths = this.host.paths();
       const settings = this.host.settings();
       if (settings.modelId === 'custom' && settings.modelPath.length === 0) {
@@ -221,7 +236,11 @@ export class EngineManager {
       if (settings.modelPath.length === 0 && !isLocalModelId(settings.modelId)) {
         throw new Error(`Unknown local model "${settings.modelId}".`);
       }
-      const model = isLocalModelId(settings.modelId) ? localModel(settings.modelId) : undefined;
+      let model = isLocalModelId(settings.modelId) ? localModel(settings.modelId) : undefined;
+      if (model !== undefined) {
+        await this.chooseModelToDownload(paths, settings);
+        model = isLocalModelId(settings.modelId) ? localModel(settings.modelId) : model;
+      }
       const contextLength = model !== undefined ? model.contextLength : CUSTOM_MODEL_CONTEXT_LENGTH;
       const devices = deviceChain(settings.device);
       if (settings.device === 'npu') {
@@ -313,6 +332,13 @@ export class EngineManager {
     // The NPU leads the auto chain only for NPU generation 4+ hardware.
     const npuGen = settings.device === 'auto' ? await (this.host.npuGeneration ?? npuGeneration)(this.host.platform) : 0;
     const devices = deviceChain(settings.device, 'ovgenai', npuGen);
+    // nf4 weights are the NPU format; GPU/CPU run int8. Resolved per attempt:
+    // the device chain can fall back (npu -> gpu) and switch the format.
+    const formatFor = (device: string): IrFormat => (device === 'npu' ? 'nf4' : 'int8');
+    if (baseModel !== undefined) {
+      await this.chooseModelToDownload(paths, settings, formatFor(devices[0]));
+    }
+    const model = isLocalModelId(settings.modelId) ? irModel(settings.modelId) : undefined;
     const runtimeRoot = await this.ensureOvGenaiRuntime(paths, settings);
     const libDir = ovGenaiLibDir(this.host.platform, runtimeRoot);
     // The Windows runner links TBB directly; its dlls sit outside the OpenVINO bin dir.
@@ -325,14 +351,11 @@ export class EngineManager {
     const versions = await (this.host.probeRunnerVersion ?? probeRunnerVersion)(runnerPath, libraryDirs, this.host);
     this.host.log(`ovgenai runner version: app=${versions?.app ?? 'unknown'} ovGenai=${versions?.ovGenai ?? 'unknown'}`);
 
-    const baseContextLength = baseModel !== undefined ? baseModel.contextLength : CUSTOM_MODEL_CONTEXT_LENGTH;
+    const baseContextLength = model !== undefined ? model.contextLength : CUSTOM_MODEL_CONTEXT_LENGTH;
     const contextLength = devices[0] === 'npu' || settings.device === 'npu'
       ? Math.min(baseContextLength, settings.npuContextLength > 0 ? settings.npuContextLength : NPU_CONTEXT_LENGTH)
       : baseContextLength;
 
-    // nf4 weights are the NPU format; GPU/CPU run int8. Resolved per attempt:
-    // the device chain can fall back (npu -> gpu) and switch the format.
-    const formatFor = (device: string): IrFormat => (device === 'npu' ? 'nf4' : 'int8');
     if (baseModel === undefined && !existsSync(settings.modelPath)) {
       throw new Error(`Local model file or directory not found: ${settings.modelPath}`);
     }
@@ -342,8 +365,7 @@ export class EngineManager {
     let lastModelPath = '';
     const fallbacks: string[] = [];
     for (;;) {
-      const model = baseModel !== undefined ? irModel(baseModel.id, formatFor(activeDevice)) : undefined;
-      const modelPath = model !== undefined ? await this.ensureIrModel(paths, model, settings) : settings.modelPath;
+      const modelPath = model !== undefined ? await this.ensureIrModel(paths, irModel(model.id, formatFor(activeDevice)), settings) : settings.modelPath;
       lastModelPath = modelPath;
       try {
         this.host.log(`ovgenai: loading ${model?.label ?? settings.modelPath} on ${activeDevice.toUpperCase()} (${modelPath})`);
@@ -419,7 +441,11 @@ export class EngineManager {
     if (settings.modelPath.length === 0 && !isLocalModelId(settings.modelId)) {
       throw new Error(`Unknown local model "${settings.modelId}".`);
     }
-    const model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : undefined;
+    let model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : undefined;
+    if (model !== undefined) {
+      await this.chooseModelToDownload(paths, settings);
+      model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : model;
+    }
     const modelPath = await this.ensureMlxModel(paths, model, settings);
     this.host.onStatus({ status: ENGINE_STATUS.starting });
     // Metal is the only MLX backend; no device fallback chain.
@@ -448,6 +474,56 @@ export class EngineManager {
     };
     this.host.onStatus(status);
     return status;
+  }
+
+  /**
+   * When the configured catalog model is not downloaded yet, offers the whole
+   * catalog instead of silently downloading the configured one. The pick is
+   * persisted via `setLocalModel` and reflected into `settings.modelId` so the
+   * running start uses it. Dismissing cancels the start.
+   */
+  private async chooseModelToDownload(
+    paths: EnginePaths,
+    settings: EngineManagerSettings,
+    format: IrFormat = 'int8',
+  ): Promise<void> {
+    const ask = this.host.askModelDownload;
+    if (ask === undefined || this.modelDownloadAsked || !isLocalModelId(settings.modelId)) {
+      return;
+    }
+    const choices = this.modelDownloadChoices(paths, settings.engineKind, format);
+    const current = choices.find((c) => c.id === settings.modelId);
+    if (current === undefined || current.downloaded) {
+      return;
+    }
+    this.modelDownloadAsked = true;
+    this.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: 'choose which model to download' });
+    const chosen = await ask(settings.modelId, choices);
+    if (chosen === undefined) {
+      throw new DOMException('Canceled', 'AbortError');
+    }
+    if (chosen !== settings.modelId) {
+      settings.modelId = chosen;
+      await this.host.setLocalModel?.(chosen);
+    }
+  }
+
+  private modelDownloadChoices(paths: EnginePaths, kind: EngineManagerSettings['engineKind'], format: IrFormat): ModelDownloadChoice[] {
+    const sizeLabel = (bytes: number): string => `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+    return LOCAL_MODEL_IDS.map((id) => {
+      const downloaded = kind === 'mlx'
+        ? mlxModel(id).files.every((file) => existsSync(join(mlxModelDir(paths, id), file)))
+        : kind === 'ovgenai'
+          ? irModel(id, format).files.every((file) => existsSync(join(irModelDir(paths, id, format), file)))
+          : existsSync(join(paths.modelDir, localModel(id).fileName));
+      const bytes = kind === 'mlx' ? mlxModel(id).approximateBytes : kind === 'ovgenai' ? irModel(id, format).approximateBytes : localModel(id).approximateBytes;
+      return {
+        id,
+        label: kind === 'mlx' ? mlxModel(id).label : kind === 'ovgenai' ? irModel(id, format).label : localModel(id).label,
+        detail: downloaded ? 'already downloaded' : `${sizeLabel(bytes)} download · id: ${id}`,
+        downloaded,
+      };
+    });
   }
 
   private async ensureMlxModel(paths: EnginePaths, model: ReturnType<typeof mlxModel> | undefined, settings: EngineManagerSettings): Promise<string> {

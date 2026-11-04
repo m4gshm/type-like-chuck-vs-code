@@ -86,7 +86,7 @@ export class LocalModeStatusUi {
         ? `downloading ${this.enginePhaseLabel()}…`
         : status.status === ENGINE_STATUS.preparingModel
           ? `downloading ${this.host.modelLabel()}…`
-          : `starting ${this.kindLabel()}: ${this.host.modelLabel()}…${status.npuCompile ? ' (the first NPU start compiles the model — several minutes)' : ''}`;
+          : `starting ${this.kindLabel()}: ${this.host.modelLabel()}…${status.status === ENGINE_STATUS.starting && status.npuCompile ? ' (the first NPU start compiles the model — several minutes)' : ''}`;
       this.host.stage(label);
       this.host.statusBar.setEngine(`$(loading~spin) ${label}`);
       // Suppress completions while the engine is starting: otherwise typing

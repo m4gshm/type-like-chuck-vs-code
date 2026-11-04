@@ -153,7 +153,7 @@
               "Qwen2.5-Coder 3B",
               "custom"
             ],
-            "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download."
+            "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download. When the selected model is not downloaded yet, a picker offers all catalog models before the download starts."
           },
           "tlc.local.customModelPath": {
             "type": "string",

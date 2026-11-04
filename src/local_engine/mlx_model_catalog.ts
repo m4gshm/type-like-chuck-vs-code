@@ -18,7 +18,6 @@ const MLX_FILES = [
   'model.safetensors',
   'tokenizer.json',
   'tokenizer_config.json',
-  'generation_config.json',
 ];
 
 const MLX_CATALOG: Record<LocalModelId, MlxModelSpec> = {

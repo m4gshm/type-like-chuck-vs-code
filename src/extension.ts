@@ -12,7 +12,7 @@ import { buildTemplateRegistry, ResolvedTemplates } from './templates';
 import { pickTemplateForModel } from './model_selection';
 import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
 import { copilotActive, CopilotEnableSetting } from './copilot_gate';
-import { DISTRO_CHOICE_DOWNLOAD, EngineManager, ENGINE_STATUS } from './local_engine/engine_manager';
+import { DISTRO_CHOICE_DOWNLOAD, EngineManager, ENGINE_STATUS, ModelDownloadChoice } from './local_engine/engine_manager';
 import { DEFAULT_LOCAL_MODEL } from './local_engine/model_catalog';
 import { effectiveLocalModel, localModelDisplayName, localModelSpec } from './local_engine/model_picker';
 import { migrateDirectory, resolveEnginePaths } from './local_engine/paths';
@@ -171,6 +171,19 @@ export function activate(context: vscode.ExtensionContext): void {
     await vscode.workspace.getConfiguration('tlc').update('local.distroDir', dir, vscode.ConfigurationTarget.Global);
     return dir;
   };
+  // The pick persists as tlc.local.model so later starts skip the question.
+  const askModelDownload = async (currentId: string, choices: ModelDownloadChoice[]): Promise<string | undefined> => {
+    const picked = await vscode.window.showQuickPick(
+      choices.map((c) => ({
+        label: `${c.downloaded ? '$(check)' : '$(cloud-download)'} ${c.label}`,
+        description: c.id === currentId ? '$(check) configured' : undefined,
+        detail: c.detail,
+        id: c.id,
+      })),
+      { title: `${BRAND}: Local Model Download`, placeHolder: 'The configured model is not downloaded yet — choose which model to download' },
+    );
+    return picked?.id;
+  };
   const engineManager = new EngineManager({
     platform: process.platform,
     arch: process.arch,
@@ -202,6 +215,11 @@ export function activate(context: vscode.ExtensionContext): void {
     log: trace,
     warn: warn,
     askDistroOrDownload,
+    askModelDownload,
+    setLocalModel: async (id) => {
+      await vscode.workspace.getConfiguration('tlc').update('local.model', id, vscode.ConfigurationTarget.Global);
+      await vscode.workspace.getConfiguration('tlc').update('local.customModelPath', undefined, vscode.ConfigurationTarget.Global);
+    },
   });
 
   /**

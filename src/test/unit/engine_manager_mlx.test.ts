@@ -36,7 +36,7 @@ interface Fixture {
   root: string;
 }
 
-const MLX_FILES = ['config.json', 'model.safetensors', 'tokenizer.json', 'tokenizer_config.json', 'generation_config.json'];
+const MLX_FILES = ['config.json', 'model.safetensors', 'tokenizer.json', 'tokenizer_config.json'];
 
 const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {}): Promise<Fixture> => {
   const root = await mkdtemp(join(tmpdir(), 'tlc-mlx-test-'));
@@ -138,6 +138,53 @@ describe('EngineManager (mlx engine)', () => {
     expect(f.downloads.length).toBeGreaterThan(downloadsBefore);
     const { existsSync } = await import('fs');
     expect(existsSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-Instruct-4bit', 'model.safetensors'))).toBe(true);
+    await manager.stop();
+  });
+
+  it('asks which model to download when the configured one is missing and persists the pick', async () => {
+    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B' });
+    const pickedModels: string[] = [];
+    let answer: string | undefined = 'Qwen2.5-Coder 3B';
+    f.host.askModelDownload = async (currentId, choices) => {
+      pickedModels.push(currentId);
+      expect(choices.map((c) => c.id)).toEqual(['Qwen2.5-Coder 0.5B', 'Qwen2.5-Coder 1.5B', 'Qwen2.5-Coder 3B']);
+      expect(choices.find((c) => c.id === 'Qwen2.5-Coder 1.5B')?.downloaded).toBe(true);
+      expect(choices.find((c) => c.id === 'Qwen2.5-Coder 0.5B')?.downloaded).toBe(false);
+      return answer;
+    };
+    const persisted: string[] = [];
+    f.host.setLocalModel = async (id) => {
+      persisted.push(id);
+    };
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(pickedModels).toEqual(['Qwen2.5-Coder 0.5B']);
+    expect(persisted).toEqual(['Qwen2.5-Coder 3B']);
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 3B' });
+    expect(f.downloads.every((d) => d.url.includes('Qwen2.5-Coder-3B-Instruct-4bit'))).toBe(true);
+    expect(f.downloads.some((d) => d.url.includes('Qwen2.5-Coder-0.5B'))).toBe(false);
+    await manager.stop();
+  });
+
+  it('cancels the start when the model-download question is dismissed', async () => {
+    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B' });
+    f.host.askModelDownload = async () => undefined;
+    const manager = new EngineManager(f.host);
+    await expect(manager.ensureReady()).rejects.toThrow();
+    expect(last(f.statuses).status).toBe('error');
+    expect(f.downloads).toHaveLength(0);
+    await manager.stop();
+  });
+
+  it('skips the model-download question when the configured model is already downloaded', async () => {
+    const f = await makeFixture();
+    f.host.askModelDownload = async () => {
+      throw new Error('must not be asked');
+    };
+    const manager = new EngineManager(f.host);
+    const status = await manager.ensureReady();
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 1.5B' });
+    expect(f.downloads).toHaveLength(0);
     await manager.stop();
   });
 });
