@@ -30,7 +30,7 @@ if (!forceBuild && existsSync(destination)) {
   process.exit(0);
 }
 
-const backendRoot = join(root, '..', target.repo);
+const backendRoot = join(root, target.repo);
 if (!existsSync(backendRoot)) {
   console.error(`Backend repo not found: ${backendRoot}`);
   process.exit(1);

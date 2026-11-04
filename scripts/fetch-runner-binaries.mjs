@@ -63,9 +63,9 @@ async function releaseAssets(repo) {
   return release.assets ?? [];
 }
 
-// Sibling backend repo directory: <ext-root>/../<repo> (the repo holding the
+// Backend submodule directory: <ext-root>/<repo> (the repo holding the
 // Taskfile that builds build/<asset> for the host OS).
-const localRepoDir = (repo) => join(dirname(fileURLToPath(import.meta.url)), '..', '..', repo);
+const localRepoDir = (repo) => join(dirname(fileURLToPath(import.meta.url)), '..', repo);
 
 // Local build fallback: if the sibling backend repo exists for this host
 // platform, copy (or first build via `task build`) the freshly built runner.

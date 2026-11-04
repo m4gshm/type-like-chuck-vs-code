@@ -88,10 +88,11 @@ npm run build        # test + lint (what CI runs)
 npm run package      # compile + icon regen + vsce package → .vsix
 ```
 
-The `ovgenai` C++ runner lives in [`type-like-chuck-backed-openvino`](https://github.com/m4gshm/type-like-chuck-backed-openvino), the Swift `mlx` runner in [`type-like-chuck-backed-mlx`](https://github.com/m4gshm/type-like-chuck-backed-mlx); the extension only imports release-named binaries via:
+The `ovgenai` C++ runner lives in the [`type-like-chuck-backed-openvino`](https://github.com/m4gshm/type-like-chuck-backed-openvino) submodule, the Swift `mlx` runner in the [`type-like-chuck-backed-mlx`](https://github.com/m4gshm/type-like-chuck-backed-mlx) submodule; the extension only imports release-named binaries via:
 
 ```bash
-task runner:import   # local: build & copy from the backend repos
+git submodule update --init   # one-time: fetch the backend submodules
+task runner:import   # local: build & copy from the backend submodules
 task runner:fetch    # download from the backend releases (RUNNER_VERSION=<tag> pins)
 task package         # full .vsix
 ```

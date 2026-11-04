@@ -1,7 +1,8 @@
 # TLC build automation (go-task: brew/choco install go-task).
-# The OpenVINO GenAI runner backend lives in the separate repository
-# m4gshm/type-like-chuck-backed-openvino; this file only imports its binaries:
-#   - runner:import  — local: copy from ../type-like-chuck-backed-openvino/build
+# The runner backends are git submodules of this repository
+# (m4gshm/type-like-chuck-backed-openvino, m4gshm/type-like-chuck-backed-mlx);
+# this file only imports their binaries:
+#   - runner:import  — local: build in the submodule and copy from its build/
 #   - runner:fetch   — CI: download from the backend repo's GitHub release
 #                      (pin a version with RUNNER_VERSION=<tag>, e.g. v0.1.0)
 # The plugin package expects them at binaries/ovgenai/<platform>/ with the
@@ -10,8 +11,8 @@
 version: '3'
 
 vars:
-  BACKEND_REPO: '../type-like-chuck-backed-openvino'
-  BACKEND_MLX: '../type-like-chuck-backed-mlx'
+  BACKEND_REPO: 'type-like-chuck-backed-openvino'
+  BACKEND_MLX: 'type-like-chuck-backed-mlx'
   RUNNER_VERSION: '' # pin a backend release tag here, empty = latest release
 
 env:
@@ -98,7 +99,7 @@ tasks:
           mkdir -p binaries/ovgenai/linux-x64 binaries/ovgenai/win32-x64
           cp '{{.BACKEND_REPO}}/build/tlc-ovgenai-runner-linux-x64' binaries/ovgenai/linux-x64/tlc-ovgenai-runner
         fi
-      - cmd: powershell -Command "Copy-Item ..\type-like-chuck-backed-openvino\build\tlc-ovgenai-runner-win32-x64.exe binaries\ovgenai\win32-x64\tlc-ovgenai-runner.exe"
+      - cmd: powershell -Command "Copy-Item type-like-chuck-backed-openvino\build\tlc-ovgenai-runner-win32-x64.exe binaries\ovgenai\win32-x64\tlc-ovgenai-runner.exe"
         platforms: [windows]
       - |
         if [ ! -d '{{.BACKEND_MLX}}' ]; then
