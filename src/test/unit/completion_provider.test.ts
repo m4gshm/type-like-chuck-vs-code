@@ -89,7 +89,6 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
     } as unknown as CompletionState,
     statusBar: { setBusy: () => undefined, setError: () => undefined, clearError: () => undefined } as unknown as StatusBar,
     connectionWatchdog: { reportFailure: () => undefined, reportSuccess: () => undefined },
-    toRelativePath: (p: string) => p,
     warn: () => undefined,
     debug: () => undefined,
     trace: () => undefined,
@@ -497,6 +496,25 @@ describe('CompletionProvider', () => {
     const range = items[0].range as { start: { character: number }; end: { character: number } };
     expect(range.start.character).toBe(10);
     expect(range.end.character).toBe(10);
+  });
+
+  it('keeps the insertion a plain range when the next line only prefix-matches after its indentation', async () => {
+    // api_test.go regression: cursor at the end of `fourth = `, the next line
+    // starts `entities`; absorbing the newline + indentation and matching
+    // `entit` must not turn the insertion into a multi-line replacement.
+    const { deps } = makeDeps(async () => ({ text: 'entity{"fourth"}' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['fourth = ', ' entities = []*entity{}']);
+    const token = new FakeToken();
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 9) as never, {} as never, token as never);
+    await vi.advanceTimersByTimeAsync(250);
+    const items = await result;
+    expect(items).toHaveLength(1);
+    expect(items[0].insertText).toBe('entity{"fourth"}');
+    const range = items[0].range as { start: { character: number }; end: { character: number } };
+    expect(range.start.character).toBe(9);
+    expect(range.end.character).toBe(9);
   });
 
   it('keeps a plain insertion range when nothing overlaps', async () => {

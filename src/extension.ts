@@ -323,7 +323,6 @@ export function activate(context: vscode.ExtensionContext): void {
     completionState: complectionState,
     statusBar: statusBar,
     connectionWatchdog: connectionWatchdog,
-    toRelativePath: (p: string) => vscode.workspace.asRelativePath(p),
     warn: warn,
     debug: debug,
     trace: trace,

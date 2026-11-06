@@ -21,7 +21,6 @@ export interface ProviderDeps {
   completionState: CompletionState;
   statusBar: StatusBar;
   connectionWatchdog: ConnectionWatchdogLike;
-  toRelativePath: (fullPath: string) => string;
   warn: (message: string) => void;
   debug: (message: string) => void;
   trace: (message: string) => void;
@@ -35,6 +34,7 @@ interface CachedCompletion {
   version: number;
   createdAt: number;
   text: string;
+  anchored?: boolean;
 }
 
 const GRACE_EXPIRED: unique symbol = Symbol('graceExpired');
@@ -90,7 +90,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionItem[]> {
     const { completionState: state, forbidden } = this.deps;
-    const fileName = this.deps.toRelativePath(document.fileName);
+    const fileName = document.fileName;
     if (!state.isEnabled()) {
       this.deps.debug(`completion skipped: completions are disabled (${fileName})`);
       return [];
@@ -107,7 +107,12 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     // Fully overlapping suggestions are useless; partial overlaps must replace
     // the duplicated characters instead of doubling them.
     const offset = document.offsetAt(position);
-    const following = document.getText().slice(offset, offset + completion.text.length);
+    // Compare with the rest of the current line only: crossing the newline
+    // treats the next line's indentation + first word as a phantom overlap
+    // (e.g. `entity{...}` after `entit` from `entities` on the next line) and
+    // turns a plain insertion into a multi-line replacement, which VS Code
+    // then refuses to render.
+    const following = document.getText().slice(offset, offset + completion.text.length).split('\n', 1)[0];
     // The model may continue its generation into the suffix: trim the tail
     // duplicating the text after the cursor before the overlap handling.
     const tailOverlap = trailingOverlapLength(completion.text, following);
@@ -130,12 +135,20 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     return [new vscode.InlineCompletionItem(seam.insert, range)];
   }
 
+  handleItemDidShow(_completions: vscode.InlineCompletionList, _item: vscode.InlineCompletionItem, updatedInsertText: string): void {
+    this.deps.debug(`completion shown by the editor: ${updatedInsertText}`);
+  }
+
+  disposeInlineCompletions(_completions: vscode.InlineCompletionList, reason: unknown): void {
+    this.deps.debug(`completion disposed by the editor without showing: ${JSON.stringify(reason)}`);
+  }
+
   private async getOrCreateCompletion(
     document: vscode.TextDocument,
     position: vscode.Position,
     token: vscode.CancellationToken,
   ): Promise<{ text: string } | undefined> {
-    const fileName = this.deps.toRelativePath(document.fileName);
+    const fileName = document.fileName;
     const prefix = this.prefixWord(document, position);
     const pos = `${position.line}:${position.character}${prefix ? ' "' + prefix + '"' : ''}`;
     const requestId = `r${++this.requestCounter}`;
@@ -148,18 +161,19 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     } else {
       const cached = this.cachedValue(document, position);
       if (cached !== undefined) {
-        this.deps.debug(`${requestId} completion cached result: ${fileName} @ ${pos} -> ${cached}`);
-        return { text: cached };
+        this.deps.debug(`${requestId} completion cached result: ${fileName} @ ${pos} -> ${cached.text}`);
+        this.deps.debug(`${requestId} completion cache source: doc v${document.version}, cached at v${cached.version} @ ${cached.line}:${cached.character}, age ${Math.round(performance.now() - cached.createdAt)}ms anchored=${cached.anchored}`);
+        return { text: cached.text };
       }
-      this.deps.trace(`${requestId} completion trace: cache miss: ${fileName} @ ${pos}`);
+      this.deps.trace(`${requestId} trace: cache miss: ${fileName} @ ${pos}`);
     }
 
     // Undo/redo back to the request's exact position (same character,
     // different version) means the request's context no longer exists.
     const pendingHere = manual ? undefined : this.pending;
     this.deps.trace(pendingHere
-      ? `${requestId} completion trace: pending ${pendingHere.requestId} found @ ${pendingHere.line}:${pendingHere.positionCharacter} (v${pendingHere.version})`
-      : `${requestId} completion trace: no pending request: ${fileName} @ ${pos}`);
+      ? `${requestId} trace: pending ${pendingHere.requestId} found @ ${pendingHere.line}:${pendingHere.positionCharacter} (v${pendingHere.version})`
+      : `${requestId} trace: no pending request: ${fileName} @ ${pos}`);
     if (
       pendingHere &&
       pendingHere.fileName === document.fileName &&
@@ -177,7 +191,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       const config = this.deps.getConfig();
       const typedOn = position.character > pendingHere.positionCharacter;
       if (typedOn && config.pendingGraceMs <= 0) {
-        this.deps.trace(`${requestId} completion trace: typed past pending ${pendingHere.requestId} position with grace disabled, aborting: ${fileName} @ ${pos}`);
+        this.deps.trace(`${requestId} trace: typed past pending ${pendingHere.requestId} position with grace disabled, aborting: ${fileName} @ ${pos}`);
         pendingHere.abort();
       } else {
         this.deps.statusBar.setBusy(true);
@@ -187,7 +201,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
             sleep(config.pendingGraceMs, token).then(() => GRACE_EXPIRED),
           ]) : await this.awaitRequest(pendingHere.completion, token);
           if (result === GRACE_EXPIRED) {
-            this.deps.trace(`${requestId} completion trace: pending ${pendingHere.requestId} grace expired after ${config.pendingGraceMs}ms, aborting: ${fileName} @ ${pos}`);
+            this.deps.trace(`${requestId} trace: pending ${pendingHere.requestId} grace expired after ${config.pendingGraceMs}ms, aborting: ${fileName} @ ${pos}`);
             pendingHere.abort();
           } else {
             const completion = result as { text?: string; failed?: boolean };
@@ -203,7 +217,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
                 this.deps.debug(`${requestId} completion pending completions ${pendingHere.requestId}: ${fileName} @ ${pendingHere.line}:${pendingHere.positionCharacter}${pendingPrefix ? ' "' + pendingPrefix + '"' : ''} -> ${sliced.result}`);
                 return { text: sliced.result };
               }
-              this.deps.trace(`${requestId} completion trace: typed text diverged from pending ${pendingHere.requestId} completion, requesting afresh: ${fileName} @ ${pos}`);
+              this.deps.trace(`${requestId} trace: typed text diverged from pending ${pendingHere.requestId} completion, requesting afresh: ${fileName} @ ${pos}`);
             } else if (completion.failed) {
               this.deps.debug(`${requestId} completion pending ${pendingHere.requestId} returned failure: ${fileName} @ ${pos}`);
               return undefined;
@@ -231,7 +245,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
         this.deps.debug(`${requestId} completion skipped: auto-trigger is disabled`);
         return undefined;
       }
-      this.deps.trace(`${requestId} completion trace: debouncing for ${config.debounceMs}ms: ${fileName} @ ${pos}`);
+      this.deps.trace(`${requestId} trace: debouncing for ${config.debounceMs}ms: ${fileName} @ ${pos}`);
       try {
         await sleep(config.debounceMs, token);
       } catch (e) {
@@ -244,14 +258,14 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
         this.handleRequestError(e, `${requestId} completion debounce error: ${fileName} @ ${pos}`);
         return undefined;
       }
-      this.deps.trace(`${requestId} completion trace: debounce passed: ${fileName} @ ${pos}`);
+      this.deps.trace(`${requestId} trace: debounce passed: ${fileName} @ ${pos}`);
     }
 
     const controller = new AbortController();
     const cancelSubscription = token.onCancellationRequested(() => {
       // Keep the request briefly pending so fast typing can re-use it.
       if (this.activeRequest && this.activeRequest.controller === controller) {
-        this.deps.trace(`${requestId} completion trace: request moved to pending: ${fileName} @ ${pos}`);
+        this.deps.trace(`${requestId} trace: request moved to pending: ${fileName} @ ${pos}`);
         this.pending = new PendingCompletion(
           document.fileName,
           position.line,
@@ -261,11 +275,11 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
           this.activeRequest.completion,
           controller,
           1000,
-          () => this.deps.trace(`${requestId} completion trace: pending TTL expired, aborting: ${fileName} @ ${position.line}:${position.character}`),
+          () => this.deps.trace(`${requestId} trace: pending TTL expired, aborting: ${fileName} @ ${position.line}:${position.character}`),
         );
         this.activeRequest = undefined;
       } else {
-        this.deps.trace(`${requestId} completion trace: request aborted on cancellation`);
+        this.deps.trace(`${requestId} trace: request aborted on cancellation`);
         controller.abort();
       }
     });
@@ -290,7 +304,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     });
     this.activeRequest = { controller, completion: request };
     this.deps.statusBar.setBusy(true);
-    this.deps.trace(`${requestId} completion trace: sending request to ${this.deps.client.endpoint} (model ${this.deps.client.model}, template ${template.id}): ${fileName} @ ${pos}`);
+    this.deps.trace(`${requestId} trace: sending request to ${this.deps.client.endpoint} (model ${this.deps.client.model}, template ${template.id}): ${fileName} @ ${pos}`);
 
     try {
       const text = await request;
@@ -319,7 +333,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     }
   }
 
-  private cachedValue(document: vscode.TextDocument, position: vscode.Position): string | undefined {
+  private cachedValue(document: vscode.TextDocument, position: vscode.Position): CachedCompletion | undefined {
     const config = this.deps.getConfig();
     if (!config.cacheEnabled) {
       return undefined;
@@ -330,15 +344,18 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     }
     const age = performance.now() - cache.createdAt;
     if (age >= config.cacheTtlMs) {
-      this.deps.trace(`completion trace: cached completion expired after ${Math.round(age)}ms (ttl ${config.cacheTtlMs}ms): ${this.deps.toRelativePath(document.fileName)} @ ${position.line}:${position.character}`);
+      this.deps.trace(`completion trace: cached completion expired after ${Math.round(age)}ms (ttl ${config.cacheTtlMs}ms): ${document.fileName} @ ${position.line}:${position.character}`);
       this.cache = undefined;
       return undefined;
     }
     if (cache.fileName !== document.fileName || cache.line !== position.line) {
       return undefined;
     }
+    if (cache.version === document.version && cache.character === position.character) {
+      return { ...cache, anchored: true };
+    }
     if (cache.version === document.version) {
-      return cache.character === position.character ? cache.text : undefined;
+      return undefined;
     }
     return this.partialCacheHit(document, position, cache);
   }
@@ -353,7 +370,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     document: vscode.TextDocument,
     position: vscode.Position,
     cache: CachedCompletion,
-  ): string | undefined {
+  ): CachedCompletion | undefined {
     if (cache.version === document.version) {
       return undefined;
     }
@@ -369,7 +386,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       createdAt: performance.now(),
       text: sliced.result,
     };
-    return this.cache.text;
+    return this.cache;
   }
 
   /**
