@@ -69,6 +69,25 @@ describe('CompletionsClient.complete', () => {
     expect(result.text).toBe('foo');
   });
 
+  it('skips a leading markdown fence line from instruct models', async () => {
+    const sdk = fakeSdk(async () => stream(['```go\n', 'if x > 0 {']));
+    expect(await complete(clientWith(sdk))).toMatchObject({ text: 'if x > 0 {' });
+  });
+
+  it('skips the fence even when it arrives without a trailing newline in one chunk', async () => {
+    const sdk = fakeSdk(async () => stream(['```go', '\n', 'return a + b']));
+    expect(await complete(clientWith(sdk))).toMatchObject({ text: 'return a + b' });
+  });
+
+  it('returns empty when the completion is only a fence opener', async () => {
+    const sdk = fakeSdk(async () => stream([' ```go']));
+    expect(await complete(clientWith(sdk))).toMatchObject({ text: '' });
+  });
+
+  it('keeps a fence in the middle of the generated text', async () => {
+    const sdk = fakeSdk(async () => stream(['code ```go\n more']));
+    expect(await complete(clientWith(sdk))).toMatchObject({ text: 'code ```go' });
+  });
   it('cuts the text at the first newline', async () => {
     const sdk = fakeSdk(async () => stream(['foo', 'bar\nbaz()', 'more']));
     const result = await complete(clientWith(sdk));

@@ -14,8 +14,8 @@
 // an explicit override also disables the local-build fallback. A downloaded
 // runner records its release in a <binary>.tag sidecar: it is re-downloaded
 // only when that version differs from the expected one.
-import { existsSync, mkdirSync, createWriteStream, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { chmod, rename } from 'node:fs/promises';
+import { existsSync, mkdirSync, createWriteStream, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmod, rename, rm } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { join, dirname } from 'node:path';
@@ -30,7 +30,7 @@ const TARGETS = [
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/win32-x64', releaseDir: 'binaries/ovgenai-release/win32-x64', asset: 'tlc-ovgenai-runner-win32-x64.exe', finalName: 'tlc-ovgenai-runner.exe', hostPlatform: 'win32' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-x64', releaseDir: 'binaries/ovgenai-release/linux-x64', asset: 'tlc-ovgenai-runner-linux-x64', finalName: 'tlc-ovgenai-runner', hostPlatform: 'linux' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-arm64', releaseDir: 'binaries/ovgenai-release/linux-arm64', asset: 'tlc-ovgenai-runner-linux-arm64', finalName: 'tlc-ovgenai-runner' },
-  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin' },
+  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundlesFrom: '.build/release' },
 ];
 
 const githubToken = process.env.GITHUB_TOKEN;
@@ -91,6 +91,25 @@ function localBuild(target) {
   return localBinary;
 }
 
+// SwiftPM puts target resources (MLX default metallib) into <pkg>_<target>.bundle
+// next to the binary in .build/release; without them the runner fails to load Metal.
+async function copyResourceBundles(target, destinationDir) {
+  if (target.bundlesFrom === undefined) {
+    return;
+  }
+  const resourcesDir = join(localRepoDir(target.repo), target.bundlesFrom);
+  if (!existsSync(resourcesDir)) {
+    return;
+  }
+  const { cpSync, readdirSync } = await import('node:fs');
+  for (const entry of readdirSync(resourcesDir)) {
+    if (entry.endsWith('.bundle')) {
+      cpSync(join(resourcesDir, entry), join(destinationDir, entry), { recursive: true });
+      console.log(`copied ${entry} -> ${destinationDir}`);
+    }
+  }
+}
+
 const assetsByRepo = new Map();
 // A recorded release tag means the binary came from a GitHub release; 'local'
 // or no tag means a local build (packaging keeps it, --release always wants
@@ -116,10 +135,14 @@ for (const target of TARGETS) {
   mkdirSync(dir, { recursive: true });
   const localBinary = localBuild(target);
   if (localBinary !== undefined) {
+    // Replacing in place can leave macOS with a stale-mapped binary it then
+    // SIGKILLs on exec; remove first.
+    rmSync(destination, { force: true });
     copyFileSync(localBinary, destination);
     if (process.platform !== 'win32') {
       await chmod(destination, 0o755);
     }
+    await copyResourceBundles(target, dirname(destination));
     writeTag(destination, 'local');
     console.log(`copied ${destination}`);
     continue;
@@ -149,9 +172,21 @@ for (const target of TARGETS) {
     process.exit(1);
   }
   console.log(`fetching ${target.asset} from ${OWNER}/${target.repo} release ${expected ?? 'latest'}…`);
-  await download(asset.browser_download_url, destination);
-  if (process.platform !== 'win32') {
+  if (target.asset.endsWith('.tar.gz')) {
+    // The archive carries the binary plus the SwiftPM resource bundles
+    // (metallib); tar preserves the executable bit on extraction.
+    await download(asset.browser_download_url, `${destination}.tar.gz`);
+    const extract = spawnSync('tar', ['-xzf', `${destination}.tar.gz`, '-C', dir], { stdio: 'inherit' });
+    if (extract.status !== 0) {
+      process.exit(extract.status ?? 1);
+    }
     await chmod(destination, 0o755);
+    await rm(`${destination}.tar.gz`, { force: true });
+  } else {
+    await download(asset.browser_download_url, destination);
+    if (process.platform !== 'win32') {
+      await chmod(destination, 0o755);
+    }
   }
   writeTag(destination, expected ?? 'latest');
   console.log(`fetched ${destination}`);

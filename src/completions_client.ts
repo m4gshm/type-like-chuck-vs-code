@@ -230,6 +230,7 @@ export class CompletionsClient {
     let done = false;
     let loopDetected = false;
     let chunksSeen = 0;
+    let fenceSkipped = false;
     for await (const chunk of chunks) {
       chunksSeen++;
       const chunkText = chunk.choices[0]?.text ?? '';
@@ -260,6 +261,13 @@ export class CompletionsClient {
         }
         const newlineAt = text.match(/[\r\n]/);
         if (newlineAt && newlineAt.index !== undefined) {
+          // Instruct models often open with a markdown fence (```go);
+          // skip that line and complete from the following one.
+          if (!fenceSkipped && isMarkdownFenceOpener(text.slice(0, newlineAt.index))) {
+            fenceSkipped = true;
+            text = text.slice(newlineAt.index + 1);
+            continue;
+          }
           text = text.slice(0, newlineAt.index);
           done = true;
           break;
@@ -268,6 +276,9 @@ export class CompletionsClient {
     }
     if (!done && !loopDetected && !signal.aborted) {
       text = truncateToLine(text).text;
+    }
+    if (!fenceSkipped && isMarkdownFenceOpener(text)) {
+      text = '';
     }
     // Template tags must never leak into the insertion.
     for (const token of template.reservedTokens) {
@@ -283,7 +294,14 @@ export class CompletionsClient {
 }
 
 export function isAbortError(err: unknown): boolean {
-  return err instanceof Error && err.name === 'AbortError';
+  return err instanceof Error ? err.name === 'AbortError' : false;
+}
+
+const MARKDOWN_FENCE_OPENER = /^\s*(```|~~~)[A-Za-z0-9_+#.:-]*\s*$/;
+
+/** A lone ```lang / ~~~lang line: instruct models open FIM answers with it. */
+export function isMarkdownFenceOpener(line: string): boolean {
+  return MARKDOWN_FENCE_OPENER.test(line);
 }
 
 export function messageOf(err: unknown): string {

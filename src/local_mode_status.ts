@@ -55,8 +55,8 @@ export class LocalModeStatusUi {
         this.host.client.setStdioSource((prompt, maxTokens, stop, signal) => runner.stream(prompt, maxTokens, stop, signal));
         this.host.client.setModelLabel(status.model);
         this.host.statusBar.setEngine(undefined);
-        this.host.statusBar.setEngineDetail(`${status.model} (${status.device})`);
-        this.host.log.info(`${BRAND} local engine ready: ${this.host.engineKind()} runner model=${status.modelPath} device=${status.device}`);
+        this.host.statusBar.setEngineDetail(status.device !== undefined ? `${status.model} (${status.device})` : status.model);
+        this.host.log.info(`${BRAND} local engine ready: ${this.host.engineKind()} runner model=${status.modelPath}${status.device !== undefined ? ` device=${status.device}` : ''}`);
         this.host.watchdog.reportSuccess();
       } else {
         this.host.setEndpoint(status.baseUrl);
@@ -64,8 +64,8 @@ export class LocalModeStatusUi {
         void this.host.client.setApiKey(status.apiKey);
         this.host.watchdog.reportSuccess();
         this.host.statusBar.setEngine(undefined);
-        this.host.statusBar.setEngineDetail(`${status.model} (${status.device})`);
-        this.host.log.info(`${BRAND} local engine ready: ${status.baseUrl} model=${status.modelPath} device=${status.device} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
+        this.host.statusBar.setEngineDetail(status.device !== undefined ? `${status.model} (${status.device})` : status.model);
+        this.host.log.info(`${BRAND} local engine ready: ${status.baseUrl} model=${status.modelPath}${status.device !== undefined ? ` device=${status.device}` : ''} key=${status.apiKey ?? '(none — key authentication disabled)'}`);
       }
     } else if (status.status === ENGINE_STATUS.error) {
       this.host.client.setStdioSource(undefined);

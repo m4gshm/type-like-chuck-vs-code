@@ -34,7 +34,7 @@ export type EngineStatus =
   | { status: typeof ENGINE_STATUS.preparingEngine }
   | { status: typeof ENGINE_STATUS.preparingModel }
   | { status: typeof ENGINE_STATUS.starting; /** Only the NPU compiles the model graph; the hint is shown just for it. */ npuCompile?: boolean }
-  | { status: typeof ENGINE_STATUS.ready; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device: LocalDevice }
+  | { status: typeof ENGINE_STATUS.ready; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device?: LocalDevice }
   | { status: typeof ENGINE_STATUS.error; message: string };
 
 /** The running ovgenai stdio runner exposed for the completions transport. */
@@ -105,8 +105,6 @@ export interface EngineManagerHost extends RunnerDeps {
 
 export class EngineManager {
   private engine: RunningLocalEngine | undefined;
-  private runningModel: string | undefined;
-  private runningDevice: LocalDevice | undefined;
   private startPromise: Promise<EngineStatus> | undefined;
   private crashTimes: number[] = [];
   /** The model-download question is asked once per start: device-fallback retries must not re-ask. */
@@ -121,8 +119,6 @@ export class EngineManager {
       return;
     }
     this.engine = undefined;
-    this.runningModel = undefined;
-    this.runningDevice = undefined;
     const now = Date.now();
     this.crashTimes = this.crashTimes.filter((t) => now - t < 60_000);
     this.crashTimes.push(now);
@@ -134,29 +130,6 @@ export class EngineManager {
     void this.ensureReady().catch(() => undefined);
   };
 
-  current(): EngineStatus {
-    if (this.engine !== undefined && this.runningModel !== undefined && this.runningDevice !== undefined) {
-      if (isStdioRunner(this.engine)) {
-        return {
-          status: 'ready',
-          baseUrl: '',
-          apiKey: undefined,
-          model: this.runningModel,
-          modelPath: this.engine.modelPath,
-          device: this.runningDevice,
-        };
-      }
-      return {
-        status: 'ready',
-        baseUrl: this.engine.baseUrl,
-        apiKey: this.engine.apiKey,
-        model: this.runningModel,
-        modelPath: this.engine.modelPath,
-        device: this.runningDevice,
-      };
-    }
-    return { status: ENGINE_STATUS.notInstalled };
-  }
 
   /**
    * Makes sure the engine and model are present and the server is running
@@ -178,8 +151,6 @@ export class EngineManager {
   async stop(): Promise<void> {
     const engine = this.engine;
     this.engine = undefined;
-    this.runningModel = undefined;
-    this.runningDevice = undefined;
     await engine?.stop();
   }
 
@@ -293,8 +264,6 @@ export class EngineManager {
         this.host.notify(`${BRAND}: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
       }
       this.engine = engine;
-      this.runningModel = settings.modelId;
-      this.runningDevice = activeDevice;
       const status: EngineStatus = {
         status: 'ready',
         baseUrl: engine.baseUrl,
@@ -412,8 +381,6 @@ export class EngineManager {
       this.host.notify(`${BRAND}: started on ${activeDevice.toUpperCase()} — ${failed} unavailable (${reasons})`);
     }
     this.engine = runner;
-    this.runningModel = settings.modelId;
-    this.runningDevice = activeDevice;
     const status: EngineStatus = {
       status: 'ready',
       // The stdio runner has no HTTP endpoint; completions go through
@@ -462,15 +429,12 @@ export class EngineManager {
       this.host,
     );
     this.engine = runner;
-    this.runningModel = settings.modelId;
-    this.runningDevice = 'gpu';
     const status: EngineStatus = {
       status: 'ready',
       baseUrl: '',
       apiKey: undefined,
       model: settings.modelId,
       modelPath,
-      device: 'gpu',
     };
     this.host.onStatus(status);
     return status;

@@ -28,6 +28,27 @@ export class InlineCompletionItem {
   ) {}
 }
 
+export class CodeActionKind {
+  static readonly QuickFix = new CodeActionKind('quickfix');
+  constructor(readonly value: string) {}
+}
+
+export class WorkspaceEdit {
+  readonly edits: Array<{ uri: unknown; position: Position; insert: string }> = [];
+  insert(uri: unknown, position: Position, insert: string): void {
+    this.edits.push({ uri, position, insert });
+  }
+}
+
+export class CodeAction {
+  edit?: WorkspaceEdit;
+  isPreferred?: boolean;
+  constructor(
+    readonly title: string,
+    readonly kind: CodeActionKind,
+  ) {}
+}
+
 export class CancellationError extends Error {
   constructor() {
     super('Cancelled');

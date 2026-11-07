@@ -12,6 +12,7 @@ const makeHost = () => {
     stages: [] as string[],
     stdioSet: [] as Array<unknown>,
     apiKeys: [] as Array<string | undefined>,
+    logs: [] as string[],
     successes: 0,
   };
   const host = {
@@ -35,7 +36,7 @@ const makeHost = () => {
     modelLabel: () => 'Qwen2.5-Coder 1.5B',
     setEndpoint: (url: string | undefined) => recorded.endpoint.push(url),
     stage: (label: string) => recorded.stages.push(label),
-    log: { info: () => undefined, warn: () => undefined },
+    log: { info: (m: string) => recorded.logs.push(m), warn: () => undefined },
   };
   const ui = new LocalModeStatusUi(host as never);
   return { ui, recorded, setRunner: (r: typeof runner) => { runner = r; } };
@@ -59,6 +60,14 @@ describe('LocalModeStatusUi', () => {
     expect(recorded.endpoint).toEqual(['http://127.0.0.1:9/v1']);
     expect(recorded.stdioSet).toEqual([]);
     expect(recorded.apiKeys).toEqual([undefined]);
+  });
+
+  it('omits the device from the detail and ready log when the engine reports none (mlx)', () => {
+    const { ui, recorded, setRunner } = makeHost();
+    setRunner({ stream: async function* () { yield 'x'; } });
+    ui.handle({ status: 'ready', model: 'm', modelPath: '/p', baseUrl: '', apiKey: undefined });
+    expect(recorded.details.at(-1)).toBe('m');
+    expect(recorded.logs.at(-1)).toBe('Type like Chuck local engine ready: llama.cpp runner model=/p');
   });
 
   it('blocks completions and points at a dead endpoint on error', () => {

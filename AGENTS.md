@@ -99,6 +99,11 @@ that change's delta specs. Key invariants:
   (priority is resolved in `effectiveApiKey`/`syncApiKey` in `extension.ts`).
 - Suggestions are single-line: truncate at the first newline and strip reserved
   tokens; they must never leak into the inserted text.
+- Suggestions duplicating the line right below the cursor are suppressed; a
+  suggestion that mostly re-states it (`partialLineDelta`, ≥60% shared prefix on
+  both sides) is suppressed too and surfaced as a quick fix (PartialLineCodeActions)
+  that inserts the difference into that line via WorkspaceEdit. The candidate is
+  per-document-version: any edit invalidates it.
 
 ## Conventions
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overlapLength, seamOverlap, trailingOverlapLength } from '../../overlap';
+import { duplicatesFollowingLine, lineAfterCursor, overlapLength, partialLineDelta, seamOverlap, trailingOverlapLength } from '../../overlap';
 
 describe('overlapLength', () => {
   it('returns 0 when nothing matches', () => {
@@ -75,5 +75,53 @@ describe('seamOverlap', () => {
   it('keeps the strict result when whitespace absorption does not help', () => {
     expect(seamOverlap(' = 1; // done', ' = 1;')).toEqual({ replaceCount: 5, insert: ' = 1; // done', duplicate: false });
     expect(seamOverlap('foo', 'bar')).toEqual({ replaceCount: 0, insert: 'foo', duplicate: false });
+  });
+});
+
+describe('lineAfterCursor', () => {
+  it('returns the line following the cursor line', () => {
+    expect(lineAfterCursor('a\nbc\nd', 0)).toBe('bc');
+    expect(lineAfterCursor('a\nbc\nd', 2)).toBe('d');
+  });
+
+  it('returns the last line when the cursor is on it', () => {
+    expect(lineAfterCursor('a\nbc', 1)).toBe('bc');
+    expect(lineAfterCursor('ab', 0)).toBe('');
+  });
+});
+
+describe('duplicatesFollowingLine', () => {
+  it('detects a repeated line ignoring indentation', () => {
+    expect(duplicatesFollowingLine('\tentities = []', '\tentities = []')).toBe(true);
+    expect(duplicatesFollowingLine('  x = 1', '\tx = 1')).toBe(true);
+  });
+
+  it('does not fire on different or empty suggestions', () => {
+    expect(duplicatesFollowingLine('x = 1', 'x = 2')).toBe(false);
+    expect(duplicatesFollowingLine('   ', 'x')).toBe(false);
+    expect(duplicatesFollowingLine('x = 1', '')).toBe(false);
+  });
+});
+
+describe('partialLineDelta', () => {
+  it('returns the completion remainder when the next line is mostly restated', () => {
+    expect(partialLineDelta(
+      '\tentities = []*entity{&first, &second, &third, &fourth}',
+      '\tentities = []*entity{&first, &second, &third}',
+    )).toEqual({ prefixLength: 44, insert: ', &fourth}' });
+  });
+
+  it('accepts the next line as a strict prefix of the completion', () => {
+    expect(partialLineDelta('return a + b // sum', 'return a + b')).toEqual({ prefixLength: 12, insert: ' // sum' });
+  });
+
+  it('rejects short accidental common prefixes', () => {
+    expect(partialLineDelta('\tfoo = computeBar()', '\tbaz = computeQux()')).toBeUndefined();
+  });
+
+  it('rejects exact and empty matches', () => {
+    expect(partialLineDelta('\tx = 1', '\tx = 1')).toBeUndefined();
+    expect(partialLineDelta('x = 1', '')).toBeUndefined();
+    expect(partialLineDelta('', 'x = 1')).toBeUndefined();
   });
 });

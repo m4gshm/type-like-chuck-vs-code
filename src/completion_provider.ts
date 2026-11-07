@@ -6,7 +6,8 @@ import { PendingCompletion } from './pending_completion';
 import { CompletionState } from './completion_state';
 import { StatusBar } from './status_bar';
 import { ResolvedTemplates } from './templates';
-import { seamOverlap, trailingOverlapLength } from './overlap';
+import { duplicatesFollowingLine, lineAfterCursor, partialLineDelta, seamOverlap, trailingOverlapLength } from './overlap';
+import { PartialLineActionStore } from './partial_line_action';
 
 /** Connection-failure coalescing the provider reports to (see ConnectionWatchdog). */
 export interface ConnectionWatchdogLike {
@@ -25,6 +26,7 @@ export interface ProviderDeps {
   debug: (message: string) => void;
   trace: (message: string) => void;
   error: (message: string, err: unknown) => void;
+  partialLineActions: PartialLineActionStore;
 }
 
 interface CachedCompletion {
@@ -107,12 +109,13 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     // Fully overlapping suggestions are useless; partial overlaps must replace
     // the duplicated characters instead of doubling them.
     const offset = document.offsetAt(position);
+    const docText = document.getText();
     // Compare with the rest of the current line only: crossing the newline
     // treats the next line's indentation + first word as a phantom overlap
     // (e.g. `entity{...}` after `entit` from `entities` on the next line) and
     // turns a plain insertion into a multi-line replacement, which VS Code
     // then refuses to render.
-    const following = document.getText().slice(offset, offset + completion.text.length).split('\n', 1)[0];
+    const following = docText.slice(offset, offset + completion.text.length).split('\n', 1)[0];
     // The model may continue its generation into the suffix: trim the tail
     // duplicating the text after the cursor before the overlap handling.
     const tailOverlap = trailingOverlapLength(completion.text, following);
@@ -126,6 +129,31 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     const seam = seamOverlap(text, following);
     if (seam.duplicate) {
       this.deps.debug('completion skipped: completion duplicates the existing text after the cursor');
+      return [];
+    }
+    // The seam cannot see past the end of the cursor's line: a suggestion
+    // repeating the line right below would insert a duplicate.
+    if (duplicatesFollowingLine(seam.insert, lineAfterCursor(docText, offset))) {
+      this.deps.debug('completion skipped: completion duplicates the line below the cursor');
+      return [];
+    }
+    // A suggestion that mostly re-states the line right below the cursor is
+    // worthless at the cursor; surface the difference as a code action
+    // inserting it into that line instead.
+    const nextLine = lineAfterCursor(docText, offset);
+    const partial = partialLineDelta(seam.insert, nextLine);
+    if (partial !== undefined) {
+      const leadingWhitespace = nextLine.length - nextLine.trimStart().length;
+      this.deps.partialLineActions.set({
+        fileName: document.fileName,
+        documentVersion: document.version,
+        line: position.line + 1,
+        character: leadingWhitespace + partial.prefixLength,
+        insert: partial.insert,
+        completion: seam.insert,
+      });
+      const matched = Math.round((100 * partial.prefixLength) / seam.insert.trim().length);
+      this.deps.debug(`completion suppressed: ${matched}% matches line ${position.line + 2} — offered as a code action`);
       return [];
     }
     const range =

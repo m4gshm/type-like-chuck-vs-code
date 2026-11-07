@@ -4,7 +4,7 @@
 // (downloaded from the pinned release or built earlier); pass --build (or set
 // SYNC_RUNNER_BUILD=1) to rebuild the backend repo and copy the fresh binary
 // — for testing backend changes over F5.
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const TARGETS = [
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/win32-x64', asset: 'tlc-ovgenai-runner-win32-x64.exe', finalName: 'tlc-ovgenai-runner.exe', platform: 'win32' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-x64', asset: 'tlc-ovgenai-runner-linux-x64', finalName: 'tlc-ovgenai-runner', platform: 'linux' },
-  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64', finalName: 'tlc-mlx-runner', platform: 'darwin' },
+  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64', finalName: 'tlc-mlx-runner', platform: 'darwin', bundlesFrom: '.build/release' },
 ];
 
 const target = TARGETS.find((t) => t.platform === process.platform);
@@ -53,6 +53,9 @@ mkdirSync(dirname(destination), { recursive: true });
 // The source exe was just linked/used and may be briefly locked; retry.
 for (let attempt = 1; ; attempt++) {
   try {
+    // Replacing in place can leave macOS with a stale-mapped binary it then
+    // SIGKILLs on exec; remove first.
+    rmSync(destination, { force: true });
     copyFileSync(built, destination);
     break;
   } catch (error) {
@@ -63,3 +66,18 @@ for (let attempt = 1; ; attempt++) {
   }
 }
 console.log(`Copied ${built} -> ${destination}`);
+
+// SwiftPM puts target resources (MLX default metallib) into <pkg>_<target>.bundle
+// next to the binary in .build/release; without them the runner fails to load Metal.
+if (target.bundlesFrom !== undefined) {
+  const resourcesDir = join(backendRoot, target.bundlesFrom);
+  if (existsSync(resourcesDir)) {
+    const { cpSync, readdirSync } = await import('node:fs');
+    for (const entry of readdirSync(resourcesDir)) {
+      if (entry.endsWith('.bundle')) {
+        cpSync(join(resourcesDir, entry), join(dirname(destination), entry), { recursive: true });
+        console.log(`Copied ${entry} -> ${target.dir}`);
+      }
+    }
+  }
+}

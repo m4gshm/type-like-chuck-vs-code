@@ -3,6 +3,8 @@ import { readConfig, ExtensionConfig } from './config';
 import { ApiKeyStorage } from './api_key_storage';
 import { CompletionsClient, ModelInfo } from './completions_client';
 import { CompletionProvider } from './completion_provider';
+import { PartialLineCodeActions } from './completion_code_actions';
+import { PartialLineActionStore } from './partial_line_action';
 import { CompletionState } from './completion_state';
 import { ForbiddenFiles } from './forbidden_files';
 import { ModelConfig } from './model_config';
@@ -314,6 +316,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
   let previousEnginePaths: ReturnType<typeof enginePaths> | undefined;
+  const partialLineActions = new PartialLineActionStore();
 
   const complectionProvider = new CompletionProvider({
     client,
@@ -327,6 +330,7 @@ export function activate(context: vscode.ExtensionContext): void {
     debug: debug,
     trace: trace,
     error: error,
+    partialLineActions,
   });
 
   /**
@@ -370,6 +374,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const selector: vscode.DocumentSelector = { pattern: '**' };
   const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, complectionProvider);
+  const codeActionRegistration = vscode.languages.registerCodeActionsProvider(selector, new PartialLineCodeActions(partialLineActions), {
+    providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+  });
 
   const commandDeps: TlcCommandDeps = {
     extensionPath: context.extensionPath,
@@ -395,6 +402,7 @@ export function activate(context: vscode.ExtensionContext): void {
     output,
     statusBar,
     providerRegistration,
+    codeActionRegistration,
     ...registerTlcCommands(commandDeps),
   );
 
@@ -611,9 +619,10 @@ export function activate(context: vscode.ExtensionContext): void {
       // host). The engine-status ready branch lifts the block.
       complectionState.setConnectionBlocked(true);
       statusBar.setConnectionReason('starting…');
-      // Log the effective selection; the actual device (auto resolution and
-      // fallbacks) is reported by the ready line once the engine is up.
-      info(`${BRAND} local engine: kind=${config().localEngineKind} device=${config().localDevice} model=${config().localModel}.`);
+      // The actual model (download picker may change it) and device (auto
+      // resolution and fallbacks) are reported by the ready line once the
+      // engine is up.
+      info(`${BRAND} local engine: kind=${config().localEngineKind} device=${config().localDevice}.`);
       void applyMode();
       return;
     }

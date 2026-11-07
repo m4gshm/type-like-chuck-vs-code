@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompletionProvider, ProviderDeps } from '../../completion_provider';
+import { PartialLineActionStore } from '../../partial_line_action';
 import { CompletionError } from '../../completions_client';
 import { buildTemplateRegistry } from '../../templates';
 import { ForbiddenFiles } from '../../forbidden_files';
@@ -93,6 +94,7 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
     debug: () => undefined,
     trace: () => undefined,
     error: () => undefined,
+    partialLineActions: new PartialLineActionStore(),
   };
   return { deps, calls: () => callCount };
 }
@@ -440,6 +442,35 @@ describe('CompletionProvider', () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(await result).toHaveLength(0);
     expect(calls()).toBe(1);
+  });
+
+  it('drops a completion that repeats the line below the cursor', async () => {
+    const { deps } = makeDeps(async () => ({ text: '\tentities = []*entity{&first}' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['\t}', '\tentities = []*entity{&first}']);
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 2) as never, {} as never, new FakeToken() as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(0);
+  });
+
+  it('suppresses a completion that mostly extends the next line and stores a code action candidate', async () => {
+    const { deps } = makeDeps(async () => ({ text: '\tentities = []*entity{&first, &second, &third, &fourth}' }));
+    const provider = new CompletionProvider(deps);
+    const doc = fakeDocument(['\t}', '\tentities = []*entity{&first, &second, &third}']);
+
+    const result = provider.provideInlineCompletionItems(doc as never, new Position(0, 2) as never, {} as never, new FakeToken() as never);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(await result).toHaveLength(0);
+    const candidate = deps.partialLineActions.get('main.ts', doc.version);
+    expect(candidate).toEqual({
+      fileName: 'main.ts',
+      documentVersion: doc.version,
+      line: 1,
+      character: 45,
+      insert: ', &fourth}',
+      completion: '\tentities = []*entity{&first, &second, &third, &fourth}',
+    });
   });
 
   it('replaces the whitespace-shifted seam when the completion extends the match', async () => {

@@ -62,7 +62,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const engineRoot = join(root, 'engine');
   await mkdir(modelDir, { recursive: true });
   await mkdir(engineRoot, { recursive: true });
-  const modelPath = join(modelDir, 'mlx-community', 'Qwen2.5-Coder-1.5B-Instruct-4bit');
+  const modelPath = join(modelDir, 'mlx-community', 'Qwen2.5-Coder-1.5B-4bit');
   await mkdir(modelPath, { recursive: true });
   for (const file of MLX_FILES) {
     await writeFile(join(modelPath, file), 'data');
@@ -104,9 +104,11 @@ describe('EngineManager (mlx engine)', () => {
     const f = await makeFixture();
     const manager = new EngineManager(f.host);
     const status = await manager.ensureReady();
-    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 1.5B', device: 'gpu', baseUrl: '', apiKey: undefined });
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 1.5B', baseUrl: '', apiKey: undefined });
+    expect('device' in status).toBe(false);
     expect(f.downloads).toHaveLength(0);
-    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('Qwen2.5-Coder-1.5B-Instruct-4bit'), '--ctx', '32768']);    expect(f.spawned[0].args).not.toContain('--device');
+    expect(f.spawned[0].args).toEqual(['--model', expect.stringContaining('Qwen2.5-Coder-1.5B-4bit'), '--ctx', '32768']);
+    expect(f.spawned[0].args).not.toContain('--device');
     expect(manager.stdioRunner()).toBeDefined();
     await manager.stop();
   });
@@ -123,7 +125,7 @@ describe('EngineManager (mlx engine)', () => {
     const manager = new EngineManager(f.host);
     await manager.ensureReady();
     expect(f.downloads.length).toBeGreaterThan(0);
-    expect(f.downloads[0].url).toContain('mlx-community/Qwen2.5-Coder-0.5B-Instruct-4bit/resolve/main/');
+    expect(f.downloads[0].url).toContain('mlx-community/Qwen2.5-Coder-0.5B-4bit/resolve/main/');
     await manager.stop();
   });
 
@@ -133,11 +135,11 @@ describe('EngineManager (mlx engine)', () => {
     await manager.ensureReady();
     const downloadsBefore = f.downloads.length;
     const { rmSync } = await import('fs');
-    rmSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-Instruct-4bit'), { recursive: true, force: true });
+    rmSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-4bit'), { recursive: true, force: true });
     await manager.reset('model');
     expect(f.downloads.length).toBeGreaterThan(downloadsBefore);
     const { existsSync } = await import('fs');
-    expect(existsSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-Instruct-4bit', 'model.safetensors'))).toBe(true);
+    expect(existsSync(join(f.root, 'models', 'mlx-community', 'Qwen2.5-Coder-0.5B-4bit', 'model.safetensors'))).toBe(true);
     await manager.stop();
   });
 
@@ -161,7 +163,7 @@ describe('EngineManager (mlx engine)', () => {
     expect(pickedModels).toEqual(['Qwen2.5-Coder 0.5B']);
     expect(persisted).toEqual(['Qwen2.5-Coder 3B']);
     expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 3B' });
-    expect(f.downloads.every((d) => d.url.includes('Qwen2.5-Coder-3B-Instruct-4bit'))).toBe(true);
+    expect(f.downloads.every((d) => d.url.includes('Qwen2.5-Coder-3B-4bit'))).toBe(true);
     expect(f.downloads.some((d) => d.url.includes('Qwen2.5-Coder-0.5B'))).toBe(false);
     await manager.stop();
   });
