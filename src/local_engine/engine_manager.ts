@@ -49,6 +49,9 @@ export type ResetTarget = 'engine' | 'model' | 'cache';
 // unknown; this matches the catalog models' window.
 const CUSTOM_MODEL_CONTEXT_LENGTH = 32_768;
 
+/** Restarts a hung NPU compile: 30 min without any stderr output. */
+const NPU_READY_IDLE_TIMEOUT_MS = 30 * 60_000;
+
 export interface EngineManagerSettings {
   modelId: string;
   device: LocalDevice;
@@ -351,9 +354,11 @@ export class EngineManager {
             // device-specific (incompatible blobs) — one folder per device.
             props: activeDevice === 'npu' || activeDevice === 'gpu' ? { CACHE_DIR: join(paths.modelCacheDir, `${activeDevice}-blobs`) } : undefined,
             signal: this.activeSignal,
-            // First NPU start compiles the graph, which can take unbounded
-            // time; a dead runner is still detected via the exit check.
-            readyTimeoutMs: activeDevice === 'npu' ? Number.POSITIVE_INFINITY : undefined,
+            // NPU watcher: a graph compile can take unbounded wall time, so
+            // re-arm on each stderr line instead; 30 min of silence means a
+            // hung compiler pass. A dead runner is still detected via the
+            // exit check.
+            readyIdleTimeoutMs: activeDevice === 'npu' ? NPU_READY_IDLE_TIMEOUT_MS : undefined,
             libraryDirs,
             onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
             onStderr: (line) => this.host.log(`ovgenai: ${line}`),

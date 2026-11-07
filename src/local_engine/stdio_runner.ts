@@ -15,6 +15,12 @@ export interface StdioRunnerStartOptions {
   libraryDirs?: string[];
   /** Ready-wait limit; Infinity waits forever (NPU graph compilation can take unbounded time). */
   readyTimeoutMs?: number;
+  /**
+   * Ready-wait idle limit: re-armed on every stderr line, so only a silent
+   * runner trips it (a hung compiler pass); use instead of a wall-clock
+   * readyTimeoutMs when compilation time is unbounded.
+   */
+  readyIdleTimeoutMs?: number;
   /** Cancels the ready wait: the child is killed and the start rejects with AbortError. */
   signal?: AbortSignal;
   onUnexpectedExit?: (message: string) => void;
@@ -144,11 +150,13 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     resolve: (result: GenerateResult) => void;
     reject: (err: Error) => void;
   }>();
+  const progressListeners: Array<() => void> = [];
   const lines = createInterface({ input: child.stdout! });
   lines.on('line', handleLine);
   child.stderr?.on('data', (chunk: string) => {
     for (const line of chunk.split('\n')) {
       if (line.length > 0) {
+        progressListeners.forEach((fn) => fn());
         options.onStderr?.(line);
       }
     }
@@ -168,8 +176,7 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     requests.clear();
   });
 
-  const readyInfo = await waitForReady(options.readyTimeoutMs ?? 600_000, options.signal);
-
+  const readyInfo = await waitForReady(options.readyTimeoutMs ?? 600_000, options.readyIdleTimeoutMs, options.signal);
   function handleLine(line: string): void {
     if (line.length === 0) {
       return;
@@ -206,12 +213,31 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     }
   }
 
-  function waitForReady(timeoutMs: number, signal?: AbortSignal): Promise<{ model: string; device: string; ctx: number }> {
+  function waitForReady(timeoutMs: number, idleTimeoutMs: number | undefined, signal: AbortSignal | undefined): Promise<{ model: string; device: string; ctx: number }> {
     return new Promise((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const armIdle: (() => void) | undefined = idleTimeoutMs === undefined
+        ? undefined
+        : () => {
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+              cleanup();
+              child.kill();
+              reject(new Error(`${label} runner produced no output for ${idleTimeoutMs} ms during startup`));
+            }, idleTimeoutMs);
+          };
       const cleanup = (): void => {
         clearInterval(checkDead);
         clearTimeout(timer);
+        clearTimeout(idleTimer);
         lines.off('line', onLine);
+        if (armIdle) {
+          const at = progressListeners.indexOf(armIdle);
+          if (at >= 0) {
+            progressListeners.splice(at, 1);
+          }
+        }
         signal?.removeEventListener('abort', onAbort);
       };
       const onAbort = (): void => {
@@ -219,7 +245,11 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
         child.kill();
         reject(new DOMException('Canceled', 'AbortError'));
       };
-      const timer = Number.isFinite(timeoutMs)
+      if (armIdle) {
+        progressListeners.push(armIdle);
+        armIdle();
+      }
+      timer = Number.isFinite(timeoutMs)
         ? setTimeout(() => {
             cleanup();
             reject(new Error(`${label} runner did not become ready in time`));

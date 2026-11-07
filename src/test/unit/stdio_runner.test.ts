@@ -101,6 +101,42 @@ describe('startStdioRunner', () => {
     await runner.stop();
   });
 
+  it('rejects and kills the child after the idle timeout without stderr output', async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeChild[] = [];
+      const child = new FakeChild([], {});
+      children.push(child);
+      const start = startStdioRunner(baseOptions({ readyIdleTimeoutMs: 100 }), { spawnImpl: (() => child) as never });
+      const expectation = expect(start).rejects.toThrow('produced no output for 100 ms');
+      await vi.advanceTimersByTimeAsync(100);
+      await expectation;
+      expect(child.killed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('re-arms the idle timeout on stderr lines and resolves ready with a slow compile', async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeChild[] = [];
+      const child = new FakeChild([], {});
+      children.push(child);
+      const start = startStdioRunner(baseOptions({ readyIdleTimeoutMs: 100 }), { spawnImpl: (() => child) as never });
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(60);
+        child.stderr.write(`compiling pass ${i}\n`);
+      }
+      await vi.advanceTimersByTimeAsync(60);
+      child.emitLine({ type: 'ready', model: 'm', device: 'NPU', ctx: 8192 });
+      const runner = await start;
+      expect(runner.device).toBe('NPU');
+      expect(child.killed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects when the process dies before becoming ready', async () => {
     const children: FakeChild[] = [];
     const spawn = (_cmd: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {

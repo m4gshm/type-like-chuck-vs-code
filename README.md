@@ -55,7 +55,7 @@ All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*
 
 Both native runners — the OpenVINO GenAI runner ([type-like-chuck-backed-openvino](https://github.com/m4gshm/type-like-chuck-backed-openvino)) and the MLX runner ([type-like-chuck-backed-mlx](https://github.com/m4gshm/type-like-chuck-backed-mlx)) — speak the same NDJSON stdio protocol; each README documents its runner-specific spawn options.
 
-The extension spawns `tlc-ovgenai-runner --model <dir> --device CPU|GPU|NPU [--ctx N] [--prop KEY=VALUE ...]` or `tlc-mlx-runner --model <dir> [--ctx N]` and exchanges newline-delimited JSON over stdin/stdout.
+The extension spawns `tlc-ovgenai-runner --model <dir> --device CPU|GPU|NPU [--ctx N] [--prop KEY=VALUE ...]` or `tlc-mlx-runner --model <dir> [--ctx N]` and exchanges newline-delimited JSON over stdin/stdout. On GPU/CPU a start that does not reach `ready` in 10 minutes fails; on NPU there is no wall-clock limit (the first graph compilation can take tens of minutes), but a silent runner produces no compiler output — 30 minutes of stderr silence kills the runner and falls through the device chain.
 
 Events on stdout (one JSON object per line):
 - `{"type":"version","app":"..."}` in response to `--version` (exit 0, no model load);
