@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Defines fill-in-the-middle (FIM) prompt templates that structure the completion prompt for different model families, including built-in templates (qwen2.5, qwen3, lfm2, mellum) and user-defined custom templates.
+Defines fill-in-the-middle (FIM) prompt templates that structure the completion prompt for different model families, including built-in templates (qwen2.5, qwen3, mellum) and user-defined custom templates.
 
 ## ADDED Requirements
 
 ### Requirement: Built-in FIM templates
-The extension SHALL ship with built-in FIM templates for the qwen2.5, qwen3, lfm2, and mellum model families, each defining its reserved tokens (used as stop sequences) and the rendered prompt for a given prefix/suffix pair. The selected template SHALL be configurable via settings.
+The extension SHALL ship with built-in FIM templates for the qwen2.5, qwen3, and mellum model families, each defining its reserved tokens (used as stop sequences) and the rendered prompt for a given prefix/suffix pair. The selected template SHALL be configurable via settings.
 
 #### Scenario: Select a built-in template
 - **WHEN** the user sets the template setting to `qwen3`

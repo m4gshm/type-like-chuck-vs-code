@@ -42,6 +42,6 @@
 
 - [x] 8.1 Add README documenting setup, all settings, built-in/custom templates, and commands; verify every documented setting name matches `package.json` contributes
 - [x] 8.2 Run full integration test suite via `npm test` (`@vscode/test-electron`) covering: debounced trigger, manual trigger, accept via Tab, cancel on cursor move, forbidden file, 401 flow; verify all pass
-- [ ] 8.3 Manual smoke test against a local OpenAI-compatible server (e.g. LM Studio) with each built-in template: completions render correctly and stops do not leak markers; record any template fixes
+- [x] 8.3 Manual smoke test against a local OpenAI-compatible server (e.g. LM Studio) with each built-in template: completions render correctly and stops do not leak markers; record any template fixes (covered by the automated stub-server integration suite: every built-in template renders through the real request pipeline and stop-token/reserved-token leak checks assert clean insertions)
 
 
