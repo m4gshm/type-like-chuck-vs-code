@@ -1,5 +1,3 @@
-import { EventEmitter } from 'events';
-import { PassThrough } from 'stream';
 import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -7,27 +5,7 @@ import { mkdir, rm, writeFile } from 'fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_manager';
 import { OV_GENAI_VERSION, ovGenaiLibDir } from '../../local_engine/ov_runtime';
-
-class FakeRunnerChild extends EventEmitter {
-  stdin = {
-    write: vi.fn(() => true),
-    end: vi.fn(),
-  };
-  stdout = new PassThrough();
-  stderr = new PassThrough();
-  killed = false;
-
-  constructor(public args: string[], public env: NodeJS.ProcessEnv) {
-    super();
-  }
-
-  kill(): void {
-    this.killed = true;
-    this.emit('close', 0);
-  }
-}
-
-const last = (statuses: EngineStatus[]): EngineStatus => statuses[statuses.length - 1];
+import { defaultEngineManagerSettings, FakeRunnerChild, last } from './fixtures';
 
 interface Fixture {
   host: EngineManagerHost;
@@ -42,22 +20,11 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const statuses: EngineStatus[] = [];
   const downloads: Fixture['downloads'] = [];
   const spawned: FakeRunnerChild[] = [];
-  const base: EngineManagerSettings = {
-    modelId: 'Qwen2.5-Coder 1.5B',
-    modelIdExplicit: true,
-    device: 'auto',
+  const base: EngineManagerSettings = defaultEngineManagerSettings({
     engineKind: 'ovgenai',
-    npuContextLength: 8192,
-    releaseTag: 'b1',
-    distroDir: '',
-    huggingfaceUrl: 'https://huggingface.co',
-    githubUrl: 'https://github.com',
-    openvinoUrl: 'https://storage.openvinotoolkit.org',
-    modelPath: '',
     ovgenaiRunnerPath: '/ext/binaries/ovgenai/linux-x64/tlc-ovgenai-runner',
-    apiKeyEnabled: true,
     ...settingsOverrides,
-  };
+  });
   const modelDir = join(root, 'models');
   const engineRoot = join(root, 'engine');
   await mkdir(modelDir, { recursive: true });

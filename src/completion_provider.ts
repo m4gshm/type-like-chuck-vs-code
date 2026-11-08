@@ -10,6 +10,7 @@ import { StatusBar } from './status_bar';
 import { ResolvedTemplates } from './templates';
 import { duplicatesFollowingLine, lineAfterCursor, partialLineDelta, seamOverlap, trailingOverlapLength } from './overlap';
 import { PartialLineActionStore } from './partial_line_action';
+import { CompletionCache } from './completion_cache';
 
 /** Connection-failure coalescing the provider reports to (see ConnectionWatchdog). */
 export interface ConnectionWatchdogLike {
@@ -29,16 +30,6 @@ export interface ProviderDeps {
   trace: (message: string) => void;
   error: (message: string, err: unknown) => void;
   partialLineActions: PartialLineActionStore;
-}
-
-interface CachedCompletion {
-  fileName: string;
-  line: number;
-  character: number;
-  version: number;
-  createdAt: number;
-  text: string;
-  anchored?: boolean;
 }
 
 const GRACE_EXPIRED: unique symbol = Symbol('graceExpired');
@@ -67,9 +58,11 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     | { controller: AbortController; completion: Promise<string> }
     | undefined;
   private pending: PendingCompletion | undefined;
-  private cache: CachedCompletion | undefined;
+  private cache: CompletionCache;
 
-  constructor(private readonly deps: ProviderDeps) { }
+  constructor(private readonly deps: ProviderDeps) {
+    this.cache = new CompletionCache(deps);
+  }
 
   cancelActiveRequests(): void {
     this.activeRequest?.controller.abort();
@@ -189,7 +182,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     if (manual) {
       this.deps.debug(`${requestId} completion manual trigger: bypassing cache and pending: ${fileName} @ ${pos}`);
     } else {
-      const cached = this.cachedValue(document, position);
+      const cached = this.cache.get(document, position);
       if (cached !== undefined) {
         this.deps.debug(`${requestId} completion cached result: ${fileName} @ ${pos} -> ${cached.text}`);
         this.deps.debug(`${requestId} completion cache source: doc v${document.version}, cached at v${cached.version} @ ${cached.line}:${cached.character}, age ${Math.round(performance.now() - cached.createdAt)}ms anchored=${cached.anchored}`);
@@ -240,9 +233,9 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
               this.deps.debug(`${requestId} completion cancelled while waiting for pending ${pendingHere.requestId} result: ${fileName} @ ${pos}`);
               return undefined;
             } else if (text !== undefined && text.length > 0) {
-              const sliced = this.sliceByTyped(document, position, pendingHere.positionCharacter, text);
+              const sliced = this.cache.sliceByTyped(document, position, pendingHere.positionCharacter, text);
               if (sliced !== undefined && sliced.result.trim().length > 0) {
-                this.storeCache(document, position, sliced.result);
+                this.cache.store(document, position, sliced.result);
                 const pendingPrefix = this.prefixWord(document, new vscode.Position(pendingHere.line, pendingHere.positionCharacter));
                 this.deps.debug(`${requestId} completion pending completions ${pendingHere.requestId}: ${fileName} @ ${pendingHere.line}:${pendingHere.positionCharacter}${pendingPrefix ? ' "' + pendingPrefix + '"' : ''} -> ${sliced.result}`);
                 return { text: sliced.result };
@@ -340,7 +333,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       const text = await request;
       this.deps.connectionWatchdog.reportSuccess();
       if (text.trim().length > 0) {
-        this.storeCache(document, position, text);
+        this.cache.store(document, position, text);
       }
       if (token.isCancellationRequested) {
         // The invocation was superseded (its request moved to pending or was
@@ -363,104 +356,11 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     }
   }
 
-  private cachedValue(document: vscode.TextDocument, position: vscode.Position): CachedCompletion | undefined {
-    const config = this.deps.getConfig();
-    if (!config.cacheEnabled) {
-      return undefined;
-    }
-    const cache = this.cache;
-    if (!cache) {
-      return undefined;
-    }
-    const age = performance.now() - cache.createdAt;
-    if (age >= config.cacheTtlMs) {
-      this.deps.trace(`completion trace: cached completion expired after ${Math.round(age)}ms (ttl ${config.cacheTtlMs}ms): ${document.fileName} @ ${position.line}:${position.character}`);
-      this.cache = undefined;
-      return undefined;
-    }
-    if (cache.fileName !== document.fileName || cache.line !== position.line) {
-      return undefined;
-    }
-    if (cache.version === document.version && cache.character === position.character) {
-      return { ...cache, anchored: true };
-    }
-    if (cache.version === document.version) {
-      return undefined;
-    }
-    return this.partialCacheHit(document, position, cache);
-  }
-
-  /**
-   * Forward cache: the cursor advanced along the same line and the typed text
-   * is a prefix of the cached completion, so the remainder is served without a
-   * new API call. The cache anchor moves to the current position so repeated
-   * typing keeps consuming the same completion.
-   */
-  private partialCacheHit(
-    document: vscode.TextDocument,
-    position: vscode.Position,
-    cache: CachedCompletion,
-  ): CachedCompletion | undefined {
-    if (cache.version === document.version) {
-      return undefined;
-    }
-    const sliced = this.sliceByTyped(document, position, cache.character, cache.text, true);
-    if (sliced === undefined || sliced.result.trim().length === 0) {
-      return undefined;
-    }
-    this.deps.debug(`completion served a partial cache hit: skipping ${sliced.typed.length} typed characters`);
-    this.cache = {
-      ...cache,
-      character: position.character,
-      version: document.version,
-      createdAt: performance.now(),
-      text: sliced.result,
-    };
-    return this.cache;
-  }
-
-  /**
-   * Given the text the user typed between an anchor position and the current
-   * cursor position, slice it off the completion text and return the remainder.
-   * When `skipWhenNoTyping` is true and the user hasn't moved, returns
-   * `undefined` (used by the cache path to trigger a fresh request).
-   */
-  private sliceByTyped(
-    document: vscode.TextDocument,
-    position: vscode.Position,
-    anchorCharacter: number,
-    completion: string,
-    skipWhenNoTyping = false,
-  ): { typed: string; result: string } | undefined {
-    const typed = document.lineAt(position.line).text.slice(anchorCharacter, position.character);
-    if (skipWhenNoTyping && typed.length === 0) {
-      return undefined;
-    }
-    if (typed.length > 0 && (typed.length >= completion.length || !completion.startsWith(typed))) {
-      return undefined;
-    }
-    return { typed, result: completion.slice(typed.length) };
-  }
-
   private prefixWord(document: vscode.TextDocument, position: vscode.Position): string {
     const line = document.lineAt(position.line);
     const text = line.text.slice(0, position.character);
     const match = text.match(/[\w]+$/);
     return match ? match[0] : '';
-  }
-
-  private storeCache(document: vscode.TextDocument, position: vscode.Position, text: string): void {
-    if (!this.deps.getConfig().cacheEnabled) {
-      return;
-    }
-    this.cache = {
-      fileName: document.fileName,
-      line: position.line,
-      character: position.character,
-      version: document.version,
-      createdAt: performance.now(),
-      text,
-    };
   }
 
   private async awaitRequest(

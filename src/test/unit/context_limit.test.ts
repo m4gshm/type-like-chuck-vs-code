@@ -1,43 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { ExtensionConfig, fitContext } from '../../config';
 import { extractModelContextLength } from '../../completions_client';
+import { defaultExtensionConfig } from './fixtures';
 
 function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
-  return {
-    baseUrl: 'http://stub/v1',
-    model: 'm',
-    apiKey: '',
-    mode: 'local',
-    localEngineKind: 'llama.cpp',
-    localModel: 'Qwen2.5-Coder 1.5B',
-    localModelExplicit: true,
-    localDevice: 'npu',
-    localNpuContextMaxLength: 8192,
-    localLlamaCppRelease: 'b11935',
-    localEngineDir: '',
-    localDistroDir: '',
-    localDownloadedModelsDir: '',
-    localModelCacheDir: '',
-    localHuggingfaceUrl: 'https://huggingface.co',
-    localGithubUrl: 'https://github.com',
-    localOpenvinoUrl: 'https://storage.openvinotoolkit.org',
-    localCustomModelPath: '',
-    localApiKeyEnabled: true,
-    promptTemplate: undefined,
-    customTemplate: undefined,
-    prefixMaxLength: 8000,
-    suffixMaxLength: 2000,
-    contextMaxLength: 8192,
-    maxTokens: 256,
-    debounceMs: 250,
-    pendingGraceMs: 150,
-    autoTrigger: true,
-    cacheEnabled: true,
-    cacheTtlMs: 10_000,
-    yieldToCopilot: true,
-    forbiddenFileNames: ['.env'],
-    ...overrides,
-  };
+  return defaultExtensionConfig(overrides);
 }
 
 describe('fitContext', () => {

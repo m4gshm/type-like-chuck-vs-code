@@ -5,6 +5,7 @@ import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_manager';
 import { DownloadProgress } from '../../local_engine/downloader';
+import { defaultEngineManagerSettings, last } from './fixtures';
 
 class FakeChild extends EventEmitter {
   exitCode: number | null = null;
@@ -34,26 +35,12 @@ interface Fixture {
   notify: string[];
 }
 
-const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManagerSettings => ({
-  modelId: 'Qwen2.5-Coder 1.5B',
-  modelIdExplicit: true,
-  device: 'auto',
-  engineKind: 'llama.cpp',
-  npuContextLength: 8192,
-  releaseTag: 'b1',
-  distroDir: '',
-  huggingfaceUrl: 'https://huggingface.co',
-  githubUrl: 'https://github.com',
-  openvinoUrl: 'https://storage.openvinotoolkit.org',
-  modelPath: '',
-  apiKeyEnabled: true,
-  ...overrides,
-});
+const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManagerSettings =>
+  defaultEngineManagerSettings(overrides);
 
 const makeFixture = async (
   overrides: Partial<EngineManagerHost> = {},
   settingsOverrides: Partial<EngineManagerSettings> = {},
-  
 ): Promise<Fixture> => {
   const root = await mkdtempActual(join(tmpdir(), 'tlc-enginetest-'));
   const statuses: EngineStatus[] = [];
@@ -72,7 +59,6 @@ const makeFixture = async (
     notify: (m) => notify.push(m),
     warn: () => undefined,
     log: () => undefined,
-    
     fetchImpl: (async () => new Response('{}', { status: 200 })) as never,
     spawnImpl: ((_: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
       const child = new FakeChild(args);
@@ -96,8 +82,6 @@ const makeFixture = async (
   };
   return { host, statuses, downloads, extracts, spawned, root, notify };
 };
-
-const last = (statuses: EngineStatus[]): EngineStatus => statuses[statuses.length - 1];
 
 describe('EngineManager (llama.cpp engine)', () => {
   it('downloads engine and model once, then starts the server ready on gpu', async () => {

@@ -2,43 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { ModelConfig, ModelConfigHost } from '../../model_config';
 import { ExtensionConfig } from '../../config';
 import { ModelInfo } from '../../completions_client';
+import { defaultExtensionConfig } from './fixtures';
 
 function mkConfig(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
-  return {
-    baseUrl: 'http://stub/v1',
+  return defaultExtensionConfig({
     model: 'qwen2.5-coder-1.5b',
-    apiKey: '',
     mode: 'remote',
-    localEngineKind: 'llama.cpp',
-    localModel: 'Qwen2.5-Coder 1.5B',
-    localModelExplicit: true,
     localDevice: 'cpu',
-    localNpuContextMaxLength: 8192,
-    localLlamaCppRelease: 'b11935',
-    localEngineDir: '',
-    localDistroDir: '',
-    localDownloadedModelsDir: '',
-    localModelCacheDir: '',
-    localHuggingfaceUrl: 'https://huggingface.co',
-    localGithubUrl: 'https://github.com',
-    localOpenvinoUrl: 'https://storage.openvinotoolkit.org',
-    localCustomModelPath: '',
-    localApiKeyEnabled: true,
     promptTemplate: 'qwen2',
-    customTemplate: undefined,
-    prefixMaxLength: 8000,
-    suffixMaxLength: 2000,
     contextMaxLength: 0,
-    maxTokens: 256,
-    debounceMs: 250,
-    pendingGraceMs: 150,
-    autoTrigger: true,
-    cacheEnabled: true,
-    cacheTtlMs: 10_000,
-    yieldToCopilot: true,
     forbiddenFileNames: [],
     ...overrides,
-  };
+  });
 }
 
 interface Setup {
