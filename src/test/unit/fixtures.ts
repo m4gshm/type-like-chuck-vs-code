@@ -2,7 +2,8 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { vi } from 'vitest';
 import { ExtensionConfig } from '../../config';
-import { EngineManagerSettings, EngineStatus } from '../../local_engine/engine_manager';
+import { EngineManagerSettings } from '../../local_engine/engine_manager';
+import { EngineStatus } from '../../local_engine/engine_status';
 
 export class FakeRunnerChild extends EventEmitter {
   stdin = {

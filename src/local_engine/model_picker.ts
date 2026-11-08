@@ -1,7 +1,6 @@
 import { LocalEngineKind } from '../config';
-import { isLocalModelId, LOCAL_MODEL_IDS, LocalModelId, localModel } from './model_catalog';
-import { irModel } from './ir_model_catalog';
-import { mlxModel } from './mlx_model_catalog';
+import { isLocalModelId, LOCAL_MODEL_IDS, LocalModelId } from './model_catalog';
+import { catalogSpec, diskModelDialog, diskModelHint } from './kind_catalog';
 
 export type LocalModelPickValue = LocalModelId | 'disk';
 
@@ -13,9 +12,7 @@ export function effectiveLocalModel(modelId: string, modelPath: string): string 
 
 /** Catalog spec (label, FIM template, size) for a model id under an engine kind. */
 export function localModelSpec(kind: LocalEngineKind, id: string): { label: string; template: string; approximateBytes: number } | undefined {
-  return isLocalModelId(id)
-    ? (kind === 'ovgenai' ? irModel(id) : kind === 'mlx' ? mlxModel(id) : localModel(id))
-    : undefined;
+  return isLocalModelId(id) ? catalogSpec(kind, id, 'nf4') : undefined;
 }
 
 /** Catalog label without the device-specific IR format suffix (the actual
@@ -46,12 +43,7 @@ export function localModelPickerItems(kind: LocalEngineKind, currentId: string):
   items.push({
     label: '$(folder-opened) From disk…',
     description: currentId === 'custom' ? '$(check) current' : undefined,
-    detail: 'Use a local model without downloading: '
-      + (kind === 'ovgenai'
-        ? 'an OpenVINO IR model directory (folder with openvino_model.xml/.bin and tokenizer files)'
-        : kind === 'mlx'
-          ? 'an mlx model directory'
-          : 'a GGUF file'),
+    detail: 'Use a local model without downloading: ' + diskModelHint(kind),
     value: 'disk',
   });
   return items;
@@ -63,10 +55,5 @@ export function localModelDiskDialog(kind: LocalEngineKind): {
   canSelectFiles: boolean;
   filters: Record<string, string[]>;
 } {
-  // The ovgenai runner takes a model directory, not a bare .xml file.
-  return kind === 'ovgenai'
-    ? { canSelectFolders: true, canSelectFiles: false, filters: {} }
-    : kind === 'mlx'
-      ? { canSelectFolders: true, canSelectFiles: true, filters: {} }
-      : { canSelectFolders: false, canSelectFiles: true, filters: { 'GGUF model': ['gguf'] } };
+  return diskModelDialog(kind);
 }

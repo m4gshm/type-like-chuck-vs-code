@@ -3,7 +3,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdir, writeFile } from 'fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus } from '../../local_engine/engine_manager';
+import { EngineManager, EngineManagerHost, EngineManagerSettings } from '../../local_engine/engine_manager';
+import { EngineStatus } from '../../local_engine/engine_status';
 import { defaultEngineManagerSettings, FakeRunnerChild, last } from './fixtures';
 
 interface Fixture {

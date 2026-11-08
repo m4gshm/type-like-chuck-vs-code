@@ -4,7 +4,7 @@ import { BRAND } from './brand';
 import type { CompletionState } from './completion_state';
 import type { CompletionsClient } from './completions_client';
 import type { ConnectionWatchdog } from './connection_watchdog';
-import { EngineStatus, ENGINE_STATUS } from './local_engine/engine_manager';
+import { EngineStatus, ENGINE_STATUS } from './local_engine/engine_status';
 import type { LocalEngineKind } from './config';
 
 /** The stdio pipe exposed by a running ovgenai/mlx runner. */

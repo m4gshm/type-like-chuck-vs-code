@@ -3,7 +3,8 @@ import { mkdir, mkdtemp as mkdtempActual, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_manager';
+import { EngineManager, EngineManagerHost, EngineManagerSettings } from '../../local_engine/engine_manager';
+import { EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_status';
 import { DownloadProgress } from '../../local_engine/downloader';
 import { defaultEngineManagerSettings, last } from './fixtures';
 

@@ -3,7 +3,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EngineManager, EngineManagerHost, EngineManagerSettings, EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_manager';
+import { EngineManager, EngineManagerHost, EngineManagerSettings } from '../../local_engine/engine_manager';
+import { EngineStatus, ENGINE_STATUS } from '../../local_engine/engine_status';
 import { OV_GENAI_VERSION, ovGenaiLibDir } from '../../local_engine/ov_runtime';
 import { defaultEngineManagerSettings, FakeRunnerChild, last } from './fixtures';
 
