@@ -27,6 +27,26 @@
         "${workspaceFolder}/dist/extension.js"
       ],
       "preLaunchTask": "preDebug"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:type-like-chuck-vs-code}/type-like-chuck-backed-mlx",
+      "name": "Debug tlc-mlx-runner (type-like-chuck-backed-mlx)",
+      "target": "tlc-mlx-runner",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug tlc-mlx-runner (type-like-chuck-backed-mlx)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:type-like-chuck-vs-code}/type-like-chuck-backed-mlx",
+      "name": "Release tlc-mlx-runner (type-like-chuck-backed-mlx)",
+      "target": "tlc-mlx-runner",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release tlc-mlx-runner (type-like-chuck-backed-mlx)"
     }
   ]
 }
