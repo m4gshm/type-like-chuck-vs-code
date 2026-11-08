@@ -94,6 +94,8 @@ function makeDeps(completeImpl: (p: { prefix: string }) => Promise<{ text: strin
     debug: () => undefined,
     trace: () => undefined,
     error: () => undefined,
+    notifyError: () => undefined,
+    notifyWarning: () => undefined,
     partialLineActions: new PartialLineActionStore(),
   };
   return { deps, calls: () => callCount };

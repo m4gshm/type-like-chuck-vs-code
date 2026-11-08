@@ -13,7 +13,8 @@ import { ConnectionWatchdog } from './connection_watchdog';
 import { buildTemplateRegistry, ResolvedTemplates } from './templates';
 import { pickTemplateForModel } from './model_selection';
 import { MODEL_POLL_INTERVAL_MS, modelIdsKey } from './model_polling';
-import { copilotActive, CopilotEnableSetting } from './copilot_gate';
+import { CopilotEnableSetting } from './copilot_gate';
+import { CopilotPause } from './copilot_pause';
 import { EngineManager, ModelDownloadChoice } from './local_engine/engine_manager';
 import { DISTRO_CHOICE_DOWNLOAD } from './local_engine/provisioning';
 import { ENGINE_STATUS } from './local_engine/engine_status';
@@ -332,6 +333,18 @@ export function activate(context: vscode.ExtensionContext): void {
     debug: debug,
     trace: trace,
     error: error,
+    notifyError: (message, action) => {
+      if (action !== undefined) {
+        void vscode.window.showErrorMessage(message, action.title).then((choice) => {
+          if (choice === action.title) {
+            void vscode.commands.executeCommand(action.command);
+          }
+        });
+      } else {
+        void vscode.window.showErrorMessage(message);
+      }
+    },
+    notifyWarning: (message) => void vscode.window.showWarningMessage(message),
     partialLineActions,
   });
 
@@ -395,9 +408,7 @@ export function activate(context: vscode.ExtensionContext): void {
     checkServerModels,
     reportServerReachability,
     setApiKey: (key) => client.setApiKey(key),
-    clearCopilotAutoDisabled: () => {
-      copilotAutoDisabled = false;
-    },
+    clearCopilotAutoDisabled: () => copilotPause.clearAutoDisabled(),
     warn,
   };
   context.subscriptions.push(
@@ -419,7 +430,6 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   const syncApiKey = async () => client.setApiKey(await effectiveApiKey());
 
-  let copilotAutoDisabled = false;
   context.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection((event) => {
       if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse
@@ -435,51 +445,32 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor(() => completionProvider.cancelActiveRequests()),
   );
 
-  let copilotPrev: boolean | undefined;
-  const updateCopilotPause = async (): Promise<void> => {
-    if (!modelConfig.current.yieldToCopilot) {
-      copilotPrev = undefined;
-      return;
-    }
-    const copilotConfig = vscode.workspace.getConfiguration('github.copilot');
-    const languageId = vscode.window.activeTextEditor?.document.languageId ?? 'plaintext';
-    // getExtension misses the built-in Copilot core on newer VS Code builds,
-    // so any github.copilot* extension (core or chat) counts as installed.
-    const installed = vscode.extensions.getExtension('GitHub.copilot') !== undefined
-      || vscode.extensions.all.some((e) => /^github\.copilot(-chat)?$/i.test(e.id));
-    const active = copilotActive(
-      installed,
-      copilotConfig.get<CopilotEnableSetting>('enable'),
-      copilotConfig.get<boolean>('inlineSuggest.enable'),
-      languageId,
-    );
-    if (active === copilotPrev) {
-      return;
-    }
-    const firstCheck = copilotPrev === undefined;
-    copilotPrev = active;
-    if (active && completionState.isEnabled()) {
-      copilotAutoDisabled = true;
-      await completionState.setEnabled(false);
-      completionProvider.onDisabled();
-      statusBar.refresh();
-      warn('GitHub Copilot detected: Type like Chuck completions disabled.');
-      void vscode.window.showInformationMessage(
-        `${BRAND} completions are disabled because GitHub Copilot is enabled. ${BRAND} re-enables automatically when Copilot turns off.`,
-      );
-    } else if (!active && copilotAutoDisabled) {
-      copilotAutoDisabled = false;
-      if (!firstCheck) {
-        await completionState.setEnabled(true);
-        statusBar.refresh();
-        void vscode.window.showInformationMessage('GitHub Copilot is off: Type like Chuck completions re-enabled.');
-      }
-    }
-  };
-  void updateCopilotPause();
+  const copilotPause = new CopilotPause({
+    yieldToCopilot: () => modelConfig.current.yieldToCopilot,
+    copilotInstalled: () =>
+      // getExtension misses the built-in Copilot core on newer VS Code builds,
+      // so any github.copilot* extension (core or chat) counts as installed.
+      vscode.extensions.getExtension('GitHub.copilot') !== undefined
+      || vscode.extensions.all.some((e) => /^github\.copilot(-chat)?$/i.test(e.id)),
+    copilotSettings: () => {
+      const copilotConfig = vscode.workspace.getConfiguration('github.copilot');
+      return {
+        enable: copilotConfig.get<CopilotEnableSetting>('enable'),
+        inlineSuggestEnabled: copilotConfig.get<boolean>('inlineSuggest.enable'),
+        languageId: vscode.window.activeTextEditor?.document.languageId ?? 'plaintext',
+      };
+    },
+    completionsEnabled: () => completionState.isEnabled(),
+    setCompletionsEnabled: (enabled) => completionState.setEnabled(enabled),
+    onDisabled: () => completionProvider.onDisabled(),
+    refreshStatusBar: () => statusBar.refresh(),
+    warn,
+    notify: (message) => void vscode.window.showInformationMessage(message),
+  });
+  void copilotPause.update();
   context.subscriptions.push(
-    vscode.extensions.onDidChange(() => void updateCopilotPause()),
-    vscode.window.onDidChangeActiveTextEditor(() => void updateCopilotPause()),
+    vscode.extensions.onDidChange(() => void copilotPause.update()),
+    vscode.window.onDidChangeActiveTextEditor(() => void copilotPause.update()),
   );
 
   const templateSync = new TemplateFieldSync({
@@ -496,7 +487,7 @@ export function activate(context: vscode.ExtensionContext): void {
         || event.affectsConfiguration('github.copilot.nextEditSuggestions.enabled')
         || event.affectsConfiguration('tlc.yieldToCopilot')
       ) {
-        updateCopilotPause();
+        void copilotPause.update();
       }
       if (!event.affectsConfiguration('tlc')) {
         return;

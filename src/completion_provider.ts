@@ -29,6 +29,9 @@ export interface ProviderDeps {
   debug: (message: string) => void;
   trace: (message: string) => void;
   error: (message: string, err: unknown) => void;
+  /** Surfaces a user-facing failure; `action` adds a button that runs the command. */
+  notifyError: (message: string, action?: { title: string; command: string }) => void;
+  notifyWarning: (message: string) => void;
   partialLineActions: PartialLineActionStore;
 }
 
@@ -388,23 +391,18 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
       this.deps.warn(text);
       this.deps.statusBar.setError();
       if (err.kind === 'auth') {
-        void vscode.window.showErrorMessage(text, 'Set API Key').then((choice) => {
-          if (choice === 'Set API Key') {
-            void vscode.commands.executeCommand('tlc.setApiKey');
-          }
-        });
+        this.deps.notifyError(text, { title: 'Set API Key', command: 'tlc.setApiKey' });
       } else if (err.kind === 'connection') {
         // Surfaced once per outage by the watchdog, not on every request.
         this.deps.connectionWatchdog.reportFailure(text);
       } else {
-        void vscode.window.showWarningMessage(text);
+        this.deps.notifyWarning(text);
       }
     } else {
       this.deps.error(context, err);
       const name = err instanceof Error ? err.name : typeof err;
-      const message = `Unexpected completion error (${name}): ${messageOf(err)}`;
       this.deps.statusBar.setError();
-      void vscode.window.showErrorMessage(message);
+      this.deps.notifyError(`Unexpected completion error (${name}): ${messageOf(err)}`);
     }
   }
 }
