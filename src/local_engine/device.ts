@@ -1,12 +1,5 @@
 import { LocalDevice } from '../config';
 
-export interface DeviceOptions {
-  args: string[];
-  extraEnv: Record<string, string>;
-  activeDevice: LocalDevice;
-  warning?: string;
-}
-
 export type SupportedDevice = Exclude<LocalDevice, 'auto'>;
 
 /** Context window used on the NPU: the compiled graph is built for it, and

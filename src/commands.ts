@@ -13,8 +13,7 @@ import { pickSupportedModel } from './model_selection';
 import { ResetTarget } from './local_engine/engine_manager';
 import { localModelDiskDialog, localModelPickerItems } from './local_engine/model_picker';
 import { bundledMlxRunnerPath, bundledOvgenaiRunnerPath } from './local_engine/bundled_runners';
-
-const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+import { messageOf } from './errors';
 
 export interface TlcCommandDeps {
   extensionPath: string;
@@ -22,8 +21,8 @@ export interface TlcCommandDeps {
   client: CompletionsClient;
   modelConfig: ModelConfig;
   apiKeyStorage: ApiKeyStorage;
-  complectionState: CompletionState;
-  complectionProvider: CompletionProvider;
+  completionState: CompletionState;
+  completionProvider: CompletionProvider;
   statusBar: StatusBar;
   connectionWatchdog: ConnectionWatchdog;
   engineTasks: { run(title: string, task: (signal: AbortSignal) => Promise<unknown>): Promise<void> };
@@ -97,8 +96,8 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
   const { config } = deps;
   return [
     vscode.commands.registerCommand('tlc.triggerCompletion', () => {
-      if (deps.complectionState.isEnabled()) {
-        deps.complectionProvider.resetThrottle();
+      if (deps.completionState.isEnabled()) {
+        deps.completionProvider.resetThrottle();
       }
       // When TLC is disabled the generic trigger lets another provider (e.g.
       // Copilot) answer on the same keys.
@@ -122,7 +121,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
           `${BRAND}: tlc.openai.apiKey is set in the settings and takes precedence over the secret-stored key.`,
         );
       }
-      await deps.setApiKey(config().apiKey.length > 0 ? config().apiKey : key.length === 0 ? undefined : key);
+      await deps.setApiKey(config().apiKey.length > 0 ? config().apiKey : (key.length === 0 ? undefined : key));
       void vscode.window.showInformationMessage(`${BRAND} API key updated.`);
     }),
     vscode.commands.registerCommand('tlc.clearApiKey', async () => {
@@ -136,7 +135,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
       try {
         models = await deps.client.listModels();
       } catch (err) {
-        deps.warn(`Cannot list models from ${config().baseUrl}: ${errMessage(err)}`);
+        deps.warn(`Cannot list models from ${config().baseUrl}: ${messageOf(err)}`);
         void vscode.window.showWarningMessage(
           `Cannot fetch the model list from ${config().baseUrl}. You can still enter the model id manually.`,
         );
@@ -260,7 +259,7 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
           );
         } catch (err) {
           deps.connectionWatchdog.reportFailure(
-            `${BRAND}: cannot reach ${config().baseUrl}: ${errMessage(err)}`,
+            `${BRAND}: cannot reach ${config().baseUrl}: ${messageOf(err)}`,
           );
         } finally {
           deps.statusBar.setBusy(false);
@@ -271,10 +270,10 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
       deps.connectionWatchdog.reset();
       // A manual toggle is the user's choice: Copilot must not undo it later.
       deps.clearCopilotAutoDisabled();
-      const enabled = !deps.complectionState.isEnabled();
-      await deps.complectionState.setEnabled(enabled);
+      const enabled = !deps.completionState.isEnabled();
+      await deps.completionState.setEnabled(enabled);
       if (!enabled) {
-        deps.complectionProvider.onDisabled();
+        deps.completionProvider.onDisabled();
       }
       deps.statusBar.refresh();
       void vscode.window.showInformationMessage(enabled ? `${BRAND} completions enabled.` : `${BRAND} completions disabled.`);

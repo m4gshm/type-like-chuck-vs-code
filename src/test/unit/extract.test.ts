@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import yazl from 'yazl';
-import { INSTALL_MARKER, extractArchive } from '../../local_engine/extract';
+import { extractArchive } from '../../local_engine/extract';
 
 const dirs: string[] = [];
 const tmp = async (): Promise<string> => {
@@ -41,21 +41,20 @@ describe('extractArchive', () => {
     const progress: Array<[number, number | undefined]> = [];
     await extractArchive({ archivePath: archive, destDir: dest, onProgress: (a, b) => progress.push([a, b]) });
     expect(await readFile(join(dest, 'bin', 'llama-server.exe'), 'utf8')).toBe('stub');
-    expect(await stat(join(dest, INSTALL_MARKER))).toBeTruthy();
     expect(progress[progress.length - 1]).toEqual([2, 2]);
   });
 
-  it('unpacks a tar.gz and writes the install marker', async () => {
+  it('unpacks a tar.gz', async () => {
     const src = await tmp();
     const dest = await tmp();
     await writeFile(join(src, 'hello.txt'), 'tarred');
-    const archive = join(src, 'engine.tar.gz');    const tar = spawnSync('tar', ['-czf', 'engine.tar.gz', '-C', src, 'hello.txt'], { cwd: src, windowsHide: true });
+    const archive = join(src, 'engine.tar.gz');
+    const tar = spawnSync('tar', ['-czf', 'engine.tar.gz', '-C', src, 'hello.txt'], { cwd: src, windowsHide: true });
     if (tar.status !== 0) {
       throw new Error('tar is unavailable in this environment');
     }
     await extractArchive({ archivePath: archive, destDir: dest });
     expect(await readFile(join(dest, 'hello.txt'), 'utf8')).toBe('tarred');
-    expect(await stat(join(dest, INSTALL_MARKER))).toBeTruthy();
   });
 
   it('removes the destination on cancelation and leaves no marker', async () => {

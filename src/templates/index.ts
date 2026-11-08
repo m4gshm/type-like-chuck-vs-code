@@ -58,5 +58,3 @@ export function buildTemplateRegistry(
   }
   return { registry, warnings };
 }
-
-export { DEFAULT_TEMPLATE_ID };

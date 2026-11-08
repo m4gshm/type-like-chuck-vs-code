@@ -5,6 +5,7 @@ import { pipeline } from 'stream/promises';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { messageOf } from '../errors';
 
 type ProxyAgentInstance = InstanceType<typeof HttpsProxyAgent>;
 
@@ -64,7 +65,7 @@ function downloadError(err: unknown, url: string, signal: AbortSignal | undefine
     return new DOMException('Download canceled', 'AbortError');
   }
   const bytes = downloaded === undefined ? '' : ` after ${downloaded} bytes`;
-  return new Error(`Download failed${bytes}: ${err instanceof Error ? err.message : String(err)} (${url})`);
+  return new Error(`Download failed${bytes}: ${messageOf(err)} (${url})`);
 }
 
 async function requestFollowingRedirects(url: URL, agent: ProxyAgentInstance | undefined, signal: AbortSignal | undefined, proxy?: URL): Promise<SimpleResponse> {
@@ -88,7 +89,8 @@ async function requestFollowingRedirects(url: URL, agent: ProxyAgentInstance | u
 async function defaultRequest(url: string, signal?: AbortSignal): Promise<{ status: number; headers: Headers; body: Readable }> {
   const proxy = proxyUrlFromEnv();
   const proxyUrl = proxy !== undefined ? new URL(proxy) : undefined;
-  const agent = proxyUrl !== undefined && new URL(url).protocol === 'https:' ? new HttpsProxyAgent(proxyUrl.href) : undefined;  const response = await requestFollowingRedirects(new URL(url), agent, signal, proxyUrl);
+  const agent = proxyUrl !== undefined && new URL(url).protocol === 'https:' ? new HttpsProxyAgent(proxyUrl.href) : undefined;
+  const response = await requestFollowingRedirects(new URL(url), agent, signal, proxyUrl);
   const headers = new Headers();
   for (const [name, value] of Object.entries(response.headers)) {
     if (typeof value === 'string') {

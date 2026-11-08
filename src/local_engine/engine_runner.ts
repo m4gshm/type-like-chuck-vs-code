@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { createServer } from 'net';
 import { randomBytes } from 'crypto';
 import { LocalDevice } from '../config';
@@ -198,5 +198,3 @@ export async function startEngine(options: EngineStartOptions, deps: RunnerDeps)
       }),
   };
 }
-
-export type { ChildProcess };

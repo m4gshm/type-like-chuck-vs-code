@@ -1,12 +1,7 @@
 import { execFile } from 'child_process';
 import { readdir, readFile } from 'fs/promises';
-import { cpus } from 'os';
 
 export type RecommendedEngineKind = 'llama.cpp' | 'ovgenai' | 'mlx';
-
-export type RecommendedPath =
-  | { kind: 'local'; engineKind: RecommendedEngineKind; device: 'npu' | 'gpu' | 'auto'; reason: string }
-  | { kind: 'remote'; reason: string };
 
 /**
  * Untouched-setting default engine kind: the kind half of the
@@ -22,33 +17,6 @@ export function defaultEngineKind(platform: NodeJS.Platform, arch: string, cpuMo
   return (platform === 'win32' || platform === 'linux') && arch === 'x64' && /intel/i.test(cpuModel)
     ? 'ovgenai'
     : 'llama.cpp';
-}
-
-/**
- * Pure recommendation matrix: engine kind + device from the platform,
- * CPU vendor and NPU presence. GPU presence is not probed — the engine's
- * start-fallback chain (GPU → CPU) resolves it at start.
- */
-export function recommend(
-  platform: NodeJS.Platform,
-  arch: string,
-  cpuModel: string,
-  npuGeneration: number,
-): RecommendedPath {
-  const supported = (arch === 'x64' || arch === 'arm64') && ['win32', 'linux', 'darwin'].includes(platform);
-  if (!supported) {
-    return { kind: 'remote', reason: `No local acceleration for ${platform}/${arch}` };
-  }
-  const engineKind = defaultEngineKind(platform, arch, cpuModel);
-  if (engineKind === 'mlx') {
-    return { kind: 'local', engineKind, device: 'gpu', reason: 'Metal acceleration (mlx runner on Apple Silicon)' };
-  }
-  if (engineKind === 'ovgenai') {
-    return npuGeneration >= 4
-      ? { kind: 'local', engineKind, device: 'npu', reason: 'OpenVINO GenAI runner with native IR models on the Intel NPU (generation 4 or later)' }
-      : { kind: 'local', engineKind, device: 'auto', reason: 'OpenVINO GenAI runner (GPU via Intel iGPU/Arc, CPU fallback)' };
-  }
-  return { kind: 'local', engineKind, device: 'auto', reason: 'llama.cpp vulkan build (GPU via NVIDIA/AMD/Intel, CPU fallback)' };
 }
 
 /** NPU hardware generation by PCI device ID (Linux ivpu driver naming:
@@ -118,18 +86,4 @@ export async function npuGeneration(platform: NodeJS.Platform): Promise<number> 
     return 0;
   }
   return detectIntelNpu(platform);
-}
-
-export async function probeCapability(deps: {
-  platform: NodeJS.Platform;
-  arch: string;
-  /** Override the CPU model string (defaults to os.cpus()). */
-  cpuModel?: string;
-  /** Override NPU detection (defaults to platform WMI/PCI probing). */
-  detectNpu?: (platform: NodeJS.Platform) => Promise<number>;
-}): Promise<RecommendedPath> {
-  const cpuModel = deps.cpuModel ?? cpus()[0]?.model ?? '';
-  const detect = deps.detectNpu ?? detectIntelNpu;
-  const npuGen = ['win32', 'linux'].includes(deps.platform) && deps.arch === 'x64' ? await detect(deps.platform) : 0;
-  return recommend(deps.platform, deps.arch, cpuModel, npuGen);
 }

@@ -1,12 +1,10 @@
 import { spawn } from 'child_process';
-import { mkdir, rm, writeFile } from 'fs/promises';
+import { mkdir, rm } from 'fs/promises';
 import { dirname, join, parse, relative } from 'path';
 import { pipeline } from 'stream/promises';
 import { createWriteStream } from 'fs';
 import type { ZipFile } from 'yauzl';
 import yauzl from 'yauzl';
-
-export const INSTALL_MARKER = '.tlc-installed';
 
 export interface ExtractOptions {
   archivePath: string;
@@ -111,9 +109,9 @@ async function extractTar(archivePath: string, destDir: string, signal?: AbortSi
 }
 
 /**
- * Unpacks a .zip or .tar.gz into destDir and writes the install marker on
- * success. On failure or cancelation the destination directory is removed so
- * no partial install can be mistaken for a complete one.
+ * Unpacks a .zip or .tar.gz into destDir. On failure or cancelation the
+ * destination directory is removed so no partial install can be mistaken
+ * for a complete one.
  */
 export async function extractArchive({ archivePath, destDir, signal, onProgress }: ExtractOptions): Promise<void> {
   try {
@@ -129,7 +127,6 @@ export async function extractArchive({ archivePath, destDir, signal, onProgress 
     if (signal?.aborted) {
       throw new DOMException('Download canceled', 'AbortError');
     }
-    await writeFile(join(destDir, INSTALL_MARKER), '');
   } catch (err) {
     await rm(destDir, { recursive: true, force: true });
     throw err;

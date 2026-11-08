@@ -3,6 +3,7 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { mkdir, readdir, rename, rm } from 'fs/promises';
 import { join } from 'path';
 import { LocalDevice } from '../config';
+import { messageOf } from '../errors';
 import { deviceChain, NPU_CONTEXT_LENGTH } from './device';
 import { npuGeneration } from './capability';
 import { downloadFile, DownloadProgress } from './downloader';
@@ -40,7 +41,7 @@ export type EngineStatus =
 /** The running ovgenai stdio runner exposed for the completions transport. */
 export type RunningLocalEngine = RunningEngine | RunningStdioRunner;
 
-export const isStdioRunner = (engine: RunningLocalEngine): engine is RunningStdioRunner =>
+const isStdioRunner = (engine: RunningLocalEngine): engine is RunningStdioRunner =>
   typeof (engine as RunningStdioRunner).stream === 'function';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -129,7 +130,7 @@ export class EngineManager {
     this.crashTimes.push(now);
     this.host.warn(`${BRAND} local engine: ${message}; restarting.`);
     if (this.crashTimes.length > 3) {
-      this.host.onStatus({ status: 'error', message: `the local engine keeps exiting (${message}); restart manually via ${BRAND}: Reset Local Engine` });
+      this.host.onStatus({ status: ENGINE_STATUS.error, message: `the local engine keeps exiting (${message}); restart manually via ${BRAND}: Reset Local Engine` });
       return;
     }
     void this.ensureReady().catch(() => undefined);
@@ -196,7 +197,7 @@ export class EngineManager {
       const paths = this.host.paths();
       const settings = this.host.settings();
       if (settings.modelId === 'custom' && settings.modelPath.length === 0) {
-        throw new Error('tlc.local.model is "custom" — set tlc.local.customModelPath to a model file (${BRAND}: Select Local Model → From disk…).`');
+        throw new Error(`tlc.local.model is "custom" — set tlc.local.customModelPath to a model file (${BRAND}: Select Local Model → From disk…).`);
       }
       if (settings.modelPath.length > 0 && pickTemplateForModel(settings.modelPath) === undefined) {
         // Catalog models are validated Qwen2.5-Coder builds; an offline model
@@ -257,7 +258,7 @@ export class EngineManager {
           if (next === undefined) {
             throw err;
           }
-          const message = err instanceof Error ? err.message : String(err);
+          const message = messageOf(err);
           this.host.warn(`${BRAND} local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
           fallbacks.push(`${activeDevice.toUpperCase()}: ${message}`);
           activeDevice = next;
@@ -270,7 +271,7 @@ export class EngineManager {
       }
       this.engine = engine;
       const status: EngineStatus = {
-        status: 'ready',
+        status: ENGINE_STATUS.ready,
         baseUrl: engine.baseUrl,
         apiKey: engine.apiKey,
         model: settings.modelId,
@@ -286,7 +287,7 @@ export class EngineManager {
         // A user cancel must not leave the status bar spinning on "starting".
         this.host.onStatus({ status: ENGINE_STATUS.error, message: 'start canceled' });
       } else {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = messageOf(err);
         this.host.onStatus({ status: ENGINE_STATUS.error, message });
       }
       await this.stop();
@@ -376,7 +377,7 @@ export class EngineManager {
         if (next === undefined) {
           throw err;
         }
-        const message = err instanceof Error ? err.message : String(err);
+        const message = messageOf(err);
         this.host.warn(`${BRAND} local engine: start on ${activeDevice} failed (${message}); retrying on ${next}.`);
         fallbacks.push(`${activeDevice.toUpperCase()}: ${message}`);
         activeDevice = next;
@@ -389,7 +390,7 @@ export class EngineManager {
     }
     this.engine = runner;
     const status: EngineStatus = {
-      status: 'ready',
+      status: ENGINE_STATUS.ready,
       // The stdio runner has no HTTP endpoint; completions go through
       // `EngineManager.stdioRunner` instead of a base URL.
       baseUrl: '',
@@ -437,7 +438,7 @@ export class EngineManager {
     );
     this.engine = runner;
     const status: EngineStatus = {
-      status: 'ready',
+      status: ENGINE_STATUS.ready,
       baseUrl: '',
       apiKey: undefined,
       model: settings.modelId,
@@ -690,7 +691,7 @@ export class EngineManager {
   private async ensureGgufModel(paths: EnginePaths, model: LocalModelSpec | undefined, settings: EngineManagerSettings): Promise<string> {
     if (settings.modelPath.length > 0) {
       if (!existsSync(settings.modelPath)) {
-        throw new Error(`Local model file not found: ${settings.modelPath}`);
+        throw new Error(`Local model file or directory not found: ${settings.modelPath}`);
       }
       return settings.modelPath;
     }

@@ -1,5 +1,6 @@
 import { DownloadProgress } from './local_engine/downloader';
 import { BRAND } from './brand';
+import { messageOf } from './errors';
 
 
 type ProgressReport = { message?: string };
@@ -95,7 +96,7 @@ export class EngineTaskRunner {
         await task(cancel.signal);
       } catch (err) {
         if (!(err instanceof Error && err.name === 'AbortError')) {
-          const message = `${BRAND} local engine: ${err instanceof Error ? err.message : String(err)}`;
+          const message = `${BRAND} local engine: ${messageOf(err)}`;
           this.host.offerRetry(message, () => void this.run(title, task));
         }
       } finally {

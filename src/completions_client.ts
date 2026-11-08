@@ -1,5 +1,6 @@
 import { BRAND } from './brand';
 import OpenAI from 'openai';
+import { messageOf } from './errors';
 import { maskReservedTokens } from './prompt';
 import { truncateToLine } from './line_truncation';
 import { detectLoop } from './loop_detection';
@@ -67,7 +68,8 @@ export class CompletionsClient {
 
   constructor(
     private readonly getBaseUrl: () => string,
-    private readonly getModel: () => string,    private readonly getMaxTokens: () => number,
+    private readonly getModel: () => string,
+    private readonly getMaxTokens: () => number,
     private readonly logCause?: (message: string) => void,
     private readonly logResponse?: (message: string) => void,
     private readonly createSdk: (options: {
@@ -304,6 +306,3 @@ export function isMarkdownFenceOpener(line: string): boolean {
   return MARKDOWN_FENCE_OPENER.test(line);
 }
 
-export function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}

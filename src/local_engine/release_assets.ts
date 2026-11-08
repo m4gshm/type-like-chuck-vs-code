@@ -21,7 +21,7 @@ const ASSETS: AssetEntry[] = [
   { platform: 'darwin', arch: 'arm64', fileName: (t) => `llama-${t}-bin-macos-arm64.tar.gz` },
 ];
 
-export function releaseDownloadUrl(base: string, tag: string, fileName: string, owner: string = 'ggml-org/llama.cpp'): string {
+function releaseDownloadUrl(base: string, tag: string, fileName: string, owner: string = 'ggml-org/llama.cpp'): string {
   return `${base.replace(/\/+$/, '')}/${owner}/releases/download/${tag}/${fileName}`;
 }
 

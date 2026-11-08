@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { cpus } from 'os';
 import { CustomTemplateDefinition } from './templates/types';
 import { defaultEngineKind } from './local_engine/capability';
+import { NPU_CONTEXT_LENGTH } from './local_engine/device';
+import { DEFAULT_HF_BASE } from './local_engine/model_catalog';
+import { DEFAULT_GITHUB_BASE, DEFAULT_RELEASE_TAG } from './local_engine/release_assets';
+import { DEFAULT_OPENVINO_URL } from './local_engine/ov_runtime';
 
 export type TlcMode = 'remote' | 'local';
 export type LocalDevice = 'auto' | 'cpu' | 'gpu' | 'npu';
@@ -70,7 +74,7 @@ export function readConfig(): ExtensionConfig {
   const effectiveKind: LocalEngineKind = rawKind === 'auto' && engineKind === 'llama.cpp'
     ? defaultEngineKind(process.platform, process.arch, cpus()[0]?.model ?? '')
     : engineKind;
-  const npuLimitRaw = c.get<number>('local.npuContextMaxLength', 8192);
+  const npuLimitRaw = c.get<number>('local.npuContextMaxLength', NPU_CONTEXT_LENGTH);
   // Only the ovgenai runner actually runs on the NPU (llama.cpp redirects an
   // explicit npu to GPU), so the NPU context cap applies there only.
   const npuEligible = mode === 'local' && npuLimitRaw > 0 && device === 'npu' && effectiveKind === 'ovgenai';
@@ -88,14 +92,14 @@ export function readConfig(): ExtensionConfig {
     localModelExplicit: c.get<string>('local.model', '').length > 0,
     localDevice: device,
     localNpuContextMaxLength: npuLimitRaw,
-    localLlamaCppRelease: c.get<string>('local.llamaCppRelease', 'b11935'),
+    localLlamaCppRelease: c.get<string>('local.llamaCppRelease', DEFAULT_RELEASE_TAG),
     localEngineDir: c.get<string>('local.engineDir', ''),
     localDistroDir: c.get<string>('local.distroDir', ''),
     localDownloadedModelsDir: c.get<string>('local.downloadedModelsDir', ''),
     localModelCacheDir: c.get<string>('local.modelCacheDir', ''),
-    localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', 'https://huggingface.co'),
-    localGithubUrl: c.get<string>('local.githubUrl', 'https://github.com'),
-    localOpenvinoUrl: c.get<string>('local.openvinoUrl', 'https://storage.openvinotoolkit.org'),
+    localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', DEFAULT_HF_BASE),
+    localGithubUrl: c.get<string>('local.githubUrl', DEFAULT_GITHUB_BASE),
+    localOpenvinoUrl: c.get<string>('local.openvinoUrl', DEFAULT_OPENVINO_URL),
     localCustomModelPath: c.get<string>('local.customModelPath', ''),
     localApiKeyEnabled: c.get<boolean>('local.apiKeyEnabled', true),
     promptTemplate: c.get<string>('promptTemplate'),

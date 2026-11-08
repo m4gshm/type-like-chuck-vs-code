@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { ExtensionConfig, fitContext } from './config';import { CompletionsClient, CompletionError, isAbortError, messageOf } from './completions_client';
+import { ExtensionConfig, fitContext } from './config';
+import { CompletionsClient, CompletionError, isAbortError } from './completions_client';
+import { messageOf } from './errors';
 import { extractContext } from './prompt';
 import { ForbiddenFiles } from './forbidden_files';
 import { PendingCompletion } from './pending_completion';

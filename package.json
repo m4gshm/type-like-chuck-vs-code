@@ -141,7 +141,7 @@
               "Bundled OpenVINO GenAI runner with native IR models (Windows/Linux x64, Linux arm64 Intel; NPU/GPU/CPU)",
               "Bundled MLX runner with 4-bit mlx-community models (macOS arm64; Metal)"
             ],
-            "description": "Local engine implementation (local mode only). `auto` follows the hardware: `mlx` on macOS arm64, `ovgenai` on Windows/Linux x64 and Linux arm64 with an Intel CPU, `llama.cpp` elsewhere. The ovgenai runner downloads the OpenVINO runtime libraries on first use. The mlx runner needs no downloads at all. Use \"TLC: Select Local Engine\"."
+            "description": "Local engine implementation (local mode only). `auto` follows the hardware: `mlx` on macOS arm64, `ovgenai` on Windows/Linux x64 and Linux arm64 with an Intel CPU, `llama.cpp` elsewhere. The ovgenai runner downloads the OpenVINO runtime libraries on first use. The mlx runner needs no downloads at all. Use \"TLC: Select Local Device\" or \"TLC: Reset Local Engine\"."
           },
           "tlc.local.model": {
             "type": "string",

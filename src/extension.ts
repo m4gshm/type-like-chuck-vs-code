@@ -25,8 +25,7 @@ import { LocalModeStatusUi } from './local_mode_status';
 import { normalizeLocalModelSetting, offerLocalEngine } from './startup_prompts';
 import { BRAND } from './brand';
 import { registerTlcCommands, pickLocalModelFromDisk, presentModelQuickPick, TlcCommandDeps } from './commands';
-
-const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+import { messageOf } from './errors';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Type like Chuck', { log: true });
@@ -91,19 +90,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
   );
 
-  const complectionState = new CompletionState(context.globalState);
-  const statusBar = new StatusBar(complectionState);
+  const completionState = new CompletionState(context.globalState);
+  const statusBar = new StatusBar(completionState);
 
   const connectionWatchdog = new ConnectionWatchdog({
     probe: () => client.listModels(),
     disable: (reason) => {
-      complectionProvider.cancelActiveRequests();
-      complectionState.setConnectionBlocked(true);
+      completionProvider.cancelActiveRequests();
+      completionState.setConnectionBlocked(true);
       statusBar.setConnectionReason(reason);
       statusBar.refresh();
     },
     enable: () => {
-      complectionState.setConnectionBlocked(false);
+      completionState.setConnectionBlocked(false);
       statusBar.setConnectionReason(undefined);
       statusBar.clearError();
       statusBar.refresh();
@@ -232,7 +231,7 @@ export function activate(context: vscode.ExtensionContext): void {
    */
   const localModeUi = new LocalModeStatusUi({
     statusBar,
-    state: complectionState,
+    state: completionState,
     client,
     watchdog: connectionWatchdog,
     stdioRunner: () => engineManager.stdioRunner(),
@@ -280,7 +279,7 @@ export function activate(context: vscode.ExtensionContext): void {
       client.refresh();
       // The local branch blocks completions while the engine runs; going back
       // to remote must lift the block or completions stay dead.
-      complectionState.setConnectionBlocked(false);
+      completionState.setConnectionBlocked(false);
       statusBar.setConnectionReason(undefined);
       statusBar.setEngine(undefined);
       statusBar.setEngineDetail(undefined);
@@ -319,12 +318,12 @@ export function activate(context: vscode.ExtensionContext): void {
   let previousEnginePaths: ReturnType<typeof enginePaths> | undefined;
   const partialLineActions = new PartialLineActionStore();
 
-  const complectionProvider = new CompletionProvider({
+  const completionProvider = new CompletionProvider({
     client,
     getConfig: config,
     resolveTemplates: () => templates,
     forbidden: () => forbidden,
-    completionState: complectionState,
+    completionState: completionState,
     statusBar: statusBar,
     connectionWatchdog: connectionWatchdog,
     warn: warn,
@@ -367,14 +366,14 @@ export function activate(context: vscode.ExtensionContext): void {
         + (onList ? `Current model: ${current}.` : `Model updated from the server (was "${current}").`),
       );
     } catch (err) {
-      const message = `${BRAND}: cannot reach ${config().baseUrl}: ${errMessage(err)}`;
+      const message = `${BRAND}: cannot reach ${config().baseUrl}: ${messageOf(err)}`;
       connectionWatchdog.reportFailure(message);
       void vscode.window.showWarningMessage(message);
     }
   };
 
   const selector: vscode.DocumentSelector = { pattern: '**' };
-  const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, complectionProvider);
+  const providerRegistration = vscode.languages.registerInlineCompletionItemProvider(selector, completionProvider);
   const codeActionRegistration = vscode.languages.registerCodeActionsProvider(selector, new PartialLineCodeActions(partialLineActions), {
     providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
   });
@@ -385,8 +384,8 @@ export function activate(context: vscode.ExtensionContext): void {
     client,
     modelConfig,
     apiKeyStorage,
-    complectionState,
-    complectionProvider,
+    completionState,
+    completionProvider,
     statusBar,
     connectionWatchdog,
     engineTasks,
@@ -423,15 +422,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeTextEditorSelection((event) => {
       if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse
         || event.kind === vscode.TextEditorSelectionChangeKind.Command) {
-        complectionProvider.cancelActiveRequests();
+        completionProvider.cancelActiveRequests();
         return;
       }
       const positions = event.selections.map((s) => s.active);
       if (positions.length !== 1) {
-        complectionProvider.cancelActiveRequests();
+        completionProvider.cancelActiveRequests();
       }
     }),
-    vscode.window.onDidChangeActiveTextEditor(() => complectionProvider.cancelActiveRequests()),
+    vscode.window.onDidChangeActiveTextEditor(() => completionProvider.cancelActiveRequests()),
   );
 
   let copilotPrev: boolean | undefined;
@@ -457,10 +456,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const firstCheck = copilotPrev === undefined;
     copilotPrev = active;
-    if (active && complectionState.isEnabled()) {
+    if (active && completionState.isEnabled()) {
       copilotAutoDisabled = true;
-      await complectionState.setEnabled(false);
-      complectionProvider.onDisabled();
+      await completionState.setEnabled(false);
+      completionProvider.onDisabled();
       statusBar.refresh();
       warn('GitHub Copilot detected: Type like Chuck completions disabled.');
       void vscode.window.showInformationMessage(
@@ -469,7 +468,7 @@ export function activate(context: vscode.ExtensionContext): void {
     } else if (!active && copilotAutoDisabled) {
       copilotAutoDisabled = false;
       if (!firstCheck) {
-        await complectionState.setEnabled(true);
+        await completionState.setEnabled(true);
         statusBar.refresh();
         void vscode.window.showInformationMessage('GitHub Copilot is off: Type like Chuck completions re-enabled.');
       }
@@ -541,7 +540,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration('tlc.local.model') && config().localModel === 'custom' && config().localCustomModelPath.length === 0) {
         // "custom" is meaningless without a file: ask for one immediately and
         // revert to the previous catalog model when the dialog is canceled.
-        const picked = await pickLocalModelFromDisk(config().localEngineKind);        if (picked !== undefined) {
+        const picked = await pickLocalModelFromDisk(config().localEngineKind);
+        if (picked !== undefined) {
           await vscode.workspace.getConfiguration('tlc').update('local.customModelPath', picked, vscode.ConfigurationTarget.Global);
         } else {
           const revert = previous.localModel.length > 0 && previous.localModel !== 'custom' ? previous.localModel : DEFAULT_LOCAL_MODEL;
@@ -586,7 +586,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     void checkServerModels().catch((err: unknown) => {
       connectionWatchdog.reportFailure(
-        `Cannot reach the completions API (${config().baseUrl}): ${errMessage(err)}`,
+        `Cannot reach the completions API (${config().baseUrl}): ${messageOf(err)}`,
       );
     });
   }, MODEL_POLL_INTERVAL_MS);
@@ -618,7 +618,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // activation and applyMode there is a window where the placeholder
       // endpoint would leak requests (and a 401 from the OpenAI SDK's default
       // host). The engine-status ready branch lifts the block.
-      complectionState.setConnectionBlocked(true);
+      completionState.setConnectionBlocked(true);
       statusBar.setConnectionReason('starting…');
       // The actual model (download picker may change it) and device (auto
       // resolution and fallbacks) are reported by the ready line once the

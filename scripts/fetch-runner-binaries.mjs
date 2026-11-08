@@ -38,6 +38,7 @@ const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubTok
 const versionOverride = process.env.RUNNER_VERSION?.trim() || undefined;
 const DEFAULT_RUNNER_VERSIONS = {
   'type-like-chuck-backed-openvino': 'v0.1.0',
+  'type-like-chuck-backed-mlx': 'v0.1.0',
 };
 const version = (repo) => versionOverride ?? DEFAULT_RUNNER_VERSIONS[repo];
 
@@ -151,8 +152,8 @@ for (const target of TARGETS) {
     try {
       assetsByRepo.set(target.repo, await releaseAssets(target.repo));
     } catch (err) {
-      // A repo without a pin may simply not be published yet (e.g. mlx);
-      // skip it instead of failing the whole package run. A pinned lookup
+      // A repo without a pin may simply not be published yet; skip it
+      // instead of failing the whole package run. A pinned lookup
       // failure is fatal: the pinned release must exist.
       if (version(target.repo) === undefined) {
         console.warn(`skipping ${OWNER}/${target.repo}: ${err.message}`);

@@ -35,8 +35,6 @@ export const offerLocalEngine = async (host: {
   }
 };
 
-export const offerRecommendedLocalEngine = undefined;
-
 /** A stale local.model value (renamed catalog ids, hand-edited settings)
  * would fail the engine start; reset it to the default once, with a notice. */
 export const normalizeLocalModelSetting = async (host: {
