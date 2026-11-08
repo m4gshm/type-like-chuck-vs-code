@@ -11,7 +11,9 @@
 // Backend version: pinned per repo below so a plugin build always pairs with
 // a runner release it was developed against (compatibility over freshness).
 // Override with RUNNER_VERSION=<tag> to fetch that tag from every backend;
-// an explicit override also disables the local-build fallback. A downloaded
+// a pin (the defaults above or the override) also disables the local-build
+// fallback: a plugin build always pairs with the published runner release.
+// A downloaded
 // runner records its release in a <binary>.tag sidecar: it is re-downloaded
 // only when that version differs from the expected one.
 import { existsSync, mkdirSync, createWriteStream, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -70,10 +72,11 @@ const localRepoDir = (repo) => join(dirname(fileURLToPath(import.meta.url)), '..
 
 // Local build fallback: if the sibling backend repo exists for this host
 // platform, copy (or first build via `task build`) the freshly built runner.
-// This avoids needing a GitHub release for local builds and F5 runs.
-// Skipped when RUNNER_VERSION pins a release.
+// This avoids needing a GitHub release when no release is pinned (local
+// backend development). Skipped whenever a version is pinned — CI has no
+// `task` and a pinned build must pair with the published release anyway.
 function localBuild(target) {
-  if (versionOverride !== undefined || releaseOnly) {
+  if (version(target.repo) !== undefined || releaseOnly) {
     return undefined;
   }
   const repoDir = localRepoDir(target.repo);
