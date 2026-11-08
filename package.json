@@ -153,7 +153,13 @@
               "Qwen2.5-Coder 3B",
               "custom"
             ],
-            "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download. When the selected model is not downloaded yet, a picker offers all catalog models before the download starts."
+            "enumDescriptions": [
+                "≈0.3–0.5 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+                "≈0.9–1.6 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+                "≈1.7–3.1 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+                "Use the model file or directory from `tlc.local.customModelPath`"
+            ],
+            "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download. A selected model downloads automatically when missing; the catalog picker with sizes is shown only while no model is selected yet (first start)."
           },
           "tlc.local.customModelPath": {
             "type": "string",

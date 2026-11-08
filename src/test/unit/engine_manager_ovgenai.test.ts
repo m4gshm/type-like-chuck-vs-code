@@ -44,6 +44,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const spawned: FakeRunnerChild[] = [];
   const base: EngineManagerSettings = {
     modelId: 'Qwen2.5-Coder 1.5B',
+    modelIdExplicit: true,
     device: 'auto',
     engineKind: 'ovgenai',
     npuContextLength: 8192,

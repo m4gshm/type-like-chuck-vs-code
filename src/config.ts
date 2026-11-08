@@ -14,6 +14,7 @@ export interface ExtensionConfig {
   mode: TlcMode;
   localEngineKind: LocalEngineKind;
   localModel: string;
+  localModelExplicit: boolean;
   localDevice: LocalDevice;
   localNpuContextMaxLength: number;
   localLlamaCppRelease: string;
@@ -84,6 +85,7 @@ export function readConfig(): ExtensionConfig {
     mode,
     localEngineKind: effectiveKind,
     localModel: c.get<string>('local.model', 'Qwen2.5-Coder 1.5B'),
+    localModelExplicit: c.get<string>('local.model', '').length > 0,
     localDevice: device,
     localNpuContextMaxLength: npuLimitRaw,
     localLlamaCppRelease: c.get<string>('local.llamaCppRelease', 'b11935'),

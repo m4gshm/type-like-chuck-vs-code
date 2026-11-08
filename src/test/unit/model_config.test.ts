@@ -11,6 +11,7 @@ function mkConfig(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     mode: 'remote',
     localEngineKind: 'llama.cpp',
     localModel: 'Qwen2.5-Coder 1.5B',
+    localModelExplicit: true,
     localDevice: 'cpu',
     localNpuContextMaxLength: 8192,
     localLlamaCppRelease: 'b11935',

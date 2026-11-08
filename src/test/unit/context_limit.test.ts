@@ -10,6 +10,7 @@ function config(overrides: Partial<ExtensionConfig> = {}): ExtensionConfig {
     mode: 'local',
     localEngineKind: 'llama.cpp',
     localModel: 'Qwen2.5-Coder 1.5B',
+    localModelExplicit: true,
     localDevice: 'npu',
     localNpuContextMaxLength: 8192,
     localLlamaCppRelease: 'b11935',

@@ -36,6 +36,7 @@ interface Fixture {
 
 const settings = (overrides: Partial<EngineManagerSettings> = {}): EngineManagerSettings => ({
   modelId: 'Qwen2.5-Coder 1.5B',
+  modelIdExplicit: true,
   device: 'auto',
   engineKind: 'llama.cpp',
   npuContextLength: 8192,
@@ -255,6 +256,49 @@ describe('EngineManager (llama.cpp engine)', () => {
     const f = await makeFixture({}, { modelId: 'custom', modelPath: '' });
     await expect(new EngineManager(f.host).ensureReady()).rejects.toThrow(/custom.*tlc\.local\.customModelPath/s);
     expect(last(f.statuses).status).toBe('error');
+  });
+
+  it('downloads an explicitly selected model without asking', async () => {
+    const asked: string[] = [];
+    const f = await makeFixture(
+      { askModelDownload: async (id) => { asked.push(id); return undefined; } },
+      { modelId: 'Qwen2.5-Coder 0.5B', modelIdExplicit: true },
+    );
+    const status = await new EngineManager(f.host).ensureReady();
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 0.5B' });
+    expect(f.downloads.some((d) => d.url.includes('Qwen2.5-Coder-0.5B'))).toBe(true);
+    expect(asked).toHaveLength(0);
+    await new EngineManager(f.host).stop();
+  });
+
+  it('asks which model to download while no model is selected yet and persists the pick', async () => {
+    const persisted: string[] = [];
+    const f = await makeFixture(
+      {
+        askModelDownload: async (currentId, choices) => {
+          expect(currentId).toBe('Qwen2.5-Coder 1.5B');
+          expect(choices.find((c) => c.id === 'Qwen2.5-Coder 1.5B')?.downloaded).toBe(false);
+          return 'Qwen2.5-Coder 0.5B';
+        },
+        setLocalModel: async (id) => { persisted.push(id); },
+      },
+      { modelIdExplicit: false },
+    );
+    const status = await new EngineManager(f.host).ensureReady();
+    expect(status).toMatchObject({ status: 'ready', model: 'Qwen2.5-Coder 0.5B' });
+    expect(f.downloads.some((d) => d.url.includes('Qwen2.5-Coder-0.5B'))).toBe(true);
+    expect(persisted).toEqual(['Qwen2.5-Coder 0.5B']);
+    await new EngineManager(f.host).stop();
+  });
+
+  it('cancels the start when the model download question is dismissed', async () => {
+    const f = await makeFixture(
+      { askModelDownload: async () => undefined },
+      { modelIdExplicit: false },
+    );
+    await expect(new EngineManager(f.host).ensureReady()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(f.statuses.map((s) => s.status)).toEqual([ENGINE_STATUS.awaitingInput, 'error']);
+    expect(f.downloads).toHaveLength(0);
   });
 
   it('warns only when a custom model path names no supported family', async () => {

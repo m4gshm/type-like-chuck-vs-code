@@ -54,6 +54,8 @@ const NPU_READY_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 export interface EngineManagerSettings {
   modelId: string;
+  /** True when tlc.local.model holds an explicit value; while unset the catalog picker decides what to download. */
+  modelIdExplicit: boolean;
   device: LocalDevice;
   engineKind: 'llama.cpp' | 'ovgenai' | 'mlx';
   npuContextLength: number;
@@ -100,7 +102,7 @@ export interface EngineManagerHost extends RunnerDeps {
   npuGeneration?: typeof npuGeneration;
   /** Returns a picked distro folder, DISTRO_CHOICE_DOWNLOAD, or undefined when dismissed. */
   askDistroOrDownload?: (kind: 'ovgenai' | 'llama.cpp') => Promise<string | typeof DISTRO_CHOICE_DOWNLOAD | undefined>;
-  /** Offered when the configured catalog model is not downloaded yet; returns the picked id, or undefined when dismissed. */
+  /** Offered while no catalog model is selected yet (tlc.local.model unset); returns the picked id, or undefined when dismissed. */
   askModelDownload?: (currentId: string, choices: ModelDownloadChoice[]) => Promise<string | undefined>;
   /** Persists a model picked for download (tlc.local.model). */
   setLocalModel?: (id: string) => Promise<void>;
@@ -446,10 +448,10 @@ export class EngineManager {
   }
 
   /**
-   * When the configured catalog model is not downloaded yet, offers the whole
-   * catalog instead of silently downloading the configured one. The pick is
-   * persisted via `setLocalModel` and reflected into `settings.modelId` so the
-   * running start uses it. Dismissing cancels the start.
+   * The catalog picker runs only while no model is selected yet (tlc.local.model
+   * unset); an explicit choice downloads without asking. The pick is persisted
+   * via `setLocalModel` and reflected into `settings.modelId` so the running
+   * start uses it. Dismissing cancels the start.
    */
   private async chooseModelToDownload(
     paths: EnginePaths,
@@ -457,7 +459,7 @@ export class EngineManager {
     format: IrFormat = 'int8',
   ): Promise<void> {
     const ask = this.host.askModelDownload;
-    if (ask === undefined || this.modelDownloadAsked || !isLocalModelId(settings.modelId)) {
+    if (ask === undefined || this.modelDownloadAsked || settings.modelIdExplicit || !isLocalModelId(settings.modelId)) {
       return;
     }
     const choices = this.modelDownloadChoices(paths, settings.engineKind, format);

@@ -45,6 +45,7 @@ const makeFixture = async (settingsOverrides: Partial<EngineManagerSettings> = {
   const spawned: FakeRunnerChild[] = [];
   const base: EngineManagerSettings = {
     modelId: 'Qwen2.5-Coder 1.5B',
+    modelIdExplicit: true,
     device: 'gpu',
     engineKind: 'mlx',
     npuContextLength: 8192,
@@ -143,8 +144,8 @@ describe('EngineManager (mlx engine)', () => {
     await manager.stop();
   });
 
-  it('asks which model to download when the configured one is missing and persists the pick', async () => {
-    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B' });
+  it('asks which model to download while no model is selected yet and persists the pick', async () => {
+    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B', modelIdExplicit: false });
     const pickedModels: string[] = [];
     let answer: string | undefined = 'Qwen2.5-Coder 3B';
     f.host.askModelDownload = async (currentId, choices) => {
@@ -169,7 +170,7 @@ describe('EngineManager (mlx engine)', () => {
   });
 
   it('cancels the start when the model-download question is dismissed', async () => {
-    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B' });
+    const f = await makeFixture({ modelId: 'Qwen2.5-Coder 0.5B', modelIdExplicit: false });
     f.host.askModelDownload = async () => undefined;
     const manager = new EngineManager(f.host);
     await expect(manager.ensureReady()).rejects.toThrow();

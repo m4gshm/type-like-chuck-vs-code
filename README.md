@@ -6,7 +6,7 @@ Inline (ghost text) code completions from any OpenAI-compatible API, with config
 
 ## Features
 
-- **Local engine (default)** — TLC downloads a Qwen2.5-Coder model (0.5B / 1.5B / 3B) plus an engine; when the configured model is not downloaded yet, a picker offers the whole catalog with sizes before anything is downloaded:
+- **Local engine (default)** — TLC downloads a Qwen2.5-Coder model (0.5B / 1.5B / 3B) plus an engine; a selected model downloads automatically when missing, and the catalog picker with sizes is shown only while no model is selected yet (first start):
   - `llama.cpp` — vulkan build, GGUF models, GPU (NVIDIA/AMD/Intel) + CPU fallback;
   - `ovgenai` — OpenVINO GenAI runner with native IR (nf4) models for Windows/Linux x64 and Linux arm64: CPU/GPU/Intel NPU (NF4 models favor low memory, the runtime libraries are downloaded on first use);
   - `mlx` — macOS arm64 only: MLX 4-bit models on Metal, self-contained, no downloads.

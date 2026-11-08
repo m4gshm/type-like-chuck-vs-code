@@ -200,11 +200,15 @@ The user SHALL be able to point the extension at a locally unpacked engine distr
 - **THEN** the preparation is canceled silently (same semantics as a canceled download) and no partial state is left
 
 ### Requirement: Model catalog and download
-The extension SHALL offer per-kind model catalogs via `TLC: Select Local Model`, download the chosen model into global storage if missing, and remember the choice in `tlc.local.model` (default 1.5B): Qwen2.5-Coder GGUF files 0.5B/1.5B/3B for `llama.cpp`; the same sizes as native OpenVINO IR models (`.xml` + `.bin` pairs, nf4 quantization from the m4gshm Hugging Face repos) downloaded as a pair with pair-existence validation for `ovgenai`; mlx-community 4-bit model directories (`config.json`, safetensors weights, tokenizer files) downloaded with the multi-file machinery for `mlx`. The picker SHALL offer entries only for the active engine kind, with downloaded marks, plus a "From disk…" entry that sets `tlc.local.customModelPath` (a GGUF file for llama.cpp, an IR model directory for ovgenai, an mlx model directory for mlx) with `tlc.local.model` set to `custom` and downloads nothing; selecting a catalog model again clears the setting. When the resolved model is a `custom` path whose model family cannot be matched to a built-in FIM template, the extension SHALL warn on engine start that the model was not validated for FIM completions; completions continue.
+The extension SHALL offer per-kind model catalogs via `TLC: Select Local Model`, download the chosen model into global storage if missing, and remember the choice in `tlc.local.model` (default 1.5B): Qwen2.5-Coder GGUF files 0.5B/1.5B/3B for `llama.cpp`; the same sizes as native OpenVINO IR models (`.xml` + `.bin` pairs, nf4 quantization from the m4gshm Hugging Face repos) downloaded as a pair with pair-existence validation for `ovgenai`; mlx-community 4-bit model directories (`config.json`, safetensors weights, tokenizer files) downloaded with the multi-file machinery for `mlx`. While `tlc.local.model` is unset, engine start SHALL offer the catalog picker (with download sizes) before downloading; an explicitly selected model SHALL download automatically without asking. The picker SHALL offer entries only for the active engine kind, with downloaded marks, plus a "From disk…" entry that sets `tlc.local.customModelPath` (a GGUF file for llama.cpp, an IR model directory for ovgenai, an mlx model directory for mlx) with `tlc.local.model` set to `custom` and downloads nothing; selecting a catalog model again clears the setting. When the resolved model is a `custom` path whose model family cannot be matched to a built-in FIM template, the extension SHALL warn on engine start that the model was not validated for FIM completions; completions continue.
 
 #### Scenario: First model download
-- **WHEN** local mode is entered for the first time with no model present
-- **THEN** the configured default model is downloaded automatically before the engine starts
+- **WHEN** local mode starts while no model is selected yet (`tlc.local.model` unset)
+- **THEN** the catalog picker with download sizes is offered and the picked model downloads before the engine starts
+
+#### Scenario: Selected model downloads without asking
+- **WHEN** an explicitly selected catalog model is missing on disk
+- **THEN** it downloads automatically with progress reporting and the engine starts; no confirmation picker is shown
 
 #### Scenario: Switch model
 - **WHEN** the user selects a different local model

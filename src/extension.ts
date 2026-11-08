@@ -192,6 +192,7 @@ export function activate(context: vscode.ExtensionContext): void {
     paths: enginePaths,
     settings: () => ({
       modelId: config().localModel,
+      modelIdExplicit: config().localModelExplicit,
       device: config().localDevice,
       engineKind: config().localEngineKind,
       npuContextLength: config().localNpuContextMaxLength,
