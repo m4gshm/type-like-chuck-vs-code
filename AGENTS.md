@@ -38,9 +38,11 @@ Run `check-types` and `unit` after every change; they are quick. On Windows
 ## Architecture
 
 Entry point: `src/extension.ts` (wires everything; `vscode` is imported only
-by it, `config.ts`, `status_bar.ts`, `api_key_storage.ts`, the type-only
-imports in `completion_provider.ts`/`completion_state.ts`, the unit-test stub
-and the integration tests). Core logic lives in dependency-injected classes
+by it, `config.ts`, `status_bar.ts`, `api_key_storage.ts`, `commands.ts`,
+`completion_code_actions.ts`, the constructor values in `completion_provider.ts`
+(CancellationError/Range/Position/InlineCompletionItem — the unit-test stub
+covers them), the type-only imports in `completion_state.ts`, the unit-test
+stub and the integration tests). Core logic lives in dependency-injected classes
 that do **not** import
 `vscode` — this is what keeps them unit-testable with vitest (unit tests run in
 plain Node; `vscode` is stubbed in `src/test/unit/vscode-stub.ts`).
