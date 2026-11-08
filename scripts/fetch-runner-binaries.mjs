@@ -184,6 +184,13 @@ for (const target of TARGETS) {
     if (extract.status !== 0) {
       process.exit(extract.status ?? 1);
     }
+    // The archive names the binary after the asset (tlc-mlx-runner-macos-arm64);
+    // the extension resolves finalName — align the extracted name.
+    const extracted = join(dir, target.asset.replace(/\.tar\.gz$/, ''));
+    if (!existsSync(destination) && existsSync(extracted)) {
+      rmSync(destination, { force: true });
+      await rename(extracted, destination);
+    }
     await chmod(destination, 0o755);
     await rm(`${destination}.tar.gz`, { force: true });
   } else {
