@@ -27,9 +27,9 @@ All commands are discoverable in the command palette under the `TLC:` prefix.
 
 ## Local engine defaults
 
-Engine kind and device picked by platform (untouched settings):
+Engine kind and the device priority chain (devices are tried in order) when settings are untouched:
 
-| Platform / arch | CPU | Kind | Device |
+| Platform / arch | CPU | Kind | Priority chain |
 | --- | --- | --- | --- |
 | macOS arm64 | Apple Silicon | `mlx` | `gpu` (Metal; the device setting is ignored) |
 | macOS x64 | any | `llama.cpp` | `auto` (GPU → CPU) |
@@ -41,7 +41,7 @@ Engine kind and device picked by platform (untouched settings):
 | Linux arm64 | Intel | `ovgenai` | `auto` (GPU → CPU) |
 | Linux arm64 | non-Intel (Ampere, Graviton…) | `llama.cpp` | `auto` (GPU → CPU) |
 
-The NPU part of the `auto` chain (ovgenai only) is decided by Intel NPU generation: gen 4+ (Lunar Lake, Panther Lake, Wildcat Lake, Nova Lake) leads with NPU → GPU → CPU, and the nf4 models + NPU context cap are selected from the first hop; gen 3 and older (Meteor Lake, Arrow Lake) or no NPU stay GPU → CPU. An explicit `npu` in llama.cpp is warned about and resolved to GPU.
+The `auto` chain (ovgenai only) starts on the NPU when the machine has an Intel NPU generation: gen 4+ (Lunar Lake, Panther Lake, Wildcat Lake, Nova Lake) leads with NPU → GPU → CPU, and the nf4 models + NPU context cap are selected from the first hop; gen 3 and older (Meteor Lake, Arrow Lake) or no NPU stay GPU → CPU. An explicit `npu` in llama.cpp is warned about and resolved to GPU.
 
 A failed accelerated start falls back down the device chain automatically; a start failure that hits CPU doesn't loop. A failed download shows a notification with **Retry download** (runs the start again in place) and **Reset Local Engine…** (the full reset dialog).
 
