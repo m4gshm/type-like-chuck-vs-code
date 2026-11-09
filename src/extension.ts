@@ -147,7 +147,13 @@ export function activate(context: vscode.ExtensionContext): void {
     modelName: () => localModelName(),
   });
   // The picked folder persists as tlc.local.distroDir so later starts skip the question.
+  // The "Download" choice is remembered for the session: a retried download
+  // starts again instead of re-asking (the answer per sesion reset by restart).
+  let distroDecision: Awaited<ReturnType<typeof askDistroOrDownload>> | undefined;
   const askDistroOrDownload = async (kind: 'ovgenai' | 'llama.cpp'): Promise<string | typeof DISTRO_CHOICE_DOWNLOAD | undefined> => {
+    if (distroDecision !== undefined) {
+      return distroDecision;
+    }
     const kindLabel = kind === 'ovgenai' ? 'OpenVINO GenAI runtime' : 'llama.cpp build';
     const chosen = await vscode.window.showQuickPick(
       [
@@ -160,6 +166,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return undefined;
     }
     if (chosen.value === DISTRO_CHOICE_DOWNLOAD) {
+      distroDecision = DISTRO_CHOICE_DOWNLOAD;
       return DISTRO_CHOICE_DOWNLOAD;
     }
     const folder = await vscode.window.showOpenDialog({
@@ -173,6 +180,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const dir = folder[0].fsPath;
     await vscode.workspace.getConfiguration('tlc').update('local.distroDir', dir, vscode.ConfigurationTarget.Global);
+    distroDecision = dir;
     return dir;
   };
   // The pick persists as tlc.local.model so later starts skip the question.
@@ -244,9 +252,18 @@ export function activate(context: vscode.ExtensionContext): void {
       localEndpoint = url;
     },
     stage: (label) => {
-      engineTasks.stageLabel = label;
+      engineTasks.setStage(label);
     },
     log: { info, warn },
+    offerDownloadRetry: (message) => {
+      const buttons: Array<{ label: string; action: () => void }> = [
+        { label: 'Retry download', action: () => { void engineTasks.run(`${BRAND}: retrying the local engine download`, (signal) => managerEnsureReady(signal)); } },
+        { label: 'Reset Local Engine…', action: () => { void vscode.commands.executeCommand('tlc.resetLocalEngine'); } },
+      ];
+      void vscode.window
+        .showInformationMessage(`${BRAND}: ${message}`, ...buttons.map((b) => b.label))
+        .then((chosen) => buttons.find((b) => b.label === chosen)?.action());
+    },
   });
   const localEnginePhaseLabel = (): string => localModeUi.enginePhaseLabel();
   const localModelName = (): string => localModelDisplayName(config().localEngineKind, config().localModel);

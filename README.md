@@ -43,7 +43,7 @@ Engine kind and device picked by platform (untouched settings):
 
 The NPU part of the `auto` chain (ovgenai only) is decided by Intel NPU generation: gen 4+ (Lunar Lake, Panther Lake, Wildcat Lake, Nova Lake) leads with NPU → GPU → CPU, and the nf4 models + NPU context cap are selected from the first hop; gen 3 and older (Meteor Lake, Arrow Lake) or no NPU stay GPU → CPU. An explicit `npu` in llama.cpp is warned about and resolved to GPU.
 
-A failed accelerated start falls back down the device chain automatically; a start failure that hits CPU doesn't loop.
+A failed accelerated start falls back down the device chain automatically; a start failure that hits CPU doesn't loop. A failed download shows a notification with **Retry download** (runs the start again in place) and **Reset Local Engine…** (the full reset dialog).
 
 All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A model from a supported family is marked with a check in `Type like Chuck: Select Model`.
 

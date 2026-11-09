@@ -26,6 +26,8 @@ const formatBytes = (bytes: number): string => {
 export class EngineTaskRunner {
   /** Meaningful stage before the first byte arrives; kept in sync by engine-status handling. */
   stageLabel = 'starting…';
+  /** Set when the engine moved past downloads; stale byte counters must not show through. */
+  private stagesCleared = false;
   private listener: ((kind: 'engine' | 'model', progress: DownloadProgress) => void) | undefined;
   private active: Promise<void> | undefined;
 
@@ -39,6 +41,12 @@ export class EngineTaskRunner {
     enginePhaseLabel: () => string;
     modelName: () => string;
   }) {}
+
+  /** Engine-status stage updates: the byte counter only lives during "downloading …". */
+  setStage(label: string): void {
+    this.stageLabel = label;
+    this.stagesCleared = !label.startsWith('downloading');
+  }
 
   onDownloadProgress = (kind: 'engine' | 'model', progress: DownloadProgress): void => {
     this.listener?.(kind, progress);
@@ -62,6 +70,7 @@ export class EngineTaskRunner {
     let progress: DownloadProgress = { downloadedBytes: 0, totalBytes: undefined };
     let progressKind: 'engine' | 'model' = 'engine';
     let lastFile: string | undefined;
+    this.stagesCleared = false;
     this.listener = (kind, p) => {
       if (kind !== progressKind || (p.fileName !== undefined && p.fileName !== lastFile)) {
         // A new phase or a new file started: never show the previous counters.
@@ -79,8 +88,10 @@ export class EngineTaskRunner {
         const elapsed = Math.round((Date.now() - startedAt) / 1000);
         const elapsedLabel = elapsed >= 10 ? ` (${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed)` : '';
         // Until the first byte arrives the byte counter reads 0 — show the
-        // stage instead; "0B" confuses more than it informs.
-        if (progress.downloadedBytes === 0) {
+        // stage instead; "0B" confuses more than it informs. The same applies
+        // once downloads are done (compile/start): the last file's completed
+        // counters must not read as a stuck download.
+        if (this.stagesCleared || progress.downloadedBytes === 0) {
           bar.report({ message: `${this.stageLabel}${elapsedLabel}` });
           return;
         }

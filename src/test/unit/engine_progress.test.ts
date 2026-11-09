@@ -66,4 +66,22 @@ describe('EngineTaskRunner', () => {
     await flush(200);
     expect(bars.some((b) => b.includes('openvino_model.bin (file 2/4)') && b.includes(': 1.5KB / 3.0KB'))).toBe(true);
   });
+
+  it('drops the finished byte counters once the engine moves past downloads', async () => {
+    const { host, bars } = makeHost();
+    const runner = new EngineTaskRunner(host as never);
+    const task = async () => {
+      runner.onDownloadProgress('model', { downloadedBytes: 0, totalBytes: 11400, fileName: 'tokenizer.json', fileIndex: 7, fileCount: 7 });
+      runner.onDownloadProgress('model', { downloadedBytes: 11400, totalBytes: 11400, fileName: 'tokenizer.json', fileIndex: 7, fileCount: 7 });
+      await flush(250);
+      // The engine is compiling now; a new status replaces the download phase.
+      runner.setStage('starting ovgenai runner: Qwen2.5-Coder 1.5B… (the first NPU start compiles the model — several minutes)');
+      await flush(450);
+    };
+    await runner.run('t', task);
+    await flush(200);
+    expect(bars.some((b) => b.includes('tokenizer.json'))).toBe(true);
+    expect(bars.at(-1)).toContain('starting ovgenai runner');
+    expect(bars.at(-1)).not.toContain('11.4KB');
+  });
 });

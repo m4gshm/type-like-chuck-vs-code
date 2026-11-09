@@ -130,7 +130,8 @@ for (const target of TARGETS) {
   const expected = version(target.repo);
   if (existsSync(destination)) {
     const diskTag = onDiskTag(destination);
-    if (expected === undefined || diskTag === expected || (!releaseOnly && (diskTag === 'local' || diskTag === ''))) {
+    const acceptable = expected === undefined ? diskTag === 'local' || diskTag === '' : diskTag === expected;
+    if (acceptable) {
       console.log(`runner binary present: ${destination}`);
       continue;
     }

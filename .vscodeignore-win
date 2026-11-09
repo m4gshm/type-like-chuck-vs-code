@@ -1,0 +1,32 @@
+# Everything the packaged extension does not need at runtime.
+# Windows-only vsix: same as .vscodeignore plus the non-Windows runners.
+.vscode/**
+.vscodeignore
+.vscodeignore-win
+.github/**
+.opencode/**
+.task/**
+coverage/**
+.gitmodules
+build/**
+type-like-chuck-backed-openvino/**
+type-like-chuck-backed-mlx/**
+openspec/**
+binaries/ovgenai-release/**
+binaries/ovgenai/linux-arm64/**
+binaries/ovgenai/linux-x64/**
+binaries/mlx/**
+scripts/**
+src/**
+out/**
+*.ts
+tsconfig*.json
+esbuild.js
+.gitignore
+.vscode-test.mjs
+AGENTS.md
+Taskfile.yaml
+eslint.config.mjs
+font_glyph_preview.png
+icon.svg
+NUL

@@ -32,6 +32,8 @@ export class LocalModeStatusUi {
     /** Feeds the progress bar's stage label while nothing is downloading yet. */
     stage: (label: string) => void;
     log: { info(message: string): void; warn(message: string): void };
+    /** Offered when a download fails (status.message starts with "Download failed"). */
+    offerDownloadRetry?: (message: string) => void;
   }) {}
 
   kindLabel(): string {
@@ -79,6 +81,9 @@ export class LocalModeStatusUi {
       this.host.statusBar.setConnectionReason(status.message);
       this.host.statusBar.setEngine(`$(error) engine: ${status.message}`);
       this.host.log.warn(`${BRAND} local engine error: ${status.message}`);
+      if (status.message.startsWith('Download failed')) {
+        this.host.offerDownloadRetry?.(status.message);
+      }
     } else {
       const label = status.status === ENGINE_STATUS.awaitingInput
         ? status.prompt

@@ -154,10 +154,10 @@
               "custom"
             ],
             "enumDescriptions": [
-                "≈0.3–0.5 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
-                "≈0.9–1.6 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
-                "≈1.7–3.1 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
-                "Use the model file or directory from `tlc.local.customModelPath`"
+              "≈0.3–0.5 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+              "≈0.9–1.6 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+              "≈1.7–3.1 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+              "Use the model file or directory from `tlc.local.customModelPath`"
             ],
             "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download. A selected model downloads automatically when missing; the catalog picker with sizes is shown only while no model is selected yet (first start)."
           },
@@ -435,7 +435,8 @@
     "vscode-test": "vscode-test",
     "lint": "eslint src",
     "build": "npm run test && npm run lint",
-    "package": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies"
+    "package": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies",
+    "package:win": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies --ignoreFile .vscodeignore-win"
   },
   "dependencies": {
     "https-proxy-agent": "^5.0.1",

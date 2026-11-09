@@ -13,6 +13,7 @@ const makeHost = () => {
     stdioSet: [] as Array<unknown>,
     apiKeys: [] as Array<string | undefined>,
     logs: [] as string[],
+    retryOffers: [] as string[],
     successes: 0,
   };
   const host = {
@@ -37,6 +38,7 @@ const makeHost = () => {
     setEndpoint: (url: string | undefined) => recorded.endpoint.push(url),
     stage: (label: string) => recorded.stages.push(label),
     log: { info: (m: string) => recorded.logs.push(m), warn: () => undefined },
+    offerDownloadRetry: (m: string) => recorded.retryOffers.push(m),
   };
   const ui = new LocalModeStatusUi(host as never);
   return { ui, recorded, setRunner: (r: typeof runner) => { runner = r; } };
@@ -77,6 +79,13 @@ describe('LocalModeStatusUi', () => {
     expect(recorded.endpoint).toEqual(['']);
     expect(recorded.engine.at(-1)).toBe('$(error) engine: boom');
     expect(recorded.reasons.at(-1)).toBe('boom');
+  });
+
+  it('offers a retry only when an error is a download failure', () => {
+    const { ui, recorded } = makeHost();
+    ui.handle({ status: 'error', message: 'boom' });
+    ui.handle({ status: 'error', message: 'Download failed after 16927 bytes: aborted (https://x/y)' });
+    expect(recorded.retryOffers).toEqual(['Download failed after 16927 bytes: aborted (https://x/y)']);
   });
 
   it('publishes the download stage and blocks completions while starting', () => {
