@@ -13,14 +13,18 @@ class FakeMemento {
   }
 }
 
+function items(): Array<{ text: string; tooltip?: string; command?: string; shown: boolean }> {
+  return (window as unknown as { createdStatusBarItems: Array<{ text: string; tooltip?: string; command?: string; shown: boolean }> }).createdStatusBarItems;
+}
+
 function itemText(): string {
-  const items = (window as unknown as { createdStatusBarItems: Array<{ text: string }> }).createdStatusBarItems;
-  return items[items.length - 1].text;
+  const all = items();
+  return all[all.length - 2].text;
 }
 
 function itemTooltip(): string {
-  const items = (window as unknown as { createdStatusBarItems: Array<{ tooltip?: string }> }).createdStatusBarItems;
-  return items[items.length - 1].tooltip ?? '';
+  const all = items();
+  return all[all.length - 2].tooltip ?? '';
 }
 
 describe('StatusBar', () => {
@@ -96,6 +100,20 @@ describe('StatusBar', () => {
     bar.setEngine(undefined);
     bar.setEngineDetail(undefined);
     expect(itemTooltip()).toContain('completions enabled (click to toggle)');
+  });
+
+  it('shows the partial-line badge while a candidate exists and hides it after', () => {
+    const state = new CompletionState(new FakeMemento() as never);
+    const bar = new StatusBar(state);
+    const badge = items()[items().length - 1];
+
+    bar.setPartialLine(12);
+    expect(badge.text).toBe('$(light-bulb) insert into line 12');
+    expect(badge.command).toBe('tlc.insertPartialLine');
+    expect(badge.shown).toBe(true);
+
+    bar.setPartialLine(undefined);
+    expect(badge.shown).toBe(false);
   });
 });
 

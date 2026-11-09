@@ -9,6 +9,7 @@ import type { CompletionState } from './completion_state';
 import type { ModelConfig } from './model_config';
 import type { StatusBar } from './status_bar';
 import type { ConnectionWatchdog } from './connection_watchdog';
+import type { PartialLineActionStore } from './partial_line_action';
 import { pickSupportedModel } from './model_selection';
 import { ResetTarget } from './local_engine/engine_manager';
 import { localModelDiskDialog, localModelPickerItems } from './local_engine/model_picker';
@@ -25,6 +26,7 @@ export interface TlcCommandDeps {
   completionProvider: CompletionProvider;
   statusBar: StatusBar;
   connectionWatchdog: ConnectionWatchdog;
+  partialLineActions: PartialLineActionStore;
   engineTasks: { run(title: string, task: (signal: AbortSignal) => Promise<unknown>): Promise<void> };
   engineManager: { reset(target: ResetTarget, signal?: AbortSignal): Promise<unknown> };
   checkServerModels: () => Promise<ModelInfo[]>;
@@ -245,6 +247,16 @@ export const registerTlcCommands = (deps: TlcCommandDeps): vscode.Disposable[] =
         }
       }
       await deps.engineTasks.run(`${BRAND}: resetting the local ${chosen.target}`, (signal) => deps.engineManager.reset(chosen.target, signal));
+    }),
+    vscode.commands.registerCommand('tlc.insertPartialLine', () => {
+      const document = vscode.window.activeTextEditor?.document;
+      const candidate = document !== undefined ? deps.partialLineActions.get(document.fileName, document.version) : undefined;
+      if (document === undefined || candidate === undefined) {
+        return;
+      }
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(document.uri, new vscode.Position(candidate.line, candidate.character), candidate.insert);
+      return vscode.workspace.applyEdit(edit);
     }),
     vscode.commands.registerCommand('tlc.enableDisableCompletions', async () => {
       // Clicking the error icon retries the connection instead of toggling:
