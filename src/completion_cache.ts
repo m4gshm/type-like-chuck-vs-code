@@ -33,7 +33,7 @@ export class CompletionCache {
     }
     const age = performance.now() - cache.createdAt;
     if (age >= config.cacheTtlMs) {
-      this.deps.trace(`completion trace: cached completion expired after ${Math.round(age)}ms (ttl ${config.cacheTtlMs}ms): ${document.fileName} @ ${position.line}:${position.character}`);
+      this.deps.trace(`completion trace: cache expired after ${Math.round(age)}ms (ttl ${config.cacheTtlMs}ms): ${document.fileName} @ ${position.line}:${position.character}`);
       this.entry = undefined;
       return undefined;
     }

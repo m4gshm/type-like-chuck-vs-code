@@ -136,8 +136,8 @@ tasks:
       - npm run package
 
   clean:
-    desc: Remove build artifacts
+    desc: Remove build artifacts (incl. runner binaries; they re-download from the pinned releases)
     cmds:
-      - rm -rf dist out build binaries/ovgenai
-      - cmd: powershell -Command "Remove-Item -Recurse -Force dist,out,build,binaries\ovgenai -ErrorAction SilentlyContinue"
+      - rm -rf dist out build binaries/ovgenai binaries/ovgenai-release binaries/mlx
+      - cmd: powershell -Command "Remove-Item -Recurse -Force dist,out,build,binaries\ovgenai,binaries\ovgenai-release,binaries\mlx -ErrorAction SilentlyContinue; exit 0"
         platforms: [windows]

@@ -92,7 +92,7 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     const { completionState: state, forbidden } = this.deps;
     const fileName = document.fileName;
     if (!state.isEnabled()) {
-      this.deps.debug(`completion skipped: completions are disabled (${fileName})`);
+      this.deps.trace(`completion skipped: disabled (${fileName})`);
       return [];
     }
     if (forbidden().isForbidden(document.fileName)) {
@@ -119,20 +119,20 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     const tailOverlap = trailingOverlapLength(completion.text, following);
     let text = tailOverlap > 0 ? completion.text.slice(0, completion.text.length - tailOverlap) : completion.text;
     if (text.length === 0) {
-      this.deps.debug('completion skipped: completion duplicates the existing text after the cursor');
+      this.deps.debug('completion skipped: duplicates the existing text after the cursor');
       return [];
     }
     // The seam comparison tolerates a whitespace-only difference: the model
     // may suggest `);` while the document already has ` );`.
     const seam = seamOverlap(text, following);
     if (seam.duplicate) {
-      this.deps.debug('completion skipped: completion duplicates the existing text after the cursor');
+      this.deps.debug('completion skipped: duplicates the existing text after the cursor');
       return [];
     }
     // The seam cannot see past the end of the cursor's line: a suggestion
     // repeating the line right below would insert a duplicate.
     if (duplicatesFollowingLine(seam.insert, lineAfterCursor(docText, offset))) {
-      this.deps.debug('completion skipped: completion duplicates the line below the cursor');
+      this.deps.debug('completion skipped: duplicates the line below the cursor');
       return [];
     }
     // A suggestion that mostly re-states the line right below the cursor is
