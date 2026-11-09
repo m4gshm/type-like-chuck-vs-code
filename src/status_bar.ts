@@ -7,9 +7,11 @@ const ENABLED_TEXT = '$(tlc-cowboy)';
 const DISABLED_TEXT = '$(circle-slash)';
 const BUSY_TEXT = '$(loading~spin)';
 const ERROR_TEXT = '$(error)';
+const PARTIAL_LINE_TEXT = (line: number) => `$(light-bulb) insert into line ${line}`;
 
 export class StatusBar {
   private readonly item: vscode.StatusBarItem;
+  private readonly partialItem: vscode.StatusBarItem;
   private busy = false;
   private hasError = false;
   private connectionReason: string | undefined;
@@ -18,6 +20,9 @@ export class StatusBar {
 
   constructor(state: CompletionState) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    this.partialItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+    this.partialItem.command = 'tlc.insertPartialLine';
+    this.partialItem.tooltip = 'A suppressed suggestion can extend this line. Click to insert just the difference.';
     this.state = state;
     this.refresh();
     this.item.show();
@@ -56,6 +61,16 @@ export class StatusBar {
     this.refresh();
   }
 
+  /** Shown while the current document has an insertable partial-line candidate (1-based line). */
+  setPartialLine(line: number | undefined): void {
+    if (line === undefined) {
+      this.partialItem.hide();
+      return;
+    }
+    this.partialItem.text = PARTIAL_LINE_TEXT(line);
+    this.partialItem.show();
+  }
+
   refresh(): void {
     const enabled = this.state.isEnabled();
     this.item.text = !enabled
@@ -82,5 +97,6 @@ export class StatusBar {
 
   dispose(): void {
     this.item.dispose();
+    this.partialItem.dispose();
   }
 }

@@ -14,8 +14,11 @@ export interface PartialLineCandidate {
 export class PartialLineActionStore {
   private candidate: PartialLineCandidate | undefined;
 
+  constructor(private readonly onChanged?: (candidate: PartialLineCandidate | undefined) => void) {}
+
   set(candidate: PartialLineCandidate): void {
     this.candidate = candidate;
+    this.onChanged?.(candidate);
   }
 
   /** The candidate for this document, unless the document changed since it was computed. */

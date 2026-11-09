@@ -86,6 +86,11 @@
         "command": "tlc.enableDisableCompletions",
         "title": "Enable/Disable Completions",
         "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.insertPartialLine",
+        "title": "Insert Completion Delta into Line",
+        "category": "Type like Chuck"
       }
     ],
     "keybindings": [

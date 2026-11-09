@@ -336,7 +336,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
   let previousEnginePaths: ReturnType<typeof enginePaths> | undefined;
-  const partialLineActions = new PartialLineActionStore();
+  const refreshPartialLineBadge = () => {
+    const document = vscode.window.activeTextEditor?.document;
+    const candidate = document !== undefined ? partialLineActions.get(document.fileName, document.version) : undefined;
+    statusBar.setPartialLine(candidate === undefined ? undefined : candidate.line + 1);
+  };
+  const partialLineActions = new PartialLineActionStore(refreshPartialLineBadge);
+  const partialLineBadgeWatcher = vscode.window.onDidChangeActiveTextEditor(refreshPartialLineBadge);
 
   const completionProvider = new CompletionProvider({
     client,
@@ -420,6 +426,7 @@ export function activate(context: vscode.ExtensionContext): void {
     completionProvider,
     statusBar,
     connectionWatchdog,
+    partialLineActions,
     engineTasks,
     engineManager,
     checkServerModels,
@@ -433,6 +440,8 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     providerRegistration,
     codeActionRegistration,
+    partialLineBadgeWatcher,
+    vscode.workspace.onDidChangeTextDocument(refreshPartialLineBadge),
     ...registerTlcCommands(commandDeps),
   );
 
