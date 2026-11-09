@@ -12,6 +12,7 @@ Inline (ghost text) code completions from any OpenAI-compatible API, with config
   - `mlx` — macOS arm64 only: MLX 4-bit models on Metal, self-contained, no downloads.
 - **Remote mode** — any OpenAI-compatible endpoint (LM Studio, llama.cpp, vLLM, Ollama), `GET /v1/models` is polled so server-side model changes are picked up, and the template follows the model family.
 - **Automatic + manual trigger** — completions after a typing pause (250 ms) or immediately on `Ctrl+Alt+Space` / `Alt+\` (bypasses the cache and pending reuse).
+- **Duplicate-aware suggestions** — a suggestion repeating the line right below the cursor is dropped; one that mostly re-states it is offered as a quick fix (light bulb / status-bar badge) that inserts just the difference.
 - **Built-in FIM templates** (Qwen2.5-Coder) plus custom markers, editable right in the settings.
 - **Safe by default** — API key in secret storage, completions disabled in files like `.env`, and the local engine listens on loopback with a per-session key other processes cannot use.
 - **Coexists with Copilot** — with `tlc.yieldToCopilot` TLC disables itself while Copilot's inline suggestions are enabled and re-enables after (a manual toggle always wins).
