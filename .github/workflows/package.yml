@@ -37,7 +37,8 @@ jobs:
         run: node scripts/fetch-runner-binaries.mjs
       - name: verify runner binaries launch
         run: |
-          ./binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null; code=$?
+          code=0
+          ./binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null || code=$?
           # 2 = usage/loader error from the runner; 127 = the ELF is valid but its
           # shared OpenVINO libs are absent on a bare host — the extension supplies
           # LD_LIBRARY_PATH itself. Anything else is a broken asset.
@@ -58,7 +59,8 @@ jobs:
           test -x vsix-check/binaries/mlx/darwin-arm64/tlc-mlx-runner
           echo "exec bit preserved: $(stat -c '%a' vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner)"
           echo "installed-layout launch check:"
-          ./vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null; code=$?
+          code=0
+          ./vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null || code=$?
           test "$code" -eq 2 -o "$code" -eq 127 || { echo "runner from vsix exited with $code"; exit 1; }
       - name: upload vsix artifact
         uses: actions/upload-artifact@v5
