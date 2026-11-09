@@ -1,0 +1,143 @@
+# TLC build automation (go-task: brew/choco install go-task).
+# The runner backends are git submodules of this repository
+# (m4gshm/type-like-chuck-backed-openvino, m4gshm/type-like-chuck-backed-mlx);
+# this file only imports their binaries:
+#   - runner:import  — local: build in the submodule and copy from its build/
+#   - runner:fetch   — CI: download from the backend repo's GitHub release
+#                      (pin a version with RUNNER_VERSION=<tag>, e.g. v0.1.0)
+# The plugin package expects them at binaries/ovgenai/<platform>/ with the
+# final runtime names.
+
+version: '3'
+
+vars:
+  BACKEND_REPO: 'type-like-chuck-backed-openvino'
+  BACKEND_MLX: 'type-like-chuck-backed-mlx'
+  RUNNER_VERSION: '' # pin a backend release tag here, empty = latest release
+
+env:
+  RUNNER_VERSION: '{{.RUNNER_VERSION}}'
+
+tasks:
+  default:
+    desc: Unit tests + compile + lint (fast loop)
+    cmds:
+      - task: deps
+      - task: unit
+      - task: compile
+      - task: lint
+
+  deps:
+    desc: Install npm dependencies
+    cmds:
+      - npm install
+    sources:
+      - package.json
+    generates:
+      - node_modules/.package-lock.json
+
+  check-types:
+    desc: TypeScript type check
+    cmds:
+      - npx tsc --noEmit
+
+  compile:
+    desc: Bundle the extension with esbuild
+    cmds:
+      - node esbuild.js
+    sources:
+      - src/**/*.ts
+      - esbuild.js
+    generates:
+      - dist/extension.js
+
+  unit:
+    desc: Vitest unit tests (no VS Code host)
+    cmds:
+      - npx vitest run
+    sources:
+      - src/**/*.ts
+      - src/test/unit/**/*.ts
+    generates:
+      - .vitest-timestamp
+
+  lint:
+    desc: ESLint
+    cmds:
+      - npx eslint src
+
+  test:
+    desc: Full test suite (unit + compiled integration tests in real VS Code)
+    deps: [deps, compile]
+    cmds:
+      - npx tsc -p tsconfig.test.json
+      - npx vscode-test
+
+  build:
+    desc: What CI runs — unit + compile + compile-tests + integration + lint
+    cmds:
+      - task: unit
+      - task: compile
+      - task: test
+      - task: lint
+
+  # --- backend binaries import ------------------------------------------------------
+
+  runner:import:
+    desc: Build (if needed) and copy runner binaries from the local backend repos (ovgenai + mlx)
+    cmds:
+      - |
+        if [ ! -d '{{.BACKEND_REPO}}' ]; then
+          echo "ovgenai backend repo '{{.BACKEND_REPO}}' not found — skipping local import (use runner:fetch)"
+        elif [ '{{OS}}' = 'darwin' ]; then
+          echo "macOS is not an ovgenai target — skipping the ovgenai build (runner:fetch covers it from the release)"
+        else
+          task -d '{{.BACKEND_REPO}}' build
+        fi
+      - |
+        if [ -f '{{.BACKEND_REPO}}/build/tlc-ovgenai-runner-linux-x64' ]; then
+          mkdir -p binaries/ovgenai/linux-x64 binaries/ovgenai/win32-x64
+          cp '{{.BACKEND_REPO}}/build/tlc-ovgenai-runner-linux-x64' binaries/ovgenai/linux-x64/tlc-ovgenai-runner
+        fi
+      - cmd: powershell -Command "Copy-Item type-like-chuck-backed-openvino\build\tlc-ovgenai-runner-win32-x64.exe binaries\ovgenai\win32-x64\tlc-ovgenai-runner.exe"
+        platforms: [windows]
+      - |
+        if [ ! -d '{{.BACKEND_MLX}}' ]; then
+          echo "mlx backend repo '{{.BACKEND_MLX}}' not found — skipping local import (use runner:fetch)"
+          exit 0
+        fi
+        task -d '{{.BACKEND_MLX}}' build
+      - |
+        if [ -f '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' ]; then
+          mkdir -p binaries/mlx/darwin-arm64
+          cp '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' binaries/mlx/darwin-arm64/tlc-mlx-runner
+        fi
+    sources:
+      - '{{.BACKEND_REPO}}/src/**/*'
+      - '{{.BACKEND_REPO}}/CMakeLists.txt'
+      - '{{.BACKEND_MLX}}/Sources/**/*'
+      - '{{.BACKEND_MLX}}/Package.swift'
+    generates:
+      - binaries/ovgenai/linux-x64/tlc-ovgenai-runner
+      - binaries/mlx/darwin-arm64/tlc-mlx-runner
+
+  runner:fetch:
+    desc: Download runner binaries from the backend repo's GitHub release (RUNNER_VERSION pins a tag)
+    cmds:
+      - node scripts/fetch-runner-binaries.mjs
+    generates:
+      - binaries/ovgenai/win32-x64/tlc-ovgenai-runner.exe
+      - binaries/ovgenai/linux-x64/tlc-ovgenai-runner
+      - binaries/mlx/darwin-arm64/tlc-mlx-runner
+
+  package:
+    desc: Build the .vsix (delegates to npm run package)
+    cmds:
+      - npm run package
+
+  clean:
+    desc: Remove build artifacts (incl. runner binaries; they re-download from the pinned releases)
+    cmds:
+      - rm -rf dist out build binaries/ovgenai binaries/ovgenai-release binaries/mlx
+      - cmd: powershell -Command "Remove-Item -Recurse -Force dist,out,build,binaries\ovgenai,binaries\ovgenai-release,binaries\mlx -ErrorAction SilentlyContinue; exit 0"
+        platforms: [windows]

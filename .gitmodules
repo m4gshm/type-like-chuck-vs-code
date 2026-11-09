@@ -1,0 +1,8 @@
+[submodule "type-like-chuck-backed-openvino"]
+	path = type-like-chuck-backed-openvino
+	url = ../type-like-chuck-backed-openvino.git
+	branch = dev
+[submodule "type-like-chuck-backed-mlx"]
+	path = type-like-chuck-backed-mlx
+	url = ../type-like-chuck-backed-mlx.git
+	branch = draft

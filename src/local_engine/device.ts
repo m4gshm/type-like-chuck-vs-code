@@ -1,0 +1,25 @@
+import { LocalDevice } from '../config';
+
+export type SupportedDevice = Exclude<LocalDevice, 'auto'>;
+
+/** Context window used on the NPU: the compiled graph is built for it, and
+ * generation speed and compile time grow with it. */
+export const NPU_CONTEXT_LENGTH = 8192;
+
+/**
+ * Devices to try for the requested preference, in priority order: the ovgenai
+ * `auto` chain starts on the NPU when the machine has an Intel NPU generation
+ * 4 or later, otherwise `auto` follows GPU → CPU (the default). An explicit
+ * device is tried first with CPU as the last retry. The llama.cpp build has no
+ * NPU path, so an explicit `npu` is redirected to GPU (how the backend
+ * interprets a device string is the backend's own responsibility).
+ */
+export function deviceChain(device: LocalDevice, kind: 'llama.cpp' | 'ovgenai' = 'llama.cpp', npuGeneration = 0): SupportedDevice[] {
+  if (device === 'auto') {
+    return kind === 'ovgenai' && npuGeneration >= 4 ? ['npu', 'gpu', 'cpu'] : ['gpu', 'cpu'];
+  }
+  if (device === 'npu') {
+    return kind === 'ovgenai' ? ['npu', 'gpu', 'cpu'] : ['gpu', 'cpu'];
+  }
+  return [device, 'cpu'].filter((d, i, all) => all.indexOf(d) === i) as SupportedDevice[];
+}

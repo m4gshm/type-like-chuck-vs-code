@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension (backend release)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/extension.js"
+      ],
+      "env": {
+        "TLC_RUNNER_DIR": "ovgenai-release"
+      },
+      "preLaunchTask": "preDebugRelease"
+    },
+    {
+      "name": "Run Extension (local backend build)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/extension.js"
+      ],
+      "preLaunchTask": "preDebug"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:type-like-chuck-vs-code}/type-like-chuck-backed-mlx",
+      "name": "Debug tlc-mlx-runner (type-like-chuck-backed-mlx)",
+      "target": "tlc-mlx-runner",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug tlc-mlx-runner (type-like-chuck-backed-mlx)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:type-like-chuck-vs-code}/type-like-chuck-backed-mlx",
+      "name": "Release tlc-mlx-runner (type-like-chuck-backed-mlx)",
+      "target": "tlc-mlx-runner",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release tlc-mlx-runner (type-like-chuck-backed-mlx)"
+    }
+  ]
+}

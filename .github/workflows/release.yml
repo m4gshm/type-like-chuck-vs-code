@@ -1,0 +1,32 @@
+name: Handle Release
+on:
+  release:
+    types: [published]
+jobs:
+  generate:
+    name: create release-artifacts
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22.x]
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+      - name: init Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: tests and package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          xvfb-run -a npm install
+          xvfb-run -a npm run build
+          xvfb-run -a npm run package
+      - name: upload the artifacts
+        uses: skx/github-action-publish-binaries@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: '*.vsix'

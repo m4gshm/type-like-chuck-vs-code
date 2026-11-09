@@ -1,0 +1,72 @@
+name: Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+      - name: init Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+      - name: install dependencies
+        run: npm install
+      - name: static checks and unit tests
+        run: |
+          npm run check-types
+          npm run unit
+          npm run lint
+      - name: fetch runner binaries from the backend repo release
+        run: node scripts/fetch-runner-binaries.mjs
+      - name: verify runner binaries launch
+        run: |
+          ./binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null; code=$?
+          test "$code" -eq 2 || { echo "runner exited with $code, expected 2"; exit 1; }
+          echo "runner starts and reports the missing-model error"
+      - name: pack vsix
+        run: |
+          npm run compile
+          node scripts/make-icon.mjs
+          npx vsce package --no-dependencies
+      - name: verify binaries inside the packed vsix
+        run: |
+          vsix=$(ls *.vsix)
+          unzip -q "$vsix" -d vsix-check
+          test -x vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner
+          test -f vsix-check/binaries/ovgenai/win32-x64/tlc-ovgenai-runner.exe
+          test -x vsix-check/binaries/ovgenai/linux-arm64/tlc-ovgenai-runner
+          test -x vsix-check/binaries/mlx/darwin-arm64/tlc-mlx-runner
+          echo "exec bit preserved: $(stat -c '%a' vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner)"
+          echo "installed-layout launch check:"
+          ./vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null; code=$?
+          test "$code" -eq 2 || { echo "runner from vsix exited with $code"; exit 1; }
+      - name: upload vsix artifact
+        uses: actions/upload-artifact@v5
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        with:
+          name: tlc-vsix
+          path: '*.vsix'
+          retention-days: 30
+      - name: create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '*.vsix'
+          generate_release_notes: true

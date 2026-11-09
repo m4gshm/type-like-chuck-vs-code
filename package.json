@@ -1,0 +1,472 @@
+{
+  "name": "tlc",
+  "displayName": "Type like Chuck",
+  "description": "Type like Chuck - one more AI autocomplete tool",
+  "version": "0.1.0",
+  "publisher": "m4gshm",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "type": "commonjs",
+  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/m4gshm/vs-code-l8t"
+  },
+  "contributes": {
+    "icons": {
+      "tlc-cowboy": {
+        "description": "TLC cowboy silhouette (monochrome)",
+        "default": {
+          "fontPath": "./fonts/tlc-codicons.woff",
+          "fontCharacter": "\\E001"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "tlc.triggerCompletion",
+        "title": "Trigger Completion Now",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.setApiKey",
+        "title": "Set API Key",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.clearApiKey",
+        "title": "Clear API Key",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.testConnection",
+        "title": "Test Connection",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.selectModel",
+        "title": "Select Model",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.selectMode",
+        "title": "Select Mode",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.selectLocalModel",
+        "title": "Select Local Model",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.selectLocalDevice",
+        "title": "Select Local Device",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.resetLocalEngine",
+        "title": "Reset Local Engine",
+        "category": "Type like Chuck"
+      },
+      {
+        "command": "tlc.enableDisableCompletions",
+        "title": "Enable/Disable Completions",
+        "category": "Type like Chuck"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "tlc.triggerCompletion",
+        "key": "ctrl+alt+space",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "tlc.triggerCompletion",
+        "key": "alt+\\",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Mode",
+        "order": 1,
+        "properties": {
+          "tlc.mode": {
+            "type": "string",
+            "order": 1,
+            "default": "local",
+            "enum": [
+              "remote",
+              "local"
+            ],
+            "enumDescriptions": [
+              "External OpenAI-compatible server from the Base URL setting",
+              "TLC-managed local engine: a llama.cpp llama-server started by the extension (downloaded on demand)"
+            ],
+            "description": "Completion source. Use \"TLC: Select Mode\" to switch; switching to local downloads the engine and model on first use."
+          }
+        }
+      },
+      {
+        "title": "Local Engine",
+        "order": 2,
+        "properties": {
+          "tlc.local.engineKind": {
+            "type": "string",
+            "order": 0,
+            "default": "auto",
+            "enum": [
+              "auto",
+              "llama.cpp",
+              "ovgenai",
+              "mlx"
+            ],
+            "enumDescriptions": [
+              "Best match for the platform: mlx on macOS arm64, ovgenai on Intel x64 (NPU generation 4 or later → NPU device, otherwise GPU via iGPU/Arc with CPU fallback), llama.cpp elsewhere",
+              "llama.cpp llama-server with GGUF models (all platforms)",
+              "Bundled OpenVINO GenAI runner with native IR models (Windows/Linux x64, Linux arm64 Intel; NPU/GPU/CPU)",
+              "Bundled MLX runner with 4-bit mlx-community models (macOS arm64; Metal)"
+            ],
+            "description": "Local engine implementation (local mode only). `auto` follows the hardware: `mlx` on macOS arm64, `ovgenai` on Windows/Linux x64 and Linux arm64 with an Intel CPU, `llama.cpp` elsewhere. The ovgenai runner downloads the OpenVINO runtime libraries on first use. The mlx runner needs no downloads at all. Use \"TLC: Select Local Device\" or \"TLC: Reset Local Engine\"."
+          },
+          "tlc.local.model": {
+            "type": "string",
+            "order": 1,
+            "default": "Qwen2.5-Coder 1.5B",
+            "enum": [
+              "Qwen2.5-Coder 0.5B",
+              "Qwen2.5-Coder 1.5B",
+              "Qwen2.5-Coder 3B",
+              "custom"
+            ],
+            "enumDescriptions": [
+              "≈0.3–0.5 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+              "≈0.9–1.6 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+              "≈1.7–3.1 GB download (exact size depends on the local engine: MLX 4-bit, OpenVINO IR nf4/int8 or GGUF)",
+              "Use the model file or directory from `tlc.local.customModelPath`"
+            ],
+            "description": "Local model (local mode only). \"custom\" uses the file or directory from `tlc.local.customModelPath` instead of a catalog download. A selected model downloads automatically when missing; the catalog picker with sizes is shown only while no model is selected yet (first start)."
+          },
+          "tlc.local.customModelPath": {
+            "type": "string",
+            "order": 2,
+            "default": "",
+            "description": "Path to a local model file or directory to use instead of downloading (local mode only). A GGUF file for the llama.cpp engine; an OpenVINO IR model directory for ovgenai; an mlx model directory for mlx. When set, no model is downloaded."
+          },
+          "tlc.local.device": {
+            "type": "string",
+            "order": 3,
+            "default": "auto",
+            "enum": [
+              "auto",
+              "cpu",
+              "gpu",
+              "npu"
+            ],
+            "description": "Inference device for the local engine (local mode only). `auto` follows GPU → CPU, except the ovgenai runner on an Intel NPU generation 4 or later, where `auto` starts on the NPU (falling back through GPU to CPU); an explicit `npu` is supported by the ovgenai runner (falling back through GPU to CPU) and redirected to GPU with a warning for the llama.cpp engine. The mlx engine always runs on GPU (Metal), regardless of this setting. Use \"TLC: Select Local Device\"."
+          }
+        }
+      },
+      {
+        "title": "Remote Server (OpenAI)",
+        "order": 3,
+        "properties": {
+          "tlc.openai.baseUrl": {
+            "type": "string",
+            "order": 1,
+            "default": "http://127.0.0.1:1234/v1",
+            "description": "Base URL of the OpenAI-compatible API (e.g. http://127.0.0.1:1234/v1). Run \"TLC: Test Connection\" to verify the URL and load the model list from the server."
+          },
+          "tlc.openai.model": {
+            "type": "string",
+            "order": 2,
+            "default": "Qwen2.5-Coder-1.5B",
+            "description": "Model name sent in completion requests. Use the \"TLC: Select Model\" command to pick one from the server's /v1/models list."
+          },
+          "tlc.openai.apiKey": {
+            "type": "string",
+            "order": 3,
+            "default": "",
+            "markdownDescription": "Optional API key for the completions API (plaintext; e.g. for synced settings). When non-empty it takes precedence over the key stored via the \"TLC: Set API Key\" command, which keeps the key in VS Code secret storage — the recommended way."
+          }
+        }
+      },
+      {
+        "title": "Trigger and Cache",
+        "order": 4,
+        "properties": {
+          "tlc.autoTrigger": {
+            "type": "boolean",
+            "order": 1,
+            "default": true,
+            "description": "Trigger completions automatically after a typing pause. When off, completions are only requested via the manual shortcut (Ctrl+Alt+Space)."
+          },
+          "tlc.debounceMs": {
+            "type": "integer",
+            "order": 2,
+            "default": 250,
+            "minimum": 50,
+            "maximum": 1000,
+            "description": "How long (in milliseconds) typing must pause before an automatic completion request is sent."
+          },
+          "tlc.pendingGraceMs": {
+            "type": "integer",
+            "order": 3,
+            "default": 150,
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "How long (in milliseconds) typing past a pending request waits for its result before discarding it and requesting afresh after the debounce pause. 0 never waits."
+          },
+          "tlc.cacheEnabled": {
+            "type": "boolean",
+            "order": 4,
+            "default": true,
+            "description": "Re-serve the last completion without a new API request: at the exact cursor position, and when the typed text extends it along the same line as its prefix (the remainder is served)."
+          },
+          "tlc.cacheTtlMs": {
+            "type": "integer",
+            "order": 5,
+            "default": 10000,
+            "minimum": 1000,
+            "description": "Lifetime of the cached completion in milliseconds."
+          }
+        }
+      },
+      {
+        "title": "Context and Generation",
+        "order": 5,
+        "properties": {
+          "tlc.contextMaxLength": {
+            "type": "integer",
+            "order": 1,
+            "default": 0,
+            "minimum": 0,
+            "description": "Maximum combined prefix+suffix context (characters). Filled automatically from /v1/models in remote mode; local engines' windows are known from the built-in catalog and the NPU is capped separately via tlc.local.npuContextMaxLength. 0 means unlimited. When exceeded, the prefix and suffix budgets are scaled proportionally with priority to the prefix."
+          },
+          "tlc.prefixContextMaxLength": {
+            "type": "integer",
+            "order": 2,
+            "default": 8000,
+            "minimum": 0,
+            "description": "Maximum number of characters of code before the cursor sent as context."
+          },
+          "tlc.suffixContextMaxLength": {
+            "type": "integer",
+            "order": 3,
+            "default": 2000,
+            "minimum": 0,
+            "description": "Maximum number of characters of code after the cursor sent as context."
+          },
+          "tlc.maxTokens": {
+            "type": "integer",
+            "order": 4,
+            "default": 256,
+            "minimum": 1,
+            "description": "Maximum number of tokens to generate."
+          }
+        }
+      },
+      {
+        "title": "Prompt Template",
+        "order": 6,
+        "properties": {
+          "tlc.promptTemplate": {
+            "order": 1,
+            "type": "string",
+            "default": "qwen2",
+            "enum": [
+              "qwen2",
+              "qwen3",
+              "mellum",
+              "custom"
+            ],
+            "enumDescriptions": [
+              "Qwen2 / Qwen2.5-Coder FIM format",
+              "Qwen3 / Qwen3-Coder FIM format",
+              "JetBrains Mellum FIM format",
+              "User-defined template from the Prefix / Suffix / Middle / Stop settings below"
+            ],
+            "description": "Built-in FIM prompt template, or \"custom\" to use the markers from the Prefix / Suffix / Middle / Stop settings below."
+          },
+          "tlc.prefix": {
+            "order": 2,
+            "type": "string",
+            "default": "<|fim_prefix|>",
+            "markdownDescription": "Marker placed before the code prefix. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
+          },
+          "tlc.suffix": {
+            "order": 3,
+            "type": "string",
+            "default": "<|fim_suffix|>",
+            "markdownDescription": "Marker placed before the code suffix. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
+          },
+          "tlc.middle": {
+            "order": 4,
+            "type": "string",
+            "default": "<|fim_middle|>",
+            "markdownDescription": "Marker placed after the suffix, where generation begins. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
+          },
+          "tlc.stop": {
+            "order": 5,
+            "type": "string",
+            "default": "<|fim_prefix|>,<|fim_suffix|>,<|fim_middle|>",
+            "markdownDescription": "Reserved tokens used as stop sequences and masked in user code, comma-separated. Used when Prompt Template is `custom`. Editing this field switches Prompt Template to `custom`; selecting a built-in template clears the stored marker fields."
+          }
+        }
+      },
+      {
+        "title": "Local Engine Advanced",
+        "order": 7,
+        "properties": {
+          "tlc.local.npuContextMaxLength": {
+            "type": "integer",
+            "order": 1,
+            "default": 8192,
+            "minimum": 512,
+            "description": "Context window used on the NPU (local mode only). The NPU graph is compiled for this window: a smaller window compiles faster, generates faster and needs less memory; it also caps the prefix/suffix prompt budgets when the NPU is used. 0 uses the model's full context."
+          },
+          "tlc.local.apiKeyEnabled": {
+            "type": "boolean",
+            "order": 2,
+            "default": true,
+            "description": "Require the per-session key from engine clients. Keep enabled; turn off only to call the engine directly (e.g. curl) without the key."
+          },
+          "tlc.local.llamaCppRelease": {
+            "type": "string",
+            "order": 3,
+            "default": "b11935",
+            "description": "llama.cpp release tag used for the local engine download (llama.cpp engine)."
+          },
+          "tlc.local.distroDir": {
+            "type": "string",
+            "order": 4,
+            "default": "",
+            "description": "Locally unpacked engine distribution to use instead of downloading (local mode only): an OpenVINO GenAI runtime folder for the ovgenai kind, or an unpacked llama.cpp build (or a path to a llama-server binary) for llama.cpp. Ignored by the mlx kind. When set, no engine download happens; before the first download the extension offers picking such a folder."
+          },
+          "tlc.local.engineDir": {
+            "type": "string",
+            "order": 5,
+            "default": "",
+            "description": "Directory for the downloaded engine (llama.cpp build or the OpenVINO GenAI runtime; local mode only). Empty uses the extension storage. Changing it moves the existing engine; \"TLC: Reset Local Engine…\" re-downloads."
+          },
+          "tlc.local.downloadedModelsDir": {
+            "type": "string",
+            "order": 6,
+            "default": "",
+            "description": "Directory for the downloaded models (GGUF or OpenVINO IR; local mode only). Empty uses the extension storage. Changing it moves downloaded models."
+          },
+          "tlc.local.modelCacheDir": {
+            "type": "string",
+            "order": 7,
+            "default": "",
+            "description": "Directory for the local model cache (local mode only). Empty uses the extension storage."
+          },
+          "tlc.local.huggingfaceUrl": {
+            "type": "string",
+            "order": 9,
+            "default": "https://huggingface.co",
+            "description": "Base URL for model downloads (local mode only). Change it to an alternative Hugging Face endpoint or a mirror."
+          },
+          "tlc.local.githubUrl": {
+            "type": "string",
+            "order": 10,
+            "default": "https://github.com",
+            "description": "Base URL for llama.cpp release downloads (local mode only). Change it to a GitHub mirror."
+          },
+          "tlc.local.openvinoUrl": {
+            "type": "string",
+            "order": 11,
+            "default": "https://storage.openvinotoolkit.org",
+            "description": "Base URL for the OpenVINO GenAI runtime download used by the ovgenai engine (local mode only). Change it to a mirror of storage.openvinotoolkit.org."
+          }
+        }
+      },
+      {
+        "title": "Integration",
+        "order": 8,
+        "properties": {
+          "tlc.yieldToCopilot": {
+            "type": "boolean",
+            "order": 1,
+            "default": true,
+            "description": "When GitHub Copilot inline completions turn on, TLC disables itself and notifies; when Copilot turns off, TLC re-enables only if it was disabled by this auto-reaction (a manual toggle is never overridden)."
+          },
+          "tlc.forbiddenFileNames": {
+            "type": "array",
+            "order": 2,
+            "default": [
+              ".env"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob patterns of files in which completions are disabled (e.g. .env, *.secret)."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "clean": "rimraf ./dist ./out",
+    "check-types": "tsc --noEmit",
+    "vscode:prepublish": "npm run clean && npm run check-types && npm run lint && npm run compile -- --production",
+    "compile": "node esbuild.js",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "watch": "node esbuild.js --watch",
+    "sync-runner": "node scripts/sync-runner-binaries.mjs",
+    "sync-runner-release": "node scripts/fetch-runner-binaries.mjs --release",
+    "unit": "vitest run",
+    "coverage": "vitest run --coverage",
+    "test": "npm run unit && npm run compile && npm run compile-tests && npm run vscode-test",
+    "vscode-test": "vscode-test",
+    "lint": "eslint src",
+    "build": "npm run test && npm run lint",
+    "package": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies",
+    "package:win": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies --ignoreFile .vscodeignore-win"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^5.0.1",
+    "micromatch": "^4.0.8",
+    "openai": "^6.27.0",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/micromatch": "^4.0.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "^1.97.0",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.0",
+    "@typescript-eslint/parser": "^8.72.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "mocha": "^11.8.0",
+    "rimraf": "^6.1.3",
+    "svg2ttf": "^6.1.0",
+    "svgicons2svgfont": "^16.0.0",
+    "ttf2woff": "^3.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7",
+    "yazl": "^3.3.1"
+  }
+}
