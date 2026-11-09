@@ -58,12 +58,12 @@ jobs:
                    binaries/ovgenai/win32-x64/tlc-ovgenai-runner.exe \
                    binaries/ovgenai/linux-arm64/tlc-ovgenai-runner \
                    binaries/mlx/darwin-arm64/tlc-mlx-runner; do
-            test -f "vsix-check/$f" || { echo "missing in vsix: $f"; exit 1; }
+            test -f "vsix-check/extension/$f" || { echo "missing in vsix: $f"; exit 1; }
           done
-          echo "exec bit: $(stat -c '%a' vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner)"
+          echo "exec bit: $(stat -c '%a' vsix-check/extension/binaries/ovgenai/linux-x64/tlc-ovgenai-runner)"
           echo "installed-layout launch check:"
           code=0
-          ./vsix-check/binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null || code=$?
+          ./vsix-check/extension/binaries/ovgenai/linux-x64/tlc-ovgenai-runner 2>/dev/null || code=$?
           if [ "$code" -eq 2 ] || [ "$code" -eq 127 ]; then
             echo "runner from vsix starts (exit $code)"
           else
