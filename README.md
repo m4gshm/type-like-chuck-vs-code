@@ -4,6 +4,8 @@
 
 Inline (ghost text) code completions from any OpenAI-compatible API, with configurable fill-in-the-middle (FIM) templates. Local engine mode runs everything on your machine — no external server needed.
 
+![screencast](./screencast.gif)
+
 ## Features
 
 - **Local engine (default)** — TLC downloads a Qwen2.5-Coder model (0.5B / 1.5B / 3B) plus an engine; a selected model downloads automatically when missing, and the catalog picker with sizes is shown only while no model is selected yet (first start):

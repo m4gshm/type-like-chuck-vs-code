@@ -24,6 +24,18 @@ jobs:
           xvfb-run -a npm install
           xvfb-run -a npm run build
           xvfb-run -a npm run package
+      - name: publish to VS Code Marketplace
+        run: |
+          set -o pipefail
+          npx vsce publish --no-dependencies --packagePath *.vsix 2>&1 | tee vsce.log || { grep -q "already exists" vsce.log && echo "version already published, skipping" || exit 1; }
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: publish to Open VSX Registry
+        run: |
+          set -o pipefail
+          npx ovsx publish --packagePath *.vsix -p "$OPEN_VSX_TOKEN" 2>&1 | tee ovsx.log || { grep -q "already exists" ovsx.log && echo "version already published, skipping" || exit 1; }
+        env:
+          OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
       - name: upload the artifacts
         uses: skx/github-action-publish-binaries@master
         env:
