@@ -37,8 +37,6 @@ jobs:
         env:
           OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
       - name: upload the artifacts
-        uses: skx/github-action-publish-binaries@master
+        run: gh release upload "${GITHUB_REF_NAME}" --clobber *.vsix
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: '*.vsix'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
