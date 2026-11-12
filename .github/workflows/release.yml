@@ -2,6 +2,10 @@ name: Handle Release
 on:
   release:
     types: [published]
+
+permissions:
+  contents: write
+
 jobs:
   generate:
     name: create release-artifacts
