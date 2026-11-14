@@ -2,6 +2,18 @@ import * as assert from 'node:assert';
 import * as vscode from 'vscode';
 
 suite('TLC settings-driven behavior', () => {
+  // The extension's settings handler and its template cleanup write their own
+  // config updates asynchronously; fixed sleeps race them on a loaded CI
+  // runner, so assertions poll instead.
+  const waitForValue = async (label: string, read: () => string | undefined, expected: string | undefined): Promise<void> => {
+    let actual = read();
+    for (let i = 0; i < 100 && actual !== expected; i += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+      actual = read();
+    }
+    assert.strictEqual(actual, expected, label);
+  };
+
   suiteSetup(async () => {
     // Like the TLC-extension suite: remote mode keeps the local engine (and
     // its delayed applyMode template writes) out of these settings tests.
@@ -39,19 +51,19 @@ suite('TLC settings-driven behavior', () => {
     await tlc.update('stop', '<|fim_pad|>, <|endoftext|>', vscode.ConfigurationTarget.Global);
 
     await tlc.update('promptTemplate', 'qwen3', vscode.ConfigurationTarget.Global);
-    await new Promise((r) => setTimeout(r, 300));
-    assert.strictEqual(tlc.inspect<string>('prefix')?.globalValue, undefined, 'default-valued prefix must be cleared');
+    await waitForValue('default-valued prefix must be cleared', () => tlc.inspect<string>('prefix')?.globalValue, undefined);
     assert.strictEqual(tlc.inspect<string>('stop')?.globalValue, '<|fim_pad|>, <|endoftext|>', 'a stop list that is not the full built-in value must survive');
 
     await tlc.update('prefix', '[MY]', vscode.ConfigurationTarget.Global);
     await tlc.update('promptTemplate', 'qwen2', vscode.ConfigurationTarget.Global);
-    await new Promise((r) => setTimeout(r, 300));
-    assert.strictEqual(tlc.inspect<string>('prefix')?.globalValue, '[MY]', 'custom prefix must survive the switch');
+    // Let the qwen2 cleanup finish: a field edit landing inside it is
+    // deliberately ignored by the handler.
+    await new Promise((r) => setTimeout(r, 500));
+    await waitForValue('custom prefix must survive the switch', () => tlc.inspect<string>('prefix')?.globalValue, '[MY]');
 
     await tlc.update('prefix', '[MY2]', vscode.ConfigurationTarget.Global);
-    await new Promise((r) => setTimeout(r, 300));
     // The extension writes to Global; a workspace value (if any) must not mask it.
-    assert.strictEqual(tlc.inspect<string>('promptTemplate')?.globalValue, 'custom', 'editing a field switches the template to custom');
+    await waitForValue('editing a field switches the template to custom', () => tlc.inspect<string>('promptTemplate')?.globalValue, 'custom');
   });
 
   test('changing local.engineKind while enabled restarts the engine (stub release fails fast)', async function () {
