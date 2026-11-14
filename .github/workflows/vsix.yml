@@ -32,8 +32,7 @@ jobs:
           node-version: 22.x
       - name: static checks, tests and lint
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
+          command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
           xvfb-run -a npm install
           xvfb-run -a npm run build
       - name: fetch runner binaries from the backend releases

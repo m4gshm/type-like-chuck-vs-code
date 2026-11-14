@@ -29,8 +29,7 @@ jobs:
           npm run coverage
       - name: tests and package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
+          command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
           xvfb-run -a npm run build
           xvfb-run -a npm run package
       - name: upload coverage artifact
