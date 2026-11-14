@@ -12,6 +12,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # fetch-runner-binaries.mjs authenticates its GitHub API lookups with it —
+    # unauthenticated requests share the runner IP's 60/h rate limit.
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       matrix:
         node-version: [ 22.x ]
