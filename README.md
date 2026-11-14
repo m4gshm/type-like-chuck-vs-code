@@ -102,6 +102,8 @@ task package         # full .vsix
 
 They land in `binaries/ovgenai/<platform>/` and `binaries/mlx/darwin-arm64/` — the layout the installed extension resolves; `package.yml` re-verifies that the binaries launch from the unpacked `.vsix`.
 
+On-demand vsix builds live in `vsix.yml` (*Actions → VSIX → Run workflow*, any branch) and publish the `.vsix` to the [`vsix` pre-release](https://github.com/m4gshm/type-like-chuck-vs-code/releases/tag/vsix); each asset name carries the build date and commit, and assets older than 14 days are pruned. Builds are stamped `x.y.z-build.YYYYMMDD` so they install side by side with a stable release; pre-releases never reach the marketplaces.
+
 Debug with F5 (Run Extension).
 
 ## Credits

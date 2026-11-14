@@ -1,0 +1,94 @@
+name: VSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: false
+        default: ''
+
+concurrency:
+  group: vsix
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  vsix:
+    name: build and publish the vsix
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.branch || github.event.repository.default_branch }}
+      - name: init Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+      - name: static checks, tests and lint
+        run: |
+          command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
+          xvfb-run -a npm install
+          xvfb-run -a npm run build
+      - name: fetch runner binaries from the backend releases
+        run: node scripts/fetch-runner-binaries.mjs
+      - name: verify mlx runner resources landed
+        run: |
+          # Without mlx.metallib the mlx runner exits 255 at model load; no
+          # linux step can launch the Mach-O to find out, so check the files
+          # the runtime requires instead.
+          for f in binaries/mlx/darwin-arm64/tlc-mlx-runner \
+                   binaries/mlx/darwin-arm64/mlx.metallib; do
+            test -f "$f" || { echo "missing mlx runner file: $f"; exit 1; }
+          done
+          echo "mlx runner resources present"
+      - name: stamp the build version
+        run: |
+          base=$(node -p "require('./package.json').version.split('-')[0]")
+          npm version "$base-build.$(date -u +%Y%m%d)" --no-git-tag-version --allow-same-version
+      - name: pack the vsix
+        run: |
+          sha=$(git rev-parse --short=8 HEAD)
+          version=$(node -p "require('./package.json').version")
+          npm run compile
+          node scripts/make-icon.mjs
+          npx vsce package --no-dependencies -o "tlc-$version-$sha.vsix"
+      - name: verify binaries and bundles inside the packed vsix
+        run: |
+          vsix=$(ls *.vsix)
+          unzip -oq "$vsix" -d vsix-check
+          for f in binaries/ovgenai/linux-x64/tlc-ovgenai-runner \
+                   binaries/ovgenai/win32-x64/tlc-ovgenai-runner.exe \
+                   binaries/ovgenai/linux-arm64/tlc-ovgenai-runner \
+                   binaries/mlx/darwin-arm64/tlc-mlx-runner \
+                   binaries/mlx/darwin-arm64/mlx.metallib; do
+            test -f "vsix-check/extension/$f" || { echo "missing in vsix: $f"; exit 1; }
+          done
+          echo "vsix content verified"
+      - name: publish to the rolling vsix pre-release
+        run: |
+          gh release view vsix >/dev/null 2>&1 \
+            || gh release create vsix --prerelease --title "VSIX builds" \
+                 --notes "Manual builds from any branch. Pre-release quality — prefer the latest stable release. Assets older than 14 days are pruned."
+          gh release upload vsix "$(ls *.vsix)" --clobber
+      - name: prune vsix assets older than 14 days
+        run: |
+          release_id=$(gh release view vsix --json id --jq .id)
+          cutoff=$(date -u -d '14 days ago' +%s)
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate \
+            --jq ".[] | select((.created_at | fromdateiso8601) < $cutoff) | [.id, .name] | @tsv" \
+          | while IFS=$'\t' read -r asset_id asset_name; do
+              echo "pruning $asset_name"
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+            done
+      - name: upload the vsix as a run artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: vsix
+          path: '*.vsix'
+          retention-days: 14

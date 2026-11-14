@@ -9,6 +9,9 @@ permissions:
 jobs:
   generate:
     name: create release-artifacts
+    # Prereleases (e.g. the rolling vsix pre-release) already carry their vsix and must
+    # not reach the marketplaces.
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -24,8 +27,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - name: tests and package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
+          command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
           xvfb-run -a npm install
           xvfb-run -a npm run build
           xvfb-run -a npm run package
