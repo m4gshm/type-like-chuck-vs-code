@@ -40,7 +40,13 @@ jobs:
       - name: publish to Open VSX Registry
         run: |
           set -o pipefail
-          npx ovsx publish --packagePath *.vsix -p "$OPEN_VSX_TOKEN" 2>&1 | tee ovsx.log || { grep -q "already exists" ovsx.log && echo "version already published, skipping" || exit 1; }
+          # ovsx words a same-version republish "already published" (vsce says
+          # "already exists"); "isn't active" means the version is stuck
+          # invisible on the registry and must fail loudly.
+          npx ovsx publish --packagePath *.vsix -p "$OPEN_VSX_TOKEN" 2>&1 | tee ovsx.log \
+            || { grep -q "isn't active" ovsx.log \
+                   && { echo "version published but inactive on the registry"; exit 1; } \
+                   || { grep -qE "already exists|already published" ovsx.log && echo "version already published, skipping" || exit 1; }; }
         env:
           OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
       - name: upload the artifacts
