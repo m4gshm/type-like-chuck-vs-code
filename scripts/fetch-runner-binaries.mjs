@@ -32,7 +32,7 @@ const TARGETS = [
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/win32-x64', releaseDir: 'binaries/ovgenai-release/win32-x64', asset: 'tlc-ovgenai-runner-win32-x64.exe', finalName: 'tlc-ovgenai-runner.exe', hostPlatform: 'win32' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-x64', releaseDir: 'binaries/ovgenai-release/linux-x64', asset: 'tlc-ovgenai-runner-linux-x64', finalName: 'tlc-ovgenai-runner', hostPlatform: 'linux' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-arm64', releaseDir: 'binaries/ovgenai-release/linux-arm64', asset: 'tlc-ovgenai-runner-linux-arm64', finalName: 'tlc-ovgenai-runner' },
-  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundlesFrom: '.build/release', bundleRequired: 'mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib' },
+  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundleRequired: 'mlx.metallib' },
 ];
 
 const githubToken = process.env.GITHUB_TOKEN;
@@ -95,27 +95,9 @@ function localBuild(target) {
   return localBinary;
 }
 
-// SwiftPM puts target resources (MLX default metallib) into <pkg>_<target>.bundle
-// next to the binary in .build/release; without them the runner fails to load Metal.
-async function copyResourceBundles(target, destinationDir) {
-  if (target.bundlesFrom === undefined) {
-    return;
-  }
-  const resourcesDir = join(localRepoDir(target.repo), target.bundlesFrom);
-  if (!existsSync(resourcesDir)) {
-    return;
-  }
-  const { cpSync, readdirSync } = await import('node:fs');
-  for (const entry of readdirSync(resourcesDir)) {
-    if (entry.endsWith('.bundle')) {
-      cpSync(join(resourcesDir, entry), join(destinationDir, entry), { recursive: true });
-      console.log(`copied ${entry} -> ${destinationDir}`);
-    }
-  }
-}
-
-// The metallib-carrying bundle is not optional: the mlx runner exits 255 at
-// model load without it (the v0.1.0 release asset shipped none).
+// The metallib is not optional: the mlx runner exits 255 at model load
+// without it. It ships colocated with the binary (mlx.metallib) since the
+// SwiftPM resource-bundle path broke on the swiftbuild build engine.
 function requireBundle(target, dir) {
   if (target.bundleRequired !== undefined && !existsSync(join(dir, target.bundleRequired))) {
     console.error(`Broken runner layout: ${target.bundleRequired} missing from ${dir} — the runner would exit 255 at model load.`);
@@ -159,7 +141,6 @@ for (const target of TARGETS) {
     if (process.platform !== 'win32') {
       await chmod(destination, 0o755);
     }
-    await copyResourceBundles(target, dirname(destination));
     requireBundle(target, dir);
     writeTag(destination, 'local');
     console.log(`copied ${destination}`);
