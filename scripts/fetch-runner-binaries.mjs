@@ -32,7 +32,7 @@ const TARGETS = [
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/win32-x64', releaseDir: 'binaries/ovgenai-release/win32-x64', asset: 'tlc-ovgenai-runner-win32-x64.exe', finalName: 'tlc-ovgenai-runner.exe', hostPlatform: 'win32' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-x64', releaseDir: 'binaries/ovgenai-release/linux-x64', asset: 'tlc-ovgenai-runner-linux-x64', finalName: 'tlc-ovgenai-runner', hostPlatform: 'linux' },
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-arm64', releaseDir: 'binaries/ovgenai-release/linux-arm64', asset: 'tlc-ovgenai-runner-linux-arm64', finalName: 'tlc-ovgenai-runner' },
-  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundlesFrom: '.build/release' },
+  { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundlesFrom: '.build/release', bundleRequired: 'mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib' },
 ];
 
 const githubToken = process.env.GITHUB_TOKEN;
@@ -40,7 +40,7 @@ const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubTok
 const versionOverride = process.env.RUNNER_VERSION?.trim() || undefined;
 const DEFAULT_RUNNER_VERSIONS = {
   'type-like-chuck-backed-openvino': 'v0.1.0',
-  'type-like-chuck-backed-mlx': 'v0.1.0',
+  'type-like-chuck-backed-mlx': 'v0.1.1',
 };
 const version = (repo) => versionOverride ?? DEFAULT_RUNNER_VERSIONS[repo];
 
@@ -114,6 +114,15 @@ async function copyResourceBundles(target, destinationDir) {
   }
 }
 
+// The metallib-carrying bundle is not optional: the mlx runner exits 255 at
+// model load without it (the v0.1.0 release asset shipped none).
+function requireBundle(target, dir) {
+  if (target.bundleRequired !== undefined && !existsSync(join(dir, target.bundleRequired))) {
+    console.error(`Broken runner layout: ${target.bundleRequired} missing from ${dir} — the runner would exit 255 at model load.`);
+    process.exit(1);
+  }
+}
+
 const assetsByRepo = new Map();
 // A recorded release tag means the binary came from a GitHub release; 'local'
 // or no tag means a local build (packaging keeps it, --release always wants
@@ -128,14 +137,17 @@ for (const target of TARGETS) {
   const dir = releaseOnly && target.releaseDir !== undefined ? target.releaseDir : target.dir;
   const destination = join(dir, target.finalName);
   const expected = version(target.repo);
+  const bundleMissing = target.bundleRequired !== undefined && !existsSync(join(dir, target.bundleRequired));
   if (existsSync(destination)) {
     const diskTag = onDiskTag(destination);
-    const acceptable = expected === undefined ? diskTag === 'local' || diskTag === '' : diskTag === expected;
-    if (acceptable) {
+    const versionOk = expected === undefined ? diskTag === 'local' || diskTag === '' : diskTag === expected;
+    if (versionOk && !bundleMissing) {
       console.log(`runner binary present: ${destination}`);
       continue;
     }
-    console.log(`runner binary on disk is ${diskTag === '' ? 'untagged' : diskTag}, expected ${expected} — re-downloading`);
+    console.log(bundleMissing
+      ? `runner resource bundle missing on disk (${target.bundleRequired}) — re-downloading`
+      : `runner binary on disk is ${diskTag === '' ? 'untagged' : diskTag}, expected ${expected} — re-downloading`);
   }
   mkdirSync(dir, { recursive: true });
   const localBinary = localBuild(target);
@@ -148,6 +160,7 @@ for (const target of TARGETS) {
       await chmod(destination, 0o755);
     }
     await copyResourceBundles(target, dirname(destination));
+    requireBundle(target, dir);
     writeTag(destination, 'local');
     console.log(`copied ${destination}`);
     continue;
@@ -186,9 +199,11 @@ for (const target of TARGETS) {
       process.exit(extract.status ?? 1);
     }
     // The archive names the binary after the asset (tlc-mlx-runner-macos-arm64);
-    // the extension resolves finalName — align the extracted name.
+    // the extension resolves finalName — align the extracted name. The old
+    // binary is always replaced: on a re-fetch the destination exists and
+    // must not survive a version switch.
     const extracted = join(dir, target.asset.replace(/\.tar\.gz$/, ''));
-    if (!existsSync(destination) && existsSync(extracted)) {
+    if (existsSync(extracted)) {
       rmSync(destination, { force: true });
       await rename(extracted, destination);
     }
@@ -200,6 +215,7 @@ for (const target of TARGETS) {
       await chmod(destination, 0o755);
     }
   }
+  requireBundle(target, dir);
   writeTag(destination, expected ?? 'latest');
   console.log(`fetched ${destination}`);
 }
