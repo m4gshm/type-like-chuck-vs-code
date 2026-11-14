@@ -102,6 +102,8 @@ task package         # full .vsix
 
 They land in `binaries/ovgenai/<platform>/` and `binaries/mlx/darwin-arm64/` — the layout the installed extension resolves; `package.yml` re-verifies that the binaries launch from the unpacked `.vsix`.
 
+Nightly builds run daily (`nightly.yml`, or manually via *Run workflow* with any branch) and publish the `.vsix` to the [`nightly` pre-release](https://github.com/m4gshm/type-like-chuck-vs-code/releases/tag/nightly); each asset name carries the build date and commit, assets older than 14 days are pruned, and skipped when no commit landed since the previous build. Nightlies are stamped `x.y.z-nightly.YYYYMMDD` so they install side by side with a stable release; pre-releases never reach the marketplaces.
+
 Debug with F5 (Run Extension).
 
 ## Credits
