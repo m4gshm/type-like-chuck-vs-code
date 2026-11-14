@@ -119,14 +119,14 @@ export class CompletionProvider implements vscode.InlineCompletionItemProvider {
     const tailOverlap = trailingOverlapLength(completion.text, following);
     let text = tailOverlap > 0 ? completion.text.slice(0, completion.text.length - tailOverlap) : completion.text;
     if (text.length === 0) {
-      this.deps.debug('completion skipped: duplicates the existing text after the cursor');
+      this.deps.debug(`completion skipped: duplicates the existing text after the cursor: ${JSON.stringify(completion.text)} vs ${JSON.stringify(following)}`);
       return [];
     }
     // The seam comparison tolerates a whitespace-only difference: the model
     // may suggest `);` while the document already has ` );`.
     const seam = seamOverlap(text, following);
     if (seam.duplicate) {
-      this.deps.debug('completion skipped: duplicates the existing text after the cursor');
+      this.deps.debug(`completion skipped: duplicates the existing text after the cursor: ${JSON.stringify(seam.insert)} vs ${JSON.stringify(following)}`);
       return [];
     }
     // The seam cannot see past the end of the cursor's line: a suggestion
