@@ -1,53 +1,23 @@
-name: Nightly
+name: VSIX
 
 on:
-  schedule:
-    - cron: '40 3 * * *'
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to build (the schedule always builds the default branch)'
+        description: 'Branch to build'
         required: false
         default: ''
 
 concurrency:
-  group: nightly
+  group: vsix
   cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  decision:
-    name: decide whether a build is needed
-    runs-on: ubuntu-latest
-    outputs:
-      build: ${{ steps.decide.outputs.build }}
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: checkout
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.branch || github.event.repository.default_branch }}
-      - name: skip the scheduled build when nothing changed since the last nightly
-        id: decide
-        run: |
-          build=true
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            head=$(git rev-parse --short=8 HEAD)
-            latest=$(gh release view nightly --json assets --jq '.assets | sort_by(.updatedAt) | last.name' 2>/dev/null || echo '')
-            if [ -n "$latest" ] && [ "$latest" != "null" ] && [[ "$latest" == *"$head"* ]]; then
-              build=false
-              echo "no commits since the last nightly asset ($latest)"
-            fi
-          fi
-          echo "build=$build" >> "$GITHUB_OUTPUT"
-
-  nightly:
-    name: build and publish the nightly vsix
-    needs: decision
-    if: needs.decision.outputs.build == 'true'
+  vsix:
+    name: build and publish the vsix
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,10 +48,10 @@ jobs:
             test -f "$f" || { echo "missing mlx runner file: $f"; exit 1; }
           done
           echo "mlx runner resources present"
-      - name: stamp the nightly version
+      - name: stamp the build version
         run: |
           base=$(node -p "require('./package.json').version.split('-')[0]")
-          npm version "$base-nightly.$(date -u +%Y%m%d)" --no-git-tag-version --allow-same-version
+          npm version "$base-build.$(date -u +%Y%m%d)" --no-git-tag-version --allow-same-version
       - name: pack the vsix
         run: |
           sha=$(git rev-parse --short=8 HEAD)
@@ -100,16 +70,16 @@ jobs:
                    binaries/mlx/darwin-arm64/mlx.metallib; do
             test -f "vsix-check/extension/$f" || { echo "missing in vsix: $f"; exit 1; }
           done
-          echo "nightly vsix content verified"
-      - name: publish to the rolling nightly pre-release
+          echo "vsix content verified"
+      - name: publish to the rolling vsix pre-release
         run: |
-          gh release view nightly >/dev/null 2>&1 \
-            || gh release create nightly --prerelease --title "Nightly builds" \
-                 --notes "Auto-built daily from the default branch. Pre-release quality — prefer the latest stable release. Assets older than 14 days are pruned."
-          gh release upload nightly "$(ls *.vsix)" --clobber
-      - name: prune nightly assets older than 14 days
+          gh release view vsix >/dev/null 2>&1 \
+            || gh release create vsix --prerelease --title "VSIX builds" \
+                 --notes "Manual builds from any branch. Pre-release quality — prefer the latest stable release. Assets older than 14 days are pruned."
+          gh release upload vsix "$(ls *.vsix)" --clobber
+      - name: prune vsix assets older than 14 days
         run: |
-          release_id=$(gh release view nightly --json id --jq .id)
+          release_id=$(gh release view vsix --json id --jq .id)
           cutoff=$(date -u -d '14 days ago' +%s)
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --paginate \
             --jq ".[] | select((.created_at | fromdateiso8601) < $cutoff) | [.id, .name] | @tsv" \
@@ -120,6 +90,6 @@ jobs:
       - name: upload the vsix as a run artifact
         uses: actions/upload-artifact@v5
         with:
-          name: vsix-nightly
+          name: vsix
           path: '*.vsix'
           retention-days: 14

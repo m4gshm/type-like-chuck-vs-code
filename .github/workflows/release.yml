@@ -9,7 +9,7 @@ permissions:
 jobs:
   generate:
     name: create release-artifacts
-    # Prereleases (e.g. the rolling nightly) already carry their vsix and must
+    # Prereleases (e.g. the rolling vsix pre-release) already carry their vsix and must
     # not reach the marketplaces.
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
