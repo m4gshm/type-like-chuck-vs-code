@@ -35,6 +35,19 @@ jobs:
           npm run lint
       - name: fetch runner binaries from the backend repo release
         run: node scripts/fetch-runner-binaries.mjs
+      - name: verify mlx resource bundles landed
+        run: |
+          # Without the SwiftPM bundles the mlx runner exits 255 at model load
+          # (default.metallib lives in mlx-swift_Cmlx.bundle) — the v0.1.0
+          # release asset shipped none and no linux step can launch the Mach-O
+          # to find out, so check the files the runtime requires instead.
+          for f in binaries/mlx/darwin-arm64/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib \
+                   binaries/mlx/darwin-arm64/mlx-swift_Cmlx.bundle/Contents/Info.plist \
+                   binaries/mlx/darwin-arm64/swift-transformers_Hub.bundle/Contents/Info.plist \
+                   binaries/mlx/darwin-arm64/swift-crypto_Crypto.bundle/Contents/Info.plist; do
+            test -f "$f" || { echo "missing mlx bundle file: $f"; exit 1; }
+          done
+          echo "mlx resource bundles present"
       - name: verify runner binaries launch
         run: |
           code=0
@@ -57,7 +70,10 @@ jobs:
           for f in binaries/ovgenai/linux-x64/tlc-ovgenai-runner \
                    binaries/ovgenai/win32-x64/tlc-ovgenai-runner.exe \
                    binaries/ovgenai/linux-arm64/tlc-ovgenai-runner \
-                   binaries/mlx/darwin-arm64/tlc-mlx-runner; do
+                   binaries/mlx/darwin-arm64/tlc-mlx-runner \
+                   binaries/mlx/darwin-arm64/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib \
+                   binaries/mlx/darwin-arm64/swift-transformers_Hub.bundle/Contents/Info.plist \
+                   binaries/mlx/darwin-arm64/swift-crypto_Crypto.bundle/Contents/Info.plist; do
             test -f "vsix-check/extension/$f" || { echo "missing in vsix: $f"; exit 1; }
           done
           echo "exec bit: $(stat -c '%a' vsix-check/extension/binaries/ovgenai/linux-x64/tlc-ovgenai-runner)"
