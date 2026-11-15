@@ -277,6 +277,13 @@ export async function ensureLlamaEngine(
       host.onStatus({ status: ENGINE_STATUS.preparingEngine });
       await mkdir(paths.engineRoot, { recursive: true });
       const archivePath = join(paths.engineRoot, asset.fileName);
+      // Wait out a peer's download+install first: it may fill tagDir (and
+      // remove the archive) before we spend our own download.
+      await waitForPeerDownload(host, archivePath, signal);
+      const existing = findBinary(tagDir, host.platform, 'llama-server');
+      if (existing !== undefined) {
+        return existing;
+      }
       await downloadTo(host, signal, {
         url: asset.url,
         destination: archivePath,
@@ -344,11 +351,16 @@ export async function ensureOvGenaiRuntime(
     downloadAsset: async () => {
       host.onStatus({ status: ENGINE_STATUS.preparingEngine });
       await mkdir(paths.engineRoot, { recursive: true });
-      // The wait for a peer's install may have produced the runtime already.
+      const archivePath = join(paths.engineRoot, asset.fileName);
+      // Wait out a peer's download+install first: it may install the runtime
+      // (and remove the archive) before we spend our own download. A leftover
+      // archive from an interrupted session must not be raced by several
+      // windows extracting it at once — the marker serializes that too.
+      await waitForPeerDownload(host, archivePath, signal);
+      // The wait (or an earlier session) may have produced the runtime already.
       if (existsSync(libDirOf(runtimeRoot))) {
         return runtimeRoot;
       }
-      const archivePath = join(paths.engineRoot, asset.fileName);
       await downloadTo(host, signal, {
         url: asset.url,
         destination: archivePath,
@@ -361,6 +373,10 @@ export async function ensureOvGenaiRuntime(
           // A previous interrupted install can leave the target shell behind; rename
           // onto an existing directory fails on Windows.
           await rm(runtimeRoot, { recursive: true, force: true });
+          if (!existsSync(join(stagingDir, topDir))) {
+            await rm(archivePath, { force: true });
+            throw new Error(`OpenVINO runtime archive is corrupt or incomplete — deleted ${archivePath}, retry the start to re-download.`);
+          }
           await rename(join(stagingDir, topDir), runtimeRoot);
           await rm(stagingDir, { recursive: true, force: true });
           for (const entry of await readdir(paths.engineRoot)) {
