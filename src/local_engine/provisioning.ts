@@ -121,6 +121,55 @@ export async function waitForPeerDownload(
   }
 }
 
+/**
+ * Cross-window provisioning lock: only one window asks questions, downloads,
+ * installs and compiles; the others wait quietly and show a progress label.
+ * A dead owner (crashed window) is taken over. Returns the release callback.
+ */
+export async function acquireProvisionLock(
+  engineRoot: string,
+  signal: AbortSignal | undefined,
+  host: ProvisioningHost,
+): Promise<() => Promise<void>> {
+  const lock = join(engineRoot, 'provisioning.lock');
+  for (;;) {
+    let ownerPid: number | undefined;
+    try {
+      ownerPid = (JSON.parse(readFileSync(lock, 'utf8')) as { pid: number }).pid;
+    } catch {
+      // No lock or unreadable: nobody is preparing.
+    }
+    if (ownerPid !== undefined && ownerPid !== process.pid && isPidAlive(ownerPid)) {
+      host.onStatus({
+        status: ENGINE_STATUS.awaitingInput,
+        prompt: 'waiting: another VS Code window is preparing the local engine (download, install, compile)…',
+      });
+      await sleep(2000, signal);
+      continue;
+    }
+    if (ownerPid !== undefined) {
+      await rm(lock, { force: true });
+    }
+    try {
+      await mkdir(engineRoot, { recursive: true });
+      await writeFile(lock, JSON.stringify({ pid: process.pid }));
+      break;
+    } catch {
+      await sleep(2000, signal);
+    }
+  }
+  return async () => {
+    try {
+      const own = (JSON.parse(readFileSync(lock, 'utf8')) as { pid: number }).pid === process.pid;
+      if (own) {
+        await rm(lock, { force: true });
+      }
+    } catch {
+      // Already gone.
+    }
+  };
+}
+
 async function downloadTo(
   host: ProvisioningHost,
   signal: AbortSignal | undefined,

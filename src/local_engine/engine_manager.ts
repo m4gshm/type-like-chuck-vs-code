@@ -17,7 +17,7 @@ import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
 import { SharedRunnerOptions, findLiveMatch, isPidAlive, localListenEndpoint, newToken, writeRecord } from './runner_discovery';
-import { ProvisioningHost, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime } from './provisioning';
+import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
 
@@ -193,11 +193,13 @@ export class EngineManager {
   }
 
   private async start(): Promise<EngineStatus> {
+    let releaseProvisioning: (() => Promise<void>) | undefined;
     try {
       await this.stop();
       this.modelDownloadAsked = false;
       const paths = this.host.paths();
       const settings = this.host.settings();
+      releaseProvisioning = await acquireProvisionLock(paths.engineRoot, this.activeSignal, this.host);
       if (settings.modelId === 'custom' && settings.modelPath.length === 0) {
         throw new Error(`tlc.local.model is "custom" — set tlc.local.customModelPath to a model file (${BRAND}: Select Local Model → From disk…).`);
       }
@@ -268,6 +270,8 @@ export class EngineManager {
       }
       await this.stop();
       throw err;
+    } finally {
+      await releaseProvisioning?.();
     }
   }
 
