@@ -6,7 +6,7 @@ import {
   findLiveMatch,
   localListenEndpoint,
   matchFields,
-  deriveToken,
+  newToken,
   recordKey,
   scanRecords,
   writeRecord,
@@ -43,14 +43,11 @@ describe('runner_discovery', () => {
       .toBe(recordKey({ kind: 'mlx', modelPath: '/m', contextLength: 8192 }));
   });
 
-  it('the pipe name and the token are keyed by the match fields', () => {
+  it('the pipe name is keyed by the match fields; tcp tokens are per-instance', () => {
     const a = localListenEndpoint(root, { kind: 'ovgenai', modelPath: '/m', device: 'NPU', contextLength: 4096 });
     const b = localListenEndpoint(root, { kind: 'ovgenai', modelPath: '/m', device: 'NPU', contextLength: 8192 });
     expect(a).not.toBe(b);
-    const ta = deriveToken({ kind: 'ovgenai', modelPath: '/m', device: 'NPU', contextLength: 4096 });
-    const tb = deriveToken({ kind: 'ovgenai', modelPath: '/m', device: 'NPU', contextLength: 8192 });
-    expect(ta).not.toBe(tb);
-    expect(deriveToken({ kind: 'ovgenai', modelPath: '/m', device: 'NPU', contextLength: 4096 })).toBe(ta);
+    expect(newToken()).not.toBe(newToken());
   });
 
   it('scan finds a written record with its options intact', async () => {

@@ -16,7 +16,7 @@ import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
-import { SharedRunnerOptions, RunnerRecord, deleteRecord, deriveToken, findLiveMatch, isPidAlive, localListenEndpoint, recordKey, writeRecord } from './runner_discovery';
+import { SharedRunnerOptions, RunnerRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
 import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -316,13 +316,12 @@ export class EngineManager {
     if (found !== undefined) {
       return this.connectToRecord(engineRoot, found.record, spawnOptions, label);
     }
-    const token = deriveToken(sharedOptions);
     const pipeName = localListenEndpoint(engineRoot, sharedOptions);
-    // The pipe name and the token are both derived from the combo: a live
-    // runner without a discovery record (an orphan from an older build) is
-    // still joinable — try it before spawning a doomed duplicate.
+    // The pipe name is derived from the combo and pipe clients need no token:
+    // a live runner without a discovery record (an orphan from an older
+    // build) is still joinable — try it before spawning a doomed duplicate.
     const adopted = await connectSharedRunner(
-      { transport: 'pipe', endpoint: pipeName, token, modelPath: spawnOptions.modelPath, label, signal: spawnOptions.signal, onUnexpectedExit: spawnOptions.onUnexpectedExit, readyTimeoutMs: 5000 },
+      { transport: 'pipe', endpoint: pipeName, token: '', modelPath: spawnOptions.modelPath, label, signal: spawnOptions.signal, onUnexpectedExit: spawnOptions.onUnexpectedExit, readyTimeoutMs: 5000 },
       this.host,
     ).then(
       (runner) => runner,
@@ -336,6 +335,7 @@ export class EngineManager {
       `${label}: no live shared runner for this combo — spawning (${recordKey(sharedOptions)})`,
     );
     const transport: 'pipe' | 'tcp' = settings.sharedRunnerTransport === 'tcp' ? 'tcp' : 'pipe';
+    const token = transport === 'tcp' ? newToken() : '';
     const listen = transport === 'tcp'
       ? { transport: 'tcp' as const }
       : { transport: 'pipe' as const, pipeName };

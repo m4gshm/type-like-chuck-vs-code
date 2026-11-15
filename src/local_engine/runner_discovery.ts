@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { EngineKind } from './kind_catalog';
@@ -40,13 +40,12 @@ export function recordKey(options: SharedRunnerOptions): string {
 }
 
 /**
- * Deterministic per-combo token: every window can compute it, so a live
- * runner is joinable even when its discovery record was lost (an orphan).
- * It gates only opportunistic local connections — the pipe lives in the
- * user's own namespace; TCP is opt-in.
+ * Per-instance token for the opt-in TCP transport (any local user can reach a
+ * localhost port, so the runner rejects unauthenticated clients). Pipe
+ * clients need no token: the pipe lives in the creating user's namespace.
  */
-export function deriveToken(options: SharedRunnerOptions): string {
-  return createHash('sha1').update('tlc-token:' + matchFields(options.kind, options).join('\u0000')).digest('hex').slice(0, 32);
+export function newToken(): string {
+  return randomBytes(16).toString('hex');
 }
 
 export function discoveryDir(engineRoot: string): string {

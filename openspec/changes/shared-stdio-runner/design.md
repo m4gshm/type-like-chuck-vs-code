@@ -42,8 +42,8 @@ One toggle, applies to both stdio kinds. When disabled the extension never reads
 ## Risks / Trade-offs
 
 - [Runner binaries without listen mode] → the extension falls back to private spawn when connect fails or the runner predates listen mode; no version negotiation needed beyond the connect attempt.
-- [TCP on localhost without auth] → mitigated by a token derived from the shared settings (model, device, context length): without a valid `auth` the runner closes the connection before processing anything. The deterministic derivation lets any window join a live runner even if its discovery record was lost; a local attacker could compute it too — accepted, because the default transport is a pipe in the user's own namespace and TCP is opt-in.
-- [Discovery record lost while the runner lives] → joinable anyway: pipe name and token derive from the combo, the extension connects directly instead of spawning a duplicate.
+- [TCP on localhost without auth] → mitigated by a per-instance random token from the discovery file: without a valid `auth` the runner closes the connection before processing anything. Pipe clients authenticate implicitly — the pipe lives in the creating user's namespace.
+- [Discovery record lost while the runner lives] → joinable anyway: the pipe name derives from the combo and pipe clients need no auth, the extension connects directly instead of spawning a duplicate.
 - [Stale `.sock` / state file after a crash] → the PID check plus connect-failure fallback covers it; the spawner recreates both.
 - [Two windows racing to spawn] → both spawn, the loser's endpoint key differs or its connect fails next start; worst case one duplicate load for one session, no corruption.
 - [Backend changes land later] → this change ships independently; until a runner release with listen mode is imported, the feature is a no-op pass-through.
