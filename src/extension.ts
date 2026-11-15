@@ -217,6 +217,8 @@ export function activate(context: vscode.ExtensionContext): void {
       ovgenaiRunnerPath: bundledOvgenaiRunnerPath(context.extensionPath),
       mlxRunnerPath: bundledMlxRunnerPath(context.extensionPath),
       apiKeyEnabled: config().localApiKeyEnabled,
+      sharedRunner: config().localSharedRunner,
+      sharedRunnerTransport: config().localSharedRunnerTransport,
     }),
     onStatus: (status) => localModeUi.handle(status),
     onProgress: engineTasks.onDownloadProgress,

@@ -49,6 +49,14 @@ A failed accelerated start falls back down the device chain automatically; a sta
 
 All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*` — every one is documented in its `description` field; they all apply live. In local mode nothing contacts any remote server. On startup and whenever the remote base URL changes, the configured model is validated against the server's `/v1/models` list: single-model servers are applied automatically, multi-model servers keep the configured model while it is present. A model from a supported family is marked with a check in `Type like Chuck: Select Model`.
 
+## Shared runner across windows
+
+`tlc.local.sharedRunner` (default on, ovgenai/mlx kinds) makes VS Code windows share one backend process instead of each loading its own model copy: a starting window scans the runner discovery directory (`<engine dir>/runners/`, one file per live runner) and connects to a runner whose settings match its own. A runner exits by itself when its last client disconnects — closing a window never kills a runner other windows still use. The connection is authenticated with a per-instance token from the discovery file; without a valid token the runner rejects every request.
+
+What counts as "matching" is engine-specific: **ovgenai** matches model + device + context length (the NPU graph is compiled per context window — two windows with the same model but ctx 4096 and 8192 get two runners and two compilations); **mlx** matches the model only (MLX compiles once and serves any context length, so such windows share one runner).
+
+`tlc.local.sharedRunnerTransport` picks the transport: `pipe` (default — a platform named pipe on Windows, a unix socket elsewhere), `tcp` (localhost TCP, for VS Code remote/WSL setups where the pipe cannot cross), or `auto` (pipe with an automatic TCP fallback). Connects always follow the transport recorded in the runner's discovery file, so windows sharing a runner never disagree. The status bar shows `shared, pid N` when connected to another window's runner; the TLC output channel logs the endpoint and PID.
+
 ## Custom FIM templates
 
 `tlc.promptTemplate` selects a built-in template for a known model family (MVP focus: Qwen2.5-Coder) or `custom`. In `custom` mode the FIM markers (prefix/suffix/middle) and `stop` tokens are edited right in the corresponding settings. Selecting a built-in resets the custom fields; editing any of them switches the selection to `custom`. On a model change a better-matching built-in family is applied automatically (unless `custom`); an unknown template id falls back to the default with a warning.

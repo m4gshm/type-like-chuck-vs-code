@@ -15,7 +15,8 @@ import { catalogModelDir, catalogModelFiles, catalogSpec, EngineKind, removeCata
 import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
-import { probeRunnerVersion, RunningStdioRunner, startStdioRunner } from './stdio_runner';
+import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
+import { SharedRunnerOptions, findLiveMatch, localListenEndpoint, newToken, writeRecord } from './runner_discovery';
 import { ProvisioningHost, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -40,6 +41,10 @@ export interface EngineManagerSettings {
   mlxRunnerPath?: string;
   /** When false the engine runs without key authentication (engine debugging). */
   apiKeyEnabled: boolean;
+  /** Shared-runner mode (stdio kinds): connect to a live runner or spawn one others can connect to. */
+  sharedRunner: boolean;
+  /** Shared-runner transport: platform pipe/socket, localhost TCP, or pipe with a TCP fallback. */
+  sharedRunnerTransport: 'pipe' | 'tcp' | 'auto';
 }
 
 /** One entry of the "which model to download" picker. */
@@ -266,6 +271,74 @@ export class EngineManager {
     }
   }
 
+  /**
+   * Connect-or-spawn for one resolved set of start options: scan the
+   * discovery directory for a live runner with matching options, connect to
+   * it; otherwise spawn a private-pipe or shared listen-mode runner and
+   * publish its discovery file. `auto` retries a failed pipe spawn over TCP.
+   */
+  private async startSharedRunner(
+    engineRoot: string,
+    kind: EngineKind,
+    settings: EngineManagerSettings,
+    spawnOptions: StdioRunnerStartOptions & { modelPath: string },
+    label: string,
+  ): Promise<RunningStdioRunner> {
+    const sharedOptions: SharedRunnerOptions = {
+      kind,
+      modelPath: spawnOptions.modelPath,
+      device: spawnOptions.device,
+      contextLength: spawnOptions.contextLength,
+    };
+    const found = await findLiveMatch(engineRoot, sharedOptions);
+    if (found !== undefined) {
+      const record = found.record;
+      const runner = await connectSharedRunner(
+        {
+          transport: record.transport,
+          endpoint: record.endpoint,
+          port: record.port,
+          token: record.token,
+          modelPath: spawnOptions.modelPath,
+          label,
+          signal: spawnOptions.signal,
+          onUnexpectedExit: spawnOptions.onUnexpectedExit,
+        },
+        this.host,
+      );
+      this.host.log(`${label}: connected to shared runner pid=${record.pid} (${record.transport})`);
+      return runner;
+    }
+    const token = newToken();
+    const transport: 'pipe' | 'tcp' = settings.sharedRunnerTransport === 'tcp' ? 'tcp' : 'pipe';
+    const listen = transport === 'tcp'
+      ? { transport: 'tcp' as const }
+      : { transport: 'pipe' as const, pipeName: localListenEndpoint(engineRoot, sharedOptions) };
+    let runner: RunningStdioRunner;
+    try {
+      runner = await startStdioRunner({ ...spawnOptions, listen, token }, this.host);
+    } catch (err) {
+      // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
+      // (remote/WSL) falls back to a localhost TCP listener.
+      if (settings.sharedRunnerTransport === 'auto' && transport === 'pipe') {
+        this.host.warn(`${label}: pipe listen failed (${messageOf(err)}); retrying over TCP.`);
+        runner = await startStdioRunner({ ...spawnOptions, listen: { transport: 'tcp' }, token }, this.host);
+      } else {
+        throw err;
+      }
+    }
+    const actualTransport = listen.transport === 'pipe' && runner.port !== undefined ? 'tcp' : listen.transport;
+    await writeRecord(engineRoot, {
+      pid: runner.pid ?? -1,
+      transport: actualTransport,
+      endpoint: actualTransport === 'pipe' ? listen.transport === 'tcp' ? undefined : listen.pipeName : undefined,
+      port: actualTransport === 'tcp' ? runner.port : undefined,
+      token,
+      options: sharedOptions,
+    });
+    return runner;
+  }
+
   private async startOvgenai(paths: EnginePaths, settings: EngineManagerSettings): Promise<EngineStatus> {
     const runnerPath = settings.ovgenaiRunnerPath;
     if (runnerPath === undefined || runnerPath.length === 0) {
@@ -314,29 +387,30 @@ export class EngineManager {
       lastModelPath = modelPath;
       this.host.log(`ovgenai: loading ${model?.label ?? settings.modelPath} on ${device.toUpperCase()} (${modelPath})`);
       this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: device === 'npu' });
-      return startStdioRunner(
-        {
-          runnerPath,
-          modelPath,
-          device: device.toUpperCase(),
-          contextLength,
-          // The runner's own CACHE_DIR default is relative to its cwd (the
-          // extension host's, unpredictable); pin it to the model cache so
-          // compiled blobs persist across starts. Blob caches are
-          // device-specific (incompatible blobs) — one folder per device.
-          props: device === 'npu' || device === 'gpu' ? { CACHE_DIR: join(paths.modelCacheDir, `${device}-blobs`) } : undefined,
-          signal: this.activeSignal,
-          // NPU watcher: a graph compile can take unbounded wall time, so
-          // re-arm on each stderr line instead; 30 min of silence means a
-          // hung compiler pass. A dead runner is still detected via the
-          // exit check.
-          readyIdleTimeoutMs: device === 'npu' ? NPU_READY_IDLE_TIMEOUT_MS : undefined,
-          libraryDirs,
-          onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
-          onStderr: (line) => this.host.log(`ovgenai: ${line}`),
-        },
-        this.host,
-      );
+      const spawnOptions: StdioRunnerStartOptions & { modelPath: string } = {
+        runnerPath,
+        modelPath,
+        device: device.toUpperCase(),
+        contextLength,
+        // The runner's own CACHE_DIR default is relative to its cwd (the
+        // extension host's, unpredictable); pin it to the model cache so
+        // compiled blobs persist across starts. Blob caches are
+        // device-specific (incompatible blobs) — one folder per device.
+        props: device === 'npu' || device === 'gpu' ? { CACHE_DIR: join(paths.modelCacheDir, `${device}-blobs`) } : undefined,
+        signal: this.activeSignal,
+        // NPU watcher: a graph compile can take unbounded wall time, so
+        // re-arm on each stderr line instead; 30 min of silence means a
+        // hung compiler pass. A dead runner is still detected via the
+        // exit check.
+        readyIdleTimeoutMs: device === 'npu' ? NPU_READY_IDLE_TIMEOUT_MS : undefined,
+        libraryDirs,
+        onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
+        onStderr: (line) => this.host.log(`ovgenai: ${line}`),
+      };
+      if (settings.sharedRunner) {
+        return this.startSharedRunner(paths.engineRoot, 'ovgenai', settings, spawnOptions, 'ovgenai');
+      }
+      return startStdioRunner(spawnOptions, this.host);
     });
     runner = started.engine;
     activeDevice = started.device;
@@ -351,6 +425,7 @@ export class EngineManager {
       model: settings.modelId,
       modelPath: lastModelPath,
       device: activeDevice,
+      sharedPid: settings.sharedRunner ? runner.pid : undefined,
     };
     this.host.onStatus(status);
     return status;
@@ -376,6 +451,34 @@ export class EngineManager {
     }
     const modelPath = await ensureDirModel(this.host, paths, model, settings, this.activeSignal);
     this.host.onStatus({ status: ENGINE_STATUS.starting });
+    if (settings.sharedRunner) {
+      const runner = await this.startSharedRunner(
+        paths.engineRoot,
+        'mlx',
+        settings,
+        {
+          runnerPath,
+          modelPath,
+          contextLength: model !== undefined ? model.contextLength : CUSTOM_MODEL_CONTEXT_LENGTH,
+          label: 'mlx',
+          onUnexpectedExit: (message) => this.handleUnexpectedExit(`mlx ${message}`),
+          onStderr: (line) => this.host.log(`mlx: ${line}`),
+          signal: this.activeSignal,
+        },
+        'mlx',
+      );
+      this.engine = runner;
+      const status: EngineStatus = {
+        status: ENGINE_STATUS.ready,
+        baseUrl: '',
+        apiKey: undefined,
+        model: settings.modelId,
+        modelPath,
+        sharedPid: settings.sharedRunner ? runner.pid : undefined,
+      };
+      this.host.onStatus(status);
+      return status;
+    }
     // Metal is the only MLX backend; no device fallback chain.
     const runner = await startStdioRunner(
       {

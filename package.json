@@ -350,6 +350,19 @@
             "default": true,
             "description": "Require the per-session key from engine clients. Keep enabled; turn off only to call the engine directly (e.g. curl) without the key."
           },
+          "tlc.local.sharedRunner": {
+            "type": "boolean",
+            "order": 2,
+            "default": true,
+            "description": "Share one stdio runner (ovgenai/mlx) across VS Code windows: a window connects to a live runner with matching settings instead of loading its own model copy. The runner exits by itself when the last window disconnects. Only the ovgenai and mlx kinds are shared."
+          },
+          "tlc.local.sharedRunnerTransport": {
+            "type": "string",
+            "order": 2,
+            "enum": ["pipe", "tcp", "auto"],
+            "default": "pipe",
+            "description": "Shared-runner transport (local mode only): a platform named pipe/unix socket (pipe), localhost TCP (tcp, for VS Code remote/WSL setups where the pipe cannot cross), or pipe with an automatic TCP fallback (auto)."
+          },
           "tlc.local.llamaCppRelease": {
             "type": "string",
             "order": 3,

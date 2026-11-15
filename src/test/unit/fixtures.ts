@@ -39,6 +39,8 @@ export const defaultEngineManagerSettings = (overrides: Partial<EngineManagerSet
   openvinoUrl: 'https://storage.openvinotoolkit.org',
   modelPath: '',
   apiKeyEnabled: true,
+  sharedRunner: false,
+  sharedRunnerTransport: 'pipe',
   ...overrides,
 });
 
@@ -62,6 +64,8 @@ export const defaultExtensionConfig = (overrides: Partial<ExtensionConfig> = {})
   localOpenvinoUrl: 'https://storage.openvinotoolkit.org',
   localCustomModelPath: '',
   localApiKeyEnabled: true,
+  localSharedRunner: true,
+  localSharedRunnerTransport: 'pipe',
   promptTemplate: undefined,
   customTemplate: undefined,
   prefixMaxLength: 8000,
