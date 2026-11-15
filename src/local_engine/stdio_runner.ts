@@ -453,6 +453,8 @@ export interface SharedConnectOptions {
   token: string;
   /** Expected model path: the ready handshake must match, else the connect fails. */
   modelPath: string;
+  /** The runner process id from the discovery record, surfaced in the UI. */
+  pid?: number;
   label?: string;
   readyTimeoutMs?: number;
   signal?: AbortSignal;
@@ -552,6 +554,7 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
   return {
     device: readyInfo.device,
     modelPath: options.modelPath,
+    pid: options.pid,
     stream: client.stream,
     stop: () =>
       new Promise((resolve) => {

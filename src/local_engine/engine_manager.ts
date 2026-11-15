@@ -415,6 +415,7 @@ export class EngineManager {
           port: record.port,
           token: record.token,
           modelPath: spawnOptions.modelPath,
+          pid: record.pid,
           label,
           signal: spawnOptions.signal,
           onUnexpectedExit: spawnOptions.onUnexpectedExit,
