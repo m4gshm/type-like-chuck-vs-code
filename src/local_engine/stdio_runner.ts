@@ -34,6 +34,8 @@ export interface StdioRunnerStartOptions {
   readyIdleTimeoutMs?: number;
   /** Cancels the ready wait: the child is killed and the start rejects with AbortError. */
   signal?: AbortSignal;
+  /** Called right after the child process exists (before the model loads): the shared-runner discovery record is written here. */
+  onSpawned?: (pid: number) => void;
   onUnexpectedExit?: (message: string) => void;
   onStderr?: (line: string) => void;
 }
@@ -292,6 +294,9 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     args.push('--token', options.token);
   }
   const child = spawnImpl(options.runnerPath, args, { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  if (child.pid !== undefined) {
+    options.onSpawned?.(child.pid);
+  }
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
 

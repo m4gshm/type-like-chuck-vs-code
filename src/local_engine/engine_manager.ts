@@ -16,7 +16,7 @@ import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
-import { SharedRunnerOptions, findLiveMatch, localListenEndpoint, newToken, writeRecord } from './runner_discovery';
+import { SharedRunnerOptions, findLiveMatch, isPidAlive, localListenEndpoint, newToken, writeRecord } from './runner_discovery';
 import { ProvisioningHost, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -293,19 +293,60 @@ export class EngineManager {
     const found = await findLiveMatch(engineRoot, sharedOptions);
     if (found !== undefined) {
       const record = found.record;
-      const runner = await connectSharedRunner(
-        {
-          transport: record.transport,
-          endpoint: record.endpoint,
-          port: record.port,
-          token: record.token,
-          modelPath: spawnOptions.modelPath,
-          label,
-          signal: spawnOptions.signal,
-          onUnexpectedExit: spawnOptions.onUnexpectedExit,
-        },
-        this.host,
-      );
+      let runner: RunningStdioRunner;
+      try {
+        runner = await connectSharedRunner(
+          {
+            transport: record.transport,
+            endpoint: record.endpoint,
+            port: record.port,
+            token: record.token,
+            modelPath: spawnOptions.modelPath,
+            label,
+            signal: spawnOptions.signal,
+            onUnexpectedExit: spawnOptions.onUnexpectedExit,
+          },
+          this.host,
+        );
+      } catch (err) {
+        // Transient connect failures mean the runner process is alive but its
+        // listener is not up yet (spawned moments ago, model still loading):
+        // retry within the discovery record instead of spawning a duplicate.
+        const message = messageOf(err);
+        if (!/ENOENT|ECONNREFUSED|EACCES/.test(message)) {
+          throw err;
+        }
+        let connected: RunningStdioRunner | undefined;
+        for (let attempt = 0; attempt < 5 && connected === undefined; attempt++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (!isPidAlive(record.pid)) {
+            break;
+          }
+          try {
+            connected = await connectSharedRunner(
+              {
+                transport: record.transport,
+                endpoint: record.endpoint,
+                port: record.port,
+                token: record.token,
+                modelPath: spawnOptions.modelPath,
+                label,
+                signal: spawnOptions.signal,
+                onUnexpectedExit: spawnOptions.onUnexpectedExit,
+              },
+              this.host,
+            );
+          } catch (retryErr) {
+            if (!/ENOENT|ECONNREFUSED|EACCES/.test(messageOf(retryErr))) {
+              throw retryErr;
+            }
+          }
+        }
+        if (connected === undefined) {
+          throw err;
+        }
+        runner = connected;
+      }
       this.host.log(`${label}: connected to shared runner pid=${record.pid} (${record.transport})`);
       return runner;
     }
@@ -314,28 +355,62 @@ export class EngineManager {
     const listen = transport === 'tcp'
       ? { transport: 'tcp' as const }
       : { transport: 'pipe' as const, pipeName: localListenEndpoint(engineRoot, sharedOptions) };
+    // The record goes out right after the process exists — long before the
+    // model loads — so concurrent windows find it instead of racing to spawn
+    // on the same endpoint. TCP records need the ready-reported port and are
+    // written after the start below.
+    let recordWritten = false;
+    const writePipeRecord = (pid: number | undefined): void => {
+      if (recordWritten || transport !== 'pipe' || pid === undefined) {
+        return;
+      }
+      recordWritten = true;
+      void writeRecord(engineRoot, {
+        pid,
+        transport: 'pipe',
+        endpoint: listen.transport === 'pipe' ? listen.pipeName : undefined,
+        token,
+        options: sharedOptions,
+      });
+    };
     let runner: RunningStdioRunner;
-    try {
-      runner = await startStdioRunner({ ...spawnOptions, listen, token }, this.host);
-    } catch (err) {
-      // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
-      // (remote/WSL) falls back to a localhost TCP listener.
-      if (settings.sharedRunnerTransport === 'auto' && transport === 'pipe') {
-        this.host.warn(`${label}: pipe listen failed (${messageOf(err)}); retrying over TCP.`);
-        runner = await startStdioRunner({ ...spawnOptions, listen: { transport: 'tcp' }, token }, this.host);
-      } else {
+    let spawnTries = 0;
+    for (;;) {
+      try {
+        runner = await startStdioRunner(
+          { ...spawnOptions, listen, token, onSpawned: (pid) => writePipeRecord(pid) },
+          this.host,
+        );
+        break;
+      } catch (err) {
+        // A runner on the same endpoint that is just shutting down (our own
+        // restart) owns the name for a moment: wait and retry the same
+        // endpoint before falling through to TCP.
+        if (transport === 'pipe' && /already in use/.test(messageOf(err)) && spawnTries < 3) {
+          spawnTries++;
+          this.host.log(`${label}: pipe endpoint is busy (${spawnTries}/3), retrying.`);
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
+        // (remote/WSL) falls back to a localhost TCP listener.
+        if (settings.sharedRunnerTransport === 'auto' && transport === 'pipe') {
+          this.host.warn(`${label}: pipe listen failed (${messageOf(err)}); retrying over TCP.`);
+          runner = await startStdioRunner({ ...spawnOptions, listen: { transport: 'tcp' }, token }, this.host);
+          break;
+        }
         throw err;
       }
     }
-    const actualTransport = listen.transport === 'pipe' && runner.port !== undefined ? 'tcp' : listen.transport;
-    await writeRecord(engineRoot, {
-      pid: runner.pid ?? -1,
-      transport: actualTransport,
-      endpoint: actualTransport === 'pipe' ? listen.transport === 'tcp' ? undefined : listen.pipeName : undefined,
-      port: actualTransport === 'tcp' ? runner.port : undefined,
-      token,
-      options: sharedOptions,
-    });
+    if (!recordWritten) {
+      await writeRecord(engineRoot, {
+        pid: runner.pid ?? -1,
+        transport: 'tcp',
+        port: runner.port,
+        token,
+        options: sharedOptions,
+      });
+    }
     return runner;
   }
 
