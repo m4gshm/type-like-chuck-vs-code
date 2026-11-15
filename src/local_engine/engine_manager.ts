@@ -523,6 +523,7 @@ export class EngineManager {
       modelPath: lastModelPath,
       device: activeDevice,
       sharedPid: settings.sharedRunner ? runner.pid : undefined,
+      pid: runner.pid,
     };
     this.host.onStatus(status);
     return status;
@@ -572,6 +573,7 @@ export class EngineManager {
         model: settings.modelId,
         modelPath,
         sharedPid: settings.sharedRunner ? runner.pid : undefined,
+        pid: runner.pid,
       };
       this.host.onStatus(status);
       return status;
@@ -596,6 +598,7 @@ export class EngineManager {
       apiKey: undefined,
       model: settings.modelId,
       modelPath,
+      pid: runner.pid,
     };
     this.host.onStatus(status);
     return status;
