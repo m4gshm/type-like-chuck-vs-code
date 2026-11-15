@@ -324,7 +324,13 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     }
   });
 
-  const readyInfo = await waitForReady(options.readyTimeoutMs ?? 600_000, options.readyIdleTimeoutMs, options.signal);
+  const readyInfo = await waitForReady(
+    // The NPU compile has no bound (the idle timeout below guards hangs), so
+    // the wall-clock cap only applies when no idle guard is armed.
+    options.readyTimeoutMs ?? (options.readyIdleTimeoutMs !== undefined ? Infinity : 600_000),
+    options.readyIdleTimeoutMs,
+    options.signal,
+  );
 
   function waitForReady(timeoutMs: number, idleTimeoutMs: number | undefined, signal: AbortSignal | undefined): Promise<{ model: string; device: string; ctx: number; pid?: number; port?: number }> {
     return new Promise((resolve, reject) => {
@@ -506,7 +512,9 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
       reject(err);
     };
     const onAbort = (): void => fail(new DOMException('Canceled', 'AbortError'));
-    timer = setTimeout(() => fail(new Error(`${label} shared runner did not become ready in time`)), options.readyTimeoutMs ?? 600_000);
+    // A client can connect while the runner is mid-NPU-compile (15+ min for a
+    // 3B nf4 model): the wait must outlast the compile, not a 10-min default.
+    timer = setTimeout(() => fail(new Error(`${label} shared runner did not become ready in time`)), options.readyTimeoutMs ?? 30 * 60_000);
     if (options.signal?.aborted) {
       onAbort();
       return;
