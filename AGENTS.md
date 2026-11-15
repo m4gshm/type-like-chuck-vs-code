@@ -9,6 +9,10 @@ OpenAI-compatible server, using FIM (fill-in-the-middle) prompt templates.
 Single-line suggestions only; completions are streamed from the legacy
 `POST /v1/completions` endpoint.
 
+## Git workflow
+
+Development happens in feature branches cut from `main` (name: `feature/<topic>`). Code lands in `main` only via a squash-merge PR, done manually or when the user explicitly asks for it. Agents MUST NOT merge to `main` on their own.
+
 ## Commands
 
 ```bash
