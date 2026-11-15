@@ -140,7 +140,10 @@ tasks:
       - npm run package:release
 
   # Scenario B: backends are rebuilt locally (runner:import) and the .vsix
-  # packages exactly those binaries — nothing is downloaded.
+  # packages exactly those binaries — nothing is downloaded. The version gets
+  # a "-local.<timestamp>" suffix so the installed build is identifiable in
+  # VS Code next to a release and a "-build.<date>" nightly. Rewrites the
+  # package.json version in the working tree (do not commit it).
   package:local:
     desc: Rebuild the local backend repos and build the .vsix with those binaries (no downloads)
     deps: [runner:import]
