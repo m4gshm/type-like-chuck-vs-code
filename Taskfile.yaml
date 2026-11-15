@@ -142,6 +142,7 @@ tasks:
     desc: Build the .vsix with runner binaries from the backend GitHub releases (downloads them)
     cmds:
       - npm run package:release
+      - task: prune:vsix
 
   # Scenario B: backends are rebuilt locally (runner:import) and the .vsix
   # packages exactly those binaries — nothing is downloaded. The version gets
@@ -153,6 +154,12 @@ tasks:
     deps: [runner:import]
     cmds:
       - npm run package:local
+      - task: prune:vsix
+
+  # Keep only the 3 newest tlc-*.vsix in the repo root.
+  prune:vsix:
+    cmds:
+      - node -e "const fs=require('fs');const f=fs.readdirSync('.').filter(n=>/^tlc-.*\.vsix$/.test(n)).map(n=>[n,fs.statSync(n).mtimeMs]).sort((a,b)=>b[1]-a[1]);for(const[n]of f.slice(3)){fs.unlinkSync(n);console.log('removed old vsix:',n)}"
 
   clean:
     desc: Remove build artifacts (incl. runner binaries; they re-download from the pinned releases)
