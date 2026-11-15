@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { mkdir, readdir, rename, rm, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { DownloadProgress, downloadFile } from './downloader';
 import { extractArchive } from './extract';
 import { ENGINE_STATUS, EngineStatus } from './engine_status';
@@ -90,7 +90,11 @@ const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
  * first download to finish and reuses its file instead of re-downloading.
  * Returns true when the destination is already there (skip the download).
  */
-export async function waitForPeerDownload(destination: string, signal: AbortSignal | undefined): Promise<boolean> {
+export async function waitForPeerDownload(
+  host: ProvisioningHost,
+  destination: string,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
   const marker = `${destination}.downloading`;
   for (;;) {
     let ownerPid: number | undefined;
@@ -103,6 +107,10 @@ export async function waitForPeerDownload(destination: string, signal: AbortSign
       if (existsSync(destination)) {
         return true;
       }
+      host.onStatus({
+        status: ENGINE_STATUS.awaitingInput,
+        prompt: `waiting: another VS Code window is already downloading ${basename(destination)}…`,
+      });
       await sleep(2000, signal);
       continue;
     }
@@ -116,9 +124,9 @@ export async function waitForPeerDownload(destination: string, signal: AbortSign
 async function downloadTo(
   host: ProvisioningHost,
   signal: AbortSignal | undefined,
-  opts: { url: string; destination: string; kind: 'engine' | 'model'; onProgress?: (p: DownloadProgress) => void },
+  opts: { url: string; destination: string; kind: 'engine' | 'model'; onProgress?: (p: DownloadProgress) => void; after?: () => Promise<void> },
 ): Promise<void> {
-  if (await waitForPeerDownload(opts.destination, signal)) {
+  if (await waitForPeerDownload(host, opts.destination, signal)) {
     return;
   }
   const marker = `${opts.destination}.downloading`;
@@ -130,6 +138,9 @@ async function downloadTo(
       signal,
       onProgress: opts.onProgress ?? ((p) => host.onProgress?.(opts.kind, p)),
     });
+    // The marker must cover unpacking too: a waiter that starts extracting
+    // while the owner is mid-install corrupts both installs.
+    await opts.after?.();
   } finally {
     await rm(marker, { force: true });
   }
@@ -177,8 +188,14 @@ export async function ensureLlamaEngine(
       host.onStatus({ status: ENGINE_STATUS.preparingEngine });
       await mkdir(paths.engineRoot, { recursive: true });
       const archivePath = join(paths.engineRoot, asset.fileName);
-      await downloadTo(host, signal, { url: asset.url, destination: archivePath, kind: 'engine' });
-      await (host.extract ?? extractArchive)({ archivePath, destDir: tagDir, signal });
+      await downloadTo(host, signal, {
+        url: asset.url,
+        destination: archivePath,
+        kind: 'engine',
+        after: async () => {
+          await (host.extract ?? extractArchive)({ archivePath, destDir: tagDir, signal });
+        },
+      });
       await rm(archivePath, { force: true });
       const binary = findBinary(tagDir, host.platform, 'llama-server');
       if (binary === undefined) {
@@ -237,24 +254,34 @@ export async function ensureOvGenaiRuntime(
     downloadAsset: async () => {
       host.onStatus({ status: ENGINE_STATUS.preparingEngine });
       await mkdir(paths.engineRoot, { recursive: true });
-      const archivePath = join(paths.engineRoot, asset.fileName);
-      await downloadTo(host, signal, { url: asset.url, destination: archivePath, kind: 'engine' });
-      // Extract into a staging dir (extractArchive wipes destDir on failure and
-      // engineRoot holds other engines), then move the archive's top folder up.
-      const stagingDir = join(paths.engineRoot, `${topDir}.staging`);
-      await (host.extract ?? extractArchive)({ archivePath, destDir: stagingDir, signal });
-      // A previous interrupted install can leave the target shell behind; rename
-      // onto an existing directory fails on Windows.
-      await rm(runtimeRoot, { recursive: true, force: true });
-      await rename(join(stagingDir, topDir), runtimeRoot);
-      await rm(stagingDir, { recursive: true, force: true });
-      await rm(archivePath, { force: true });
-      for (const entry of await readdir(paths.engineRoot)) {
-        // Stale installs from the previous two-level layout (ov-genai-<version>/...).
-        if (entry.startsWith('ov-genai-')) {
-          await rm(join(paths.engineRoot, entry), { recursive: true, force: true });
-        }
+      // The wait for a peer's install may have produced the runtime already.
+      if (existsSync(libDirOf(runtimeRoot))) {
+        return runtimeRoot;
       }
+      const archivePath = join(paths.engineRoot, asset.fileName);
+      await downloadTo(host, signal, {
+        url: asset.url,
+        destination: archivePath,
+        kind: 'engine',
+        after: async () => {
+          // Extract into a staging dir (extractArchive wipes destDir on failure and
+          // engineRoot holds other engines), then move the archive's top folder up.
+          const stagingDir = join(paths.engineRoot, `${topDir}.staging`);
+          await (host.extract ?? extractArchive)({ archivePath, destDir: stagingDir, signal });
+          // A previous interrupted install can leave the target shell behind; rename
+          // onto an existing directory fails on Windows.
+          await rm(runtimeRoot, { recursive: true, force: true });
+          await rename(join(stagingDir, topDir), runtimeRoot);
+          await rm(stagingDir, { recursive: true, force: true });
+          for (const entry of await readdir(paths.engineRoot)) {
+            // Stale installs from the previous two-level layout (ov-genai-<version>/...).
+            if (entry.startsWith('ov-genai-')) {
+              await rm(join(paths.engineRoot, entry), { recursive: true, force: true });
+            }
+          }
+        },
+      });
+      await rm(archivePath, { force: true });
       return runtimeRoot;
     },
   });
