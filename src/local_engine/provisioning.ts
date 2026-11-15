@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, statSync } from 'fs';
-import { mkdir, readdir, rename, rm } from 'fs/promises';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { mkdir, readdir, rename, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { DownloadProgress, downloadFile } from './downloader';
 import { extractArchive } from './extract';
@@ -7,6 +7,7 @@ import { ENGINE_STATUS, EngineStatus } from './engine_status';
 import { DirModelSpec, dirModelFileUrl } from './kind_catalog';
 import { LocalModelSpec, localModelUrl } from './model_catalog';
 import { EnginePaths } from './paths';
+import { isPidAlive } from './runner_discovery';
 import { OV_GENAI_VERSION, ovGenaiLibDir, resolveOvGenaiAsset, runnerOvGenaiVersion } from './ov_runtime';
 import { resolveEngineAsset } from './release_assets';
 
@@ -66,17 +67,72 @@ async function askDistroThenDownload<T>(deps: {
   return deps.downloadAsset();
 }
 
+const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Download canceled', 'AbortError'));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException('Download canceled', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort);
+  });
+
+/**
+ * Cross-window download coordination: a `<destination>.downloading` marker
+ * with the owner pid. A second window with the same target waits for the
+ * first download to finish and reuses its file instead of re-downloading.
+ * Returns true when the destination is already there (skip the download).
+ */
+export async function waitForPeerDownload(destination: string, signal: AbortSignal | undefined): Promise<boolean> {
+  const marker = `${destination}.downloading`;
+  for (;;) {
+    let ownerPid: number | undefined;
+    try {
+      ownerPid = (JSON.parse(readFileSync(marker, 'utf8')) as { pid: number }).pid;
+    } catch {
+      // No marker or unreadable: nobody is downloading.
+    }
+    if (ownerPid !== undefined && isPidAlive(ownerPid)) {
+      if (existsSync(destination)) {
+        return true;
+      }
+      await sleep(2000, signal);
+      continue;
+    }
+    if (ownerPid !== undefined) {
+      await rm(marker, { force: true });
+    }
+    return existsSync(destination);
+  }
+}
+
 async function downloadTo(
   host: ProvisioningHost,
   signal: AbortSignal | undefined,
   opts: { url: string; destination: string; kind: 'engine' | 'model'; onProgress?: (p: DownloadProgress) => void },
 ): Promise<void> {
-  await (host.download ?? downloadFile)({
-    url: opts.url,
-    destination: opts.destination,
-    signal,
-    onProgress: opts.onProgress ?? ((p) => host.onProgress?.(opts.kind, p)),
-  });
+  if (await waitForPeerDownload(opts.destination, signal)) {
+    return;
+  }
+  const marker = `${opts.destination}.downloading`;
+  await writeFile(marker, JSON.stringify({ pid: process.pid }));
+  try {
+    await (host.download ?? downloadFile)({
+      url: opts.url,
+      destination: opts.destination,
+      signal,
+      onProgress: opts.onProgress ?? ((p) => host.onProgress?.(opts.kind, p)),
+    });
+  } finally {
+    await rm(marker, { force: true });
+  }
 }
 
 export async function ensureLlamaEngine(
