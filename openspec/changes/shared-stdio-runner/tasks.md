@@ -5,12 +5,13 @@ Runner-side work (listen mode, refcount, token ids, PID) lives in the backend re
 ## 1. Shared runner client
 
 - [ ] 1.1 Add `connectSharedRunner(endpoint, options, deps)` in `stdio_runner.ts` producing the same `RunningStdioRunner` over a `net` pipe/socket, sharing the existing NDJSON handling; route `token` events by id with fallback to oldest-pending for old runners; verify with a unit test against a fake socket speaking the protocol
-- [ ] 1.2 Implement the endpoint key (digest of runner path, model path, device, context length) and the shared state file read/write in the engine directory; verify paths and JSON shape with a unit test
+- [ ] 1.2 Implement the discovery directory (`<engineDir>/runners/`): file naming (`<kind>-<key>.json`), read/write/reap (`{ pid, transport, endpoint, port?, options }`), directory scan with option matching (ovgenai: model+device+ctx; mlx: model); verify shapes and match/no-match branches with unit tests
 - [ ] 1.3 Implement PID liveness check (`process.kill(pid, 0)` + ready-handshake model/device match) used before connecting; verify stale-PID, PID-reuse, and dead-endpoint branches in unit tests
+- [ ] 1.4 Implement TCP transport fallback: spawner passes `--listen-tcp 0`, records the ready-reported port in the discovery file; `connectSharedRunner` connects over `127.0.0.1:<port>` when `transport` is `tcp`; verify with a fake TCP server in a unit test
 
 ## 2. Engine manager lifecycle
 
-- [ ] 2.1 Add connect-or-spawn to `engine_manager.ts`: compute key → state file → PID check → connect (handshake) → fallback to private spawn; verify both paths with unit tests for match and mismatch options
+- [ ] 2.1 Add connect-or-spawn to `engine_manager.ts`: scan the discovery directory → option match → PID check → connect (handshake) → fallback to private spawn; verify multiple-instance matching (same model, different ovgenai ctx; same model, different mlx ctx) with unit tests
 - [ ] 2.2 Handle lost connection via the existing `onUnexpectedExit` path: report, then rerun connect-or-spawn; verify with a unit test that kills the fake server and asserts restart
 - [ ] 2.3 Change shutdown with sharing enabled: close the client socket instead of sending `shutdown`; verify deactivate/mode-switch does not terminate the process (unit test with fake runner)
 

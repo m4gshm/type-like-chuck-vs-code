@@ -6,12 +6,14 @@ Each VS Code window spawns its own stdio runner (ovgenai/mlx) and loads its own 
 
 ## What Changes
 
-- The extension **connects to an existing shared runner** when one is alive and matches the configured model/device/context; otherwise it spawns a new one in listen mode and records the runner's PID and endpoint in a state file.
-- The extension validates a remembered runner PID before connecting: if the process is gone (crashed, killed, machine reboot), it treats the backend as dead and spawns a new one instead of failing to connect.
+- The extension **connects to an existing shared runner** when one is alive and matches the configured start options; otherwise it spawns a new one in listen mode and records the runner's PID and endpoint in a discovery file.
+- **Discovery directory with multiple runner instances**: each running shared runner has its own discovery file in `<engineDir>/runners/`; a starting window scans the directory and connects to the file whose options match its own (model, device, context length — context length is a match field only where the engine compiles per-context, i.e. `ovgenai` on NPU; `mlx` compiles once, so its instances match on model alone). Distinct options therefore yield distinct runner instances (e.g. qwen 3B NPU ctx=4096 and ctx=8192 → two runners, two NPU graph compilations), while identical options share one.
+- **TCP transport fallback**: when a local IPC endpoint cannot cross the boundary between the plugin host and the backend process (VS Code remote/WSL setups), the spawner starts the runner with `--listen-tcp 0` (a random localhost port), takes the chosen port from the `ready` event and records it in the discovery file; connecting windows use plain TCP on `127.0.0.1`. Pipe/socket remains the default transport.
+- The extension validates a discovery file's PID before connecting: if the process is gone (crashed, killed, machine reboot), it treats that backend as dead, ignores the stale file and spawns a new one.
 - If the shared runner dies while the extension is connected, the extension detects the lost connection and follows its existing crash-restart path (spawn or connect to a new shared runner).
 - New setting `tlc.local.sharedRunner` (default enabled on stdio engine kinds) to fall back to today's per-window private runner.
 - Status bar / output channel distinguish a connected shared runner ("shared, pid N") from a privately spawned one.
-- Runner-side capabilities (listen mode, client refcount with self-exit, per-request token routing, PID exposure) are specified in the backend repositories: `type-like-chuck-backed-openvino` and `type-like-chuck-backed-mlx`, each with a `shared-stdio-runner` change carrying the identical contract. Until a new runner release is imported (`RUNNER_VERSION`), the extension falls back to private spawns.
+- Runner-side capabilities (listen mode over pipe/socket/TCP, client refcount with self-exit, per-request token routing, PID exposure) are specified in the backend repositories: `type-like-chuck-backed-openvino` and `type-like-chuck-backed-mlx`, each with a `shared-stdio-runner` change carrying the identical contract. The runner never touches the discovery files — the spawning extension writes and reaps them. Until a new runner release is imported (`RUNNER_VERSION`), the extension falls back to private spawns.
 
 ## Capabilities
 
