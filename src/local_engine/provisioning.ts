@@ -23,6 +23,12 @@ export interface ProvisioningHost {
   extract?: typeof extractArchive;
   /** Returns a picked distro folder, DISTRO_CHOICE_DOWNLOAD, or undefined when dismissed. */
   askDistroOrDownload?: (kind: 'ovgenai' | 'llama.cpp') => Promise<string | typeof DISTRO_CHOICE_DOWNLOAD | undefined>;
+  /**
+   * Claims the cross-window provisioning leadership: the caller (the window
+   * whose user answered "Download") becomes the one that downloads/compiles;
+   * the call blocks while a peer holds the claim.
+   */
+  claimProvisioning?: (engineRoot: string) => Promise<void>;
 }
 
 export function findBinary(dir: string, platform: NodeJS.Platform, kind: 'llama-server'): string | undefined {
@@ -48,20 +54,26 @@ async function askDistroThenDownload<T>(deps: {
   signal: AbortSignal | undefined;
   kind: 'ovgenai' | 'llama.cpp';
   prompt: string;
+  engineRoot: string;
   useLocalDistro: (choice: string) => Promise<T>;
   downloadAsset: () => Promise<T>;
 }): Promise<T> {
   const ask = deps.host.askDistroOrDownload;
   if (ask !== undefined) {
-    // A status before the question: it blocks the flow, and the progress toast
-    // would otherwise keep showing the previous stage.
-    deps.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: deps.prompt });
-    const choice = await ask(deps.kind);
-    if (choice === undefined) {
-      throw new DOMException('Canceled', 'AbortError');
-    }
-    if (choice !== DISTRO_CHOICE_DOWNLOAD) {
-      return deps.useLocalDistro(choice);
+    // Leadership goes to the window the user answered in: while a peer is
+    // provisioning, skip the question and reuse its files via the markers.
+    if (!isProvisioningLocked(deps.engineRoot)) {
+      // A status before the question: it blocks the flow, and the progress
+      // toast would otherwise keep showing the previous stage.
+      deps.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: deps.prompt });
+      const choice = await ask(deps.kind);
+      if (choice === undefined) {
+        throw new DOMException('Canceled', 'AbortError');
+      }
+      if (choice !== DISTRO_CHOICE_DOWNLOAD) {
+        return deps.useLocalDistro(choice);
+      }
+      await deps.host.claimProvisioning?.(deps.engineRoot);
     }
   }
   return deps.downloadAsset();
@@ -118,6 +130,16 @@ export async function waitForPeerDownload(
       await rm(marker, { force: true });
     }
     return existsSync(destination);
+  }
+}
+
+/** True while a live window owns the provisioning leadership. */
+export function isProvisioningLocked(engineRoot: string): boolean {
+  try {
+    const { pid } = JSON.parse(readFileSync(join(engineRoot, 'provisioning.lock'), 'utf8')) as { pid: number };
+    return pid !== process.pid && isPidAlive(pid);
+  } catch {
+    return false;
   }
 }
 
@@ -226,6 +248,7 @@ export async function ensureLlamaEngine(
     signal,
     kind: 'llama.cpp',
     prompt: 'choose: download the llama.cpp build or use an existing unpacked folder',
+    engineRoot: paths.engineRoot,
     useLocalDistro: async (choice) => {
       const binary = findBinary(choice, host.platform, 'llama-server');
       if (binary === undefined) {
@@ -294,6 +317,7 @@ export async function ensureOvGenaiRuntime(
     signal,
     kind: 'ovgenai',
     prompt: 'choose: download the OpenVINO GenAI runtime or use an existing unpacked folder',
+    engineRoot: paths.engineRoot,
     useLocalDistro: async (choice) => {
       if (!existsSync(libDirOf(choice))) {
         throw new Error(`Local OpenVINO GenAI distribution has an unexpected layout: no runtime libraries under ${libDirOf(choice)}.`);

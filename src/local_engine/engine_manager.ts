@@ -193,13 +193,11 @@ export class EngineManager {
   }
 
   private async start(): Promise<EngineStatus> {
-    let releaseProvisioning: (() => Promise<void>) | undefined;
     try {
       await this.stop();
       this.modelDownloadAsked = false;
       const paths = this.host.paths();
       const settings = this.host.settings();
-      releaseProvisioning = await acquireProvisionLock(paths.engineRoot, this.activeSignal, this.host);
       if (settings.modelId === 'custom' && settings.modelPath.length === 0) {
         throw new Error(`tlc.local.model is "custom" — set tlc.local.customModelPath to a model file (${BRAND}: Select Local Model → From disk…).`);
       }
@@ -228,8 +226,8 @@ export class EngineManager {
         this.host.warn(`${BRAND} local engine: the NPU is supported only by the OpenVINO GenAI engine; using GPU instead.`);
       }
 
-      const serverPath = await ensureLlamaEngine(this.host, paths, settings, this.activeSignal);
-      const modelPath = await ensureGgufModel(this.host, paths, model, settings, this.activeSignal);
+      const serverPath = await ensureLlamaEngine(this.provisioningHost, paths, settings, this.activeSignal);
+      const modelPath = await ensureGgufModel(this.provisioningHost, paths, model, settings, this.activeSignal);
       this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: false });
 
       const { engine, device: activeDevice, fallbacks } = await this.startWithDeviceFallback(devices, (device) => {
@@ -271,8 +269,28 @@ export class EngineManager {
       await this.stop();
       throw err;
     } finally {
-      await releaseProvisioning?.();
+      await this.provisioningRelease?.();
+      this.provisioningRelease = undefined;
     }
+  }
+
+  /**
+   * Cross-window leadership: the window whose user answered "Download" claims
+   * the provisioning lock; a peer that claims later blocks until the leader
+   * finished, then reuses its files. Released by `start`'s finally.
+   */
+  private async claimProvisioning(engineRoot: string): Promise<void> {
+    if (this.provisioningRelease !== undefined) {
+      return;
+    }
+    this.provisioningRelease = await acquireProvisionLock(engineRoot, this.activeSignal, this.host);
+  }
+
+  private provisioningRelease?: () => Promise<void>;
+
+  /** `this.host` plus the leadership claim, for the provisioning functions. */
+  private get provisioningHost(): ProvisioningHost {
+    return { ...this.host, claimProvisioning: (root) => this.claimProvisioning(root) };
   }
 
   /**
@@ -437,7 +455,7 @@ export class EngineManager {
       await this.chooseModelToDownload(paths, settings, formatFor(devices[0]));
     }
     const model = isLocalModelId(settings.modelId) ? irModel(settings.modelId) : undefined;
-    const runtimeRoot = await ensureOvGenaiRuntime(this.host, paths, settings, this.activeSignal);
+    const runtimeRoot = await ensureOvGenaiRuntime(this.provisioningHost, paths, settings, this.activeSignal);
     const libDir = ovGenaiLibDir(this.host.platform, runtimeRoot);
     // The Windows runner links TBB directly; its dlls sit outside the OpenVINO bin dir.
     const tbbDir = ovGenaiTbbDir(this.host.platform, runtimeRoot);
@@ -462,7 +480,7 @@ export class EngineManager {
     let activeDevice: SupportedDevice;
     let lastModelPath = '';
     const started = await this.startWithDeviceFallback(devices, async (device) => {
-      const modelPath = model !== undefined ? await ensureDirModel(this.host, paths, irModel(model.id, formatFor(device)), settings, this.activeSignal) : settings.modelPath;
+      const modelPath = model !== undefined ? await ensureDirModel(this.provisioningHost, paths, irModel(model.id, formatFor(device)), settings, this.activeSignal) : settings.modelPath;
       lastModelPath = modelPath;
       this.host.log(`ovgenai: loading ${model?.label ?? settings.modelPath} on ${device.toUpperCase()} (${modelPath})`);
       this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: device === 'npu' });
@@ -528,7 +546,7 @@ export class EngineManager {
       await this.chooseModelToDownload(paths, settings);
       model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : model;
     }
-    const modelPath = await ensureDirModel(this.host, paths, model, settings, this.activeSignal);
+    const modelPath = await ensureDirModel(this.provisioningHost, paths, model, settings, this.activeSignal);
     this.host.onStatus({ status: ENGINE_STATUS.starting });
     if (settings.sharedRunner) {
       const runner = await this.startSharedRunner(
@@ -613,6 +631,8 @@ export class EngineManager {
       settings.modelId = chosen;
       await this.host.setLocalModel?.(chosen);
     }
+    // The user's model choice makes this window the provisioning leader.
+    await this.claimProvisioning(paths.engineRoot);
   }
 
   private modelDownloadChoices(paths: EnginePaths, kind: EngineKind, format: IrFormat): ModelDownloadChoice[] {
