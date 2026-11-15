@@ -105,7 +105,8 @@ The `ovgenai` C++ runner lives in the [`type-like-chuck-backed-openvino`](https:
 git submodule update --init   # one-time: fetch the backend submodules
 task runner:import   # local: build & copy from the backend submodules
 task runner:fetch    # download from the backend releases (RUNNER_VERSION=<tag> pins)
-task package         # full .vsix
+task package:release  # .vsix with binaries from the backend GitHub releases
+task package:local    # .vsix with locally rebuilt backend binaries (task runner:import)
 ```
 
 They land in `binaries/ovgenai/<platform>/` and `binaries/mlx/darwin-arm64/` — the layout the installed extension resolves; `package.yml` re-verifies that the binaries launch from the unpacked `.vsix`.

@@ -130,10 +130,22 @@ tasks:
       - binaries/ovgenai/linux-x64/tlc-ovgenai-runner
       - binaries/mlx/darwin-arm64/tlc-mlx-runner
 
-  package:
-    desc: Build the .vsix (delegates to npm run package)
+  # --- packaging ------------------------------------------------------------
+
+  # Scenario A: backends come from the backend repos' GitHub releases
+  # (this is what CI does; RUNNER_VERSION pins a tag, empty = latest).
+  package:release:
+    desc: Build the .vsix with runner binaries from the backend GitHub releases (downloads them)
     cmds:
-      - npm run package
+      - npm run package:release
+
+  # Scenario B: backends are rebuilt locally (runner:import) and the .vsix
+  # packages exactly those binaries — nothing is downloaded.
+  package:local:
+    desc: Rebuild the local backend repos and build the .vsix with those binaries (no downloads)
+    deps: [runner:import]
+    cmds:
+      - npm run package:local
 
   clean:
     desc: Remove build artifacts (incl. runner binaries; they re-download from the pinned releases)

@@ -453,8 +453,11 @@
     "vscode-test": "vscode-test",
     "lint": "eslint src",
     "build": "npm run test && npm run lint",
-    "package": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies",
-    "package:win": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies --ignoreFile .vscodeignore-win"
+    "package": "npm run package:release",
+    "package:release": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies",
+    "package:local": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs --local && vsce package --no-dependencies",
+    "package:win": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies --ignoreFile .vscodeignore-win",
+    "package:win:local": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs --local && vsce package --no-dependencies --ignoreFile .vscodeignore-win"
   },
   "dependencies": {
     "https-proxy-agent": "^5.0.1",

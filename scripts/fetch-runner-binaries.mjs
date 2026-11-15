@@ -26,6 +26,10 @@ import { fileURLToPath } from 'node:url';
 
 const OWNER = 'm4gshm';
 const releaseOnly = process.argv.includes('--release');
+// --local: never download and never build — package whatever is already in
+// binaries/ (the output of `task runner:import`); fail loudly on a missing
+// binary instead of silently replacing local builds with release ones.
+const localOnly = process.argv.includes('--local');
 const TARGETS = [
   // hostPlatform: the runner binary built by `task build` in the sibling backend repo
   // (build/<asset>) matches this target only on the host platform.
@@ -120,6 +124,14 @@ for (const target of TARGETS) {
   const destination = join(dir, target.finalName);
   const expected = version(target.repo);
   const bundleMissing = target.bundleRequired !== undefined && !existsSync(join(dir, target.bundleRequired));
+  if (localOnly) {
+    if (!existsSync(destination) || bundleMissing) {
+      console.error(`--local: runner binary missing: ${destination} — run "task runner:import" first.`);
+      process.exit(1);
+    }
+    console.log(`--local: using existing ${destination}`);
+    continue;
+  }
   if (existsSync(destination)) {
     const diskTag = onDiskTag(destination);
     const versionOk = expected === undefined ? diskTag === 'local' || diskTag === '' : diskTag === expected;
