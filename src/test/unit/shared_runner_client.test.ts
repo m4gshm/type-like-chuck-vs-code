@@ -117,7 +117,11 @@ describe('connectSharedRunner', () => {
   it('losing the connection surfaces through onUnexpectedExit', async () => {
     const exits: string[] = [];
     const client = await connect({ onUnexpectedExit: (m) => exits.push(m) });
-    const pending = client.stream('p', 8, []).next();
+    const pending = (async () => {
+      for await (const t of client.stream('p', 8, [])) {
+        void t;
+      }
+    })();
     runner.close();
     await expect(pending).rejects.toThrow();
     expect(exits).toHaveLength(1);
