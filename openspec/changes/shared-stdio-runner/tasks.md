@@ -25,6 +25,6 @@ Runner-side work (listen mode, refcount, token ids, PID) lives in the backend re
 
 ## 4. Integration verification
 
-- [ ] 4.1 Import new runner binaries (`task runner:import` / `runner:fetch` with the released `RUNNER_VERSION`) and verify `--listen` support via `--version`/smoke
-- [ ] 4.2 Two-window integration check on Windows (F5 or packaged vsix): first window spawns the shared runner, second connects with no second model load; close first window → runner stays; close second → runner self-exits; record results in the TLC output channel
-- [ ] 4.3 Run `npm run build` (unit + integration + lint) and fix any regressions
+- [x] 4.1 Import new runner binaries (`task runner:import` / `runner:fetch` with the released `RUNNER_VERSION`) and verify `--listen` support via `--version`/smoke
+- [x] 4.2 Two-window integration check on Windows (F5 or packaged vsix): first window spawns the shared runner, second connects with no second model load; close first window → runner stays; close second → runner self-exits; record results in the TLC output channel
+- [x] 4.3 Run `npm run build` (unit + integration + lint) and fix any regressions
