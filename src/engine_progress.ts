@@ -113,10 +113,11 @@ export class EngineTaskRunner {
       try {
         await task(cancel.signal);
       } catch (err) {
-        if (!(err instanceof Error && err.name === 'AbortError')) {
-          const message = `${BRAND} local engine: ${messageOf(err)}`;
-          this.host.offerRetry(message, () => void this.run(title, task));
-        }
+        // Cancellation included: a dismissed question (a click outside the
+        // model picker) surfaces as AbortError and would otherwise end the
+        // start with a silent "canceled" and no way back but restarting.
+        const message = `${BRAND} local engine: ${messageOf(err)}`;
+        this.host.offerRetry(message, () => void this.run(title, task));
       } finally {
         clearInterval(ticker);
         this.listener = undefined;

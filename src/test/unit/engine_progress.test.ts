@@ -53,6 +53,19 @@ describe('EngineTaskRunner', () => {
     expect(vi.mocked(host.offerRetry).mock.calls[0][0]).toContain('download failed');
   });
 
+  it('offers a retry when the task is canceled (dismissed picker)', async () => {
+    const { host } = makeHost();
+    const runner = new EngineTaskRunner(host as never);
+    const failing = async () => {
+      await flush(20);
+      throw new DOMException('Canceled', 'AbortError');
+    };
+    await runner.run('t', failing);
+    await flush(30);
+    expect(host.offerRetry).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(host.offerRetry).mock.calls[0][0]).toContain('Canceled');
+  });
+
   it('reports byte counts, the file name and the model phase while downloading', async () => {
     const { host, bars } = makeHost();
     const runner = new EngineTaskRunner(host as never);
