@@ -433,6 +433,11 @@ export class EngineManager {
         options: sharedOptions,
       });
     }
+    // Spawning a *shared* runner is a distinct decision worth a log line:
+    // every model/device/ctx combo gets its own shared instance.
+    this.host.log(
+      `${label}: spawned shared runner pid=${runner.pid} (${transport === 'pipe' ? 'pipe' : `tcp:${runner.port}`})`,
+    );
     return runner;
   }
 
