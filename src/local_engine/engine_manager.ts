@@ -16,7 +16,7 @@ import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
-import { SharedRunnerOptions, RunnerRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
+import { SharedRunnerOptions, RunnerRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
 import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -356,6 +356,9 @@ export class EngineManager {
           if (spawnTries < 3) {
             spawnTries++;
             this.host.log(`${label}: pipe endpoint is busy (${spawnTries}/3), retrying.`);
+            // The failed child had its pid written by onSpawned: the record
+            // must point at the *successful* spawn, so allow a rewrite.
+            recordWritten = false;
             await new Promise((r) => setTimeout(r, 2000));
             continue;
           }
@@ -368,7 +371,10 @@ export class EngineManager {
           }
         }
         // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
-        // (remote/WSL) falls back to a localhost TCP listener.
+        // (remote/WSL) falls back to a localhost TCP listener. The stale pipe
+        // record (a pid of an exited child) must not survive the fallback.
+        recordWritten = false;
+        await deleteRecord(engineRoot, `${kind}-${recordKey(sharedOptions)}.json`);
         if (settings.sharedRunnerTransport === 'auto' && transport === 'pipe') {
           this.host.warn(`${label}: pipe listen failed (${messageOf(err)}); retrying over TCP.`);
           runner = await startStdioRunner({ ...spawnOptions, listen: { transport: 'tcp' }, token }, this.host);
