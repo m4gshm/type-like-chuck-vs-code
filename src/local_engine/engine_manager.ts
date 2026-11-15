@@ -16,7 +16,7 @@ import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
-import { SharedRunnerOptions, findLiveMatch, isPidAlive, localListenEndpoint, newToken, writeRecord } from './runner_discovery';
+import { SharedRunnerOptions, RunnerRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
 import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -314,64 +314,11 @@ export class EngineManager {
     };
     const found = await findLiveMatch(engineRoot, sharedOptions);
     if (found !== undefined) {
-      const record = found.record;
-      let runner: RunningStdioRunner;
-      try {
-        runner = await connectSharedRunner(
-          {
-            transport: record.transport,
-            endpoint: record.endpoint,
-            port: record.port,
-            token: record.token,
-            modelPath: spawnOptions.modelPath,
-            label,
-            signal: spawnOptions.signal,
-            onUnexpectedExit: spawnOptions.onUnexpectedExit,
-          },
-          this.host,
-        );
-      } catch (err) {
-        // Transient connect failures mean the runner process is alive but its
-        // listener is not up yet (spawned moments ago, model still loading):
-        // retry within the discovery record instead of spawning a duplicate.
-        const message = messageOf(err);
-        if (!/ENOENT|ECONNREFUSED|EACCES/.test(message)) {
-          throw err;
-        }
-        let connected: RunningStdioRunner | undefined;
-        for (let attempt = 0; attempt < 5 && connected === undefined; attempt++) {
-          await new Promise((r) => setTimeout(r, 2000));
-          if (!isPidAlive(record.pid)) {
-            break;
-          }
-          try {
-            connected = await connectSharedRunner(
-              {
-                transport: record.transport,
-                endpoint: record.endpoint,
-                port: record.port,
-                token: record.token,
-                modelPath: spawnOptions.modelPath,
-                label,
-                signal: spawnOptions.signal,
-                onUnexpectedExit: spawnOptions.onUnexpectedExit,
-              },
-              this.host,
-            );
-          } catch (retryErr) {
-            if (!/ENOENT|ECONNREFUSED|EACCES/.test(messageOf(retryErr))) {
-              throw retryErr;
-            }
-          }
-        }
-        if (connected === undefined) {
-          throw err;
-        }
-        runner = connected;
-      }
-      this.host.log(`${label}: connected to shared runner pid=${record.pid} (${record.transport})`);
-      return runner;
+      return this.connectToRecord(engineRoot, found.record, spawnOptions, label);
     }
+    this.host.log(
+      `${label}: no live shared runner for this combo — spawning (${recordKey(sharedOptions)})`,
+    );
     const token = newToken();
     const transport: 'pipe' | 'tcp' = settings.sharedRunnerTransport === 'tcp' ? 'tcp' : 'pipe';
     const listen = transport === 'tcp'
@@ -387,13 +334,13 @@ export class EngineManager {
         return;
       }
       recordWritten = true;
-      void writeRecord(engineRoot, {
+      writeRecord(engineRoot, {
         pid,
         transport: 'pipe',
         endpoint: listen.transport === 'pipe' ? listen.pipeName : undefined,
         token,
         options: sharedOptions,
-      });
+      }).catch((err) => this.host.warn(`${label}: discovery record write failed: ${messageOf(err)}`));
     };
     let runner: RunningStdioRunner;
     let spawnTries = 0;
@@ -405,14 +352,20 @@ export class EngineManager {
         );
         break;
       } catch (err) {
-        // A runner on the same endpoint that is just shutting down (our own
-        // restart) owns the name for a moment: wait and retry the same
-        // endpoint before falling through to TCP.
-        if (transport === 'pipe' && /already in use/.test(messageOf(err)) && spawnTries < 3) {
-          spawnTries++;
-          this.host.log(`${label}: pipe endpoint is busy (${spawnTries}/3), retrying.`);
-          await new Promise((r) => setTimeout(r, 2000));
-          continue;
+        if (transport === 'pipe' && /already in use/.test(messageOf(err))) {
+          if (spawnTries < 3) {
+            spawnTries++;
+            this.host.log(`${label}: pipe endpoint is busy (${spawnTries}/3), retrying.`);
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          // The endpoint owner is a live runner of this combo whose record was
+          // published after our first scan: connect to it instead of pushing
+          // this start onto another device.
+          const late = await findLiveMatch(engineRoot, sharedOptions);
+          if (late !== undefined) {
+            return this.connectToRecord(engineRoot, late.record, spawnOptions, label);
+          }
         }
         // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
         // (remote/WSL) falls back to a localhost TCP listener.
@@ -438,6 +391,61 @@ export class EngineManager {
     this.host.log(
       `${label}: spawned shared runner pid=${runner.pid} (${transport === 'pipe' ? 'pipe' : `tcp:${runner.port}`})`,
     );
+    return runner;
+  }
+
+  /** Connects to a discovered shared record, retrying while its runner warms up. */
+  private async connectToRecord(
+    engineRoot: string,
+    record: RunnerRecord,
+    spawnOptions: StdioRunnerStartOptions & { modelPath: string },
+    label: string,
+  ): Promise<RunningStdioRunner> {
+    const connect = (): Promise<RunningStdioRunner> =>
+      connectSharedRunner(
+        {
+          transport: record.transport,
+          endpoint: record.endpoint,
+          port: record.port,
+          token: record.token,
+          modelPath: spawnOptions.modelPath,
+          label,
+          signal: spawnOptions.signal,
+          onUnexpectedExit: spawnOptions.onUnexpectedExit,
+        },
+        this.host,
+      );
+    let runner: RunningStdioRunner;
+    try {
+      runner = await connect();
+    } catch (err) {
+      // Transient connect failures mean the runner process is alive but its
+      // listener is not up yet (spawned moments ago, model still loading):
+      // retry within the discovery record instead of spawning a duplicate.
+      const message = messageOf(err);
+      if (!/ENOENT|ECONNREFUSED|EACCES/.test(message)) {
+        throw err;
+      }
+      let connected: RunningStdioRunner | undefined;
+      for (let attempt = 0; attempt < 5 && connected === undefined; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (!isPidAlive(record.pid)) {
+          break;
+        }
+        try {
+          connected = await connect();
+        } catch (retryErr) {
+          if (!/ENOENT|ECONNREFUSED|EACCES/.test(messageOf(retryErr))) {
+            throw retryErr;
+          }
+        }
+      }
+      if (connected === undefined) {
+        throw err;
+      }
+      runner = connected;
+    }
+    this.host.log(`${label}: connected to shared runner pid=${record.pid} (${record.transport})`);
     return runner;
   }
 
