@@ -83,7 +83,14 @@ export class EngineTaskRunner {
     };
     await this.host.withProgress({ title, cancellable: true }, async (bar, token) => {
       const cancel = new AbortController();
-      token.onCancellationRequested(() => cancel.abort());
+      // Cancel only stops a download; after the downloads are done (compile,
+      // connect-or-spawn wait) a stray click on the toast must not kill the
+      // start — it would discard the whole NPU compilation.
+      token.onCancellationRequested(() => {
+        if (!this.stagesCleared) {
+          cancel.abort();
+        }
+      });
       const ticker = setInterval(() => {
         const elapsed = Math.round((Date.now() - startedAt) / 1000);
         const elapsedLabel = elapsed >= 10 ? ` (${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed)` : '';

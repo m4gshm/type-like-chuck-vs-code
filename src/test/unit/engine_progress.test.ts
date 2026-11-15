@@ -84,4 +84,61 @@ describe('EngineTaskRunner', () => {
     expect(bars.at(-1)).toContain('starting ovgenai runner');
     expect(bars.at(-1)).not.toContain('11.4KB');
   });
+
+  it('ignores a cancel request after downloads are done', async () => {
+    const cancelCallbacks: Array<() => void> = [];
+    const { host } = makeHost();
+    const withCancelHook = {
+      ...host,
+      withProgress: async (
+        _options: { title: string; cancellable: boolean },
+        task: (p: { report(v: { message?: string }): void }, t: { onCancellationRequested(cb: () => void): void }) => Promise<void>,
+      ): Promise<void> => {
+        await task(
+          { report: () => undefined },
+          { onCancellationRequested: (cb: () => void) => cancelCallbacks.push(cb) },
+        );
+      },
+    };
+    const runner = new EngineTaskRunner(withCancelHook as never);
+    let aborted = false;
+    await runner.run('t', (signal) => {
+      signal.addEventListener('abort', () => {
+        aborted = true;
+      });
+      runner.setStage('starting ovgenai runner…');
+      cancelCallbacks.forEach((cb) => cb());
+      return flush(20);
+    });
+    expect(aborted).toBe(false);
+  });
+
+  it('cancels the task while a download is in progress', async () => {
+    const cancelCallbacks: Array<() => void> = [];
+    const { host } = makeHost();
+    const withCancelHook = {
+      ...host,
+      withProgress: async (
+        _options: { title: string; cancellable: boolean },
+        task: (p: { report(v: { message?: string }): void }, t: { onCancellationRequested(cb: () => void): void }) => Promise<void>,
+      ): Promise<void> => {
+        await task(
+          { report: () => undefined },
+          { onCancellationRequested: (cb: () => void) => cancelCallbacks.push(cb) },
+        );
+      },
+    };
+    const runner = new EngineTaskRunner(withCancelHook as never);
+    let aborted = false;
+    await runner.run('t', (signal) => {
+      signal.addEventListener('abort', () => {
+        aborted = true;
+      });
+      runner.setStage('downloading model…');
+      runner.onDownloadProgress('model', { downloadedBytes: 10, totalBytes: 100, fileName: 'm.bin' });
+      cancelCallbacks.forEach((cb) => cb());
+      return flush(20);
+    });
+    expect(aborted).toBe(true);
+  });
 });
