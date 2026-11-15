@@ -39,6 +39,21 @@ const TARGETS = [
   { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundleRequired: 'mlx.metallib' },
 ];
 
+// True for the target this machine can actually build (runner:import output):
+// the platform must match, and for linux the architecture must too.
+const isHostTarget = (target) => {
+  if (target.hostPlatform === undefined) {
+    return !target.asset.includes('arm64') || (process.platform === 'linux' && process.arch === 'arm64');
+  }
+  if (target.hostPlatform !== process.platform) {
+    return false;
+  }
+  if (target.hostPlatform === 'linux') {
+    return target.asset.includes('arm64') === (process.arch === 'arm64');
+  }
+  return true;
+};
+
 const githubToken = process.env.GITHUB_TOKEN;
 const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubToken}` } : {};
 const versionOverride = process.env.RUNNER_VERSION?.trim() || undefined;
@@ -125,11 +140,15 @@ for (const target of TARGETS) {
   const expected = version(target.repo);
   const bundleMissing = target.bundleRequired !== undefined && !existsSync(join(dir, target.bundleRequired));
   if (localOnly) {
-    if (!existsSync(destination) || bundleMissing) {
-      console.error(`--local: runner binary missing: ${destination} — run "task runner:import" first.`);
-      process.exit(1);
+    if (isHostTarget(target)) {
+      if (!existsSync(destination) || bundleMissing) {
+        console.error(`--local: runner binary missing: ${destination} — run "task runner:import" first.`);
+        process.exit(1);
+      }
+      console.log(`--local: using existing ${destination}`);
+    } else {
+      console.log(`--local: not a host-platform target (${target.asset}) — skipped`);
     }
-    console.log(`--local: using existing ${destination}`);
     continue;
   }
   if (existsSync(destination)) {

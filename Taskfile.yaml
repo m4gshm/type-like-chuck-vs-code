@@ -106,6 +106,10 @@ tasks:
           echo "mlx backend repo '{{.BACKEND_MLX}}' not found — skipping local import (use runner:fetch)"
           exit 0
         fi
+        if ! command -v swift >/dev/null 2>&1; then
+          echo "swift not found on {{OS}} — mlx builds only on macOS arm64; skipping the mlx build (runner:fetch covers it from the release)"
+          exit 0
+        fi
         task -d '{{.BACKEND_MLX}}' build
       - |
         if [ -f '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' ]; then
