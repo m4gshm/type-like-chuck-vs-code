@@ -95,6 +95,9 @@ async function askDistroThenDownload<T>(deps: {
   return deps.downloadAsset();
 }
 
+/** The provisioning lock owner within this process (claims are idempotent). */
+let claimedBy: number | undefined;
+
 /** Pauses with abort support; shared by the provisioning wait loops. */
 export const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -163,13 +166,17 @@ export function isProvisioningLocked(engineRoot: string): boolean {
 /**
  * Cross-window provisioning lock: only one window asks questions, downloads,
  * installs and compiles; the others wait quietly and show a progress label.
- * A dead owner (crashed window) is taken over. Returns the release callback.
+ * A dead owner (crashed window) is taken over. Idempotent per process: a
+ * window that already leads re-claims for free. Returns the release callback.
  */
 export async function acquireProvisionLock(
   engineRoot: string,
   signal: AbortSignal | undefined,
   host: ProvisioningHost,
 ): Promise<() => Promise<void>> {
+  if (claimedBy === process.pid) {
+    return async () => undefined;
+  }
   const lock = join(engineRoot, 'provisioning.lock');
   for (;;) {
     let ownerPid: number | undefined;
@@ -192,12 +199,14 @@ export async function acquireProvisionLock(
     try {
       await mkdir(engineRoot, { recursive: true });
       await writeFile(lock, JSON.stringify({ pid: process.pid }));
+      claimedBy = process.pid;
       break;
     } catch {
       await sleep(2000, signal);
     }
   }
   return async () => {
+    claimedBy = undefined;
     try {
       const own = (JSON.parse(readFileSync(lock, 'utf8')) as { pid: number }).pid === process.pid;
       if (own) {
@@ -277,27 +286,32 @@ export async function ensureLlamaEngine(
       host.onStatus({ status: ENGINE_STATUS.preparingEngine });
       await mkdir(paths.engineRoot, { recursive: true });
       const archivePath = join(paths.engineRoot, asset.fileName);
-      // Wait out a peer's download+install first: it may fill tagDir (and
-      // remove the archive) before we spend our own download.
-      await waitForPeerDownload(host, archivePath, signal);
-      const existing = findBinary(tagDir, host.platform, 'llama-server');
-      if (existing !== undefined) {
-        return existing;
+      const releaseClaim = await acquireProvisionLock(paths.engineRoot, signal, host);
+      try {
+        // Wait out a peer's download+install first: it may fill tagDir (and
+        // remove the archive) before we spend our own download.
+        await waitForPeerDownload(host, archivePath, signal);
+        const existing = findBinary(tagDir, host.platform, 'llama-server');
+        if (existing !== undefined) {
+          return existing;
+        }
+        await downloadTo(host, signal, {
+          url: asset.url,
+          destination: archivePath,
+          kind: 'engine',
+          after: async () => {
+            await (host.extract ?? extractArchive)({ archivePath, destDir: tagDir, signal });
+          },
+        });
+        await rm(archivePath, { force: true });
+        const binary = findBinary(tagDir, host.platform, 'llama-server');
+        if (binary === undefined) {
+          throw new Error(`llama-server not found in the extracted engine (${tagDir}).`);
+        }
+        return binary;
+      } finally {
+        await releaseClaim();
       }
-      await downloadTo(host, signal, {
-        url: asset.url,
-        destination: archivePath,
-        kind: 'engine',
-        after: async () => {
-          await (host.extract ?? extractArchive)({ archivePath, destDir: tagDir, signal });
-        },
-      });
-      await rm(archivePath, { force: true });
-      const binary = findBinary(tagDir, host.platform, 'llama-server');
-      if (binary === undefined) {
-        throw new Error(`llama-server not found in the extracted engine (${tagDir}).`);
-      }
-      return binary;
     },
   });
 }
@@ -352,33 +366,38 @@ export async function ensureOvGenaiRuntime(
       host.onStatus({ status: ENGINE_STATUS.preparingEngine });
       await mkdir(paths.engineRoot, { recursive: true });
       const archivePath = join(paths.engineRoot, asset.fileName);
-      // Wait out a peer's download+install first: it may install the runtime
-      // (and remove the archive) before we spend our own download. A leftover
-      // archive from an interrupted session must not be raced by several
-      // windows extracting it at once — the marker serializes that too.
-      await waitForPeerDownload(host, archivePath, signal);
-      // The wait (or an earlier session) may have produced the runtime already.
-      if (existsSync(libDirOf(runtimeRoot))) {
-        return runtimeRoot;
-      }
-      await downloadTo(host, signal, {
-        url: asset.url,
-        destination: archivePath,
-        kind: 'engine',
-        after: async () => {
-          // Extract into a staging dir (extractArchive wipes destDir on failure and
-          // engineRoot holds other engines), then move the archive's top folder up.
-          const stagingDir = join(paths.engineRoot, `${topDir}.staging`);
-          await (host.extract ?? extractArchive)({ archivePath, destDir: stagingDir, signal });
-          // A previous interrupted install can leave the target shell behind; rename
-          // onto an existing directory fails on Windows.
-          await rm(runtimeRoot, { recursive: true, force: true });
-          if (!existsSync(join(stagingDir, topDir))) {
-            await rm(archivePath, { force: true });
-            throw new Error(`OpenVINO runtime archive is corrupt or incomplete — deleted ${archivePath}, retry the start to re-download.`);
-          }
-          await rename(join(stagingDir, topDir), runtimeRoot);
-          await rm(stagingDir, { recursive: true, force: true });
+      // Leadership first: windows that skipped the question must not download
+      // while the answering window is mid-provisioning — they wait here, then
+      // reuse its files.
+      const releaseClaim = await acquireProvisionLock(paths.engineRoot, signal, host);
+      try {
+        // Wait out a peer's download+install first: it may install the runtime
+        // (and remove the archive) before we spend our own download. A leftover
+        // archive from an interrupted session must not be raced by several
+        // windows extracting it at once — the marker serializes that too.
+        await waitForPeerDownload(host, archivePath, signal);
+        // The wait (or an earlier session) may have produced the runtime already.
+        if (existsSync(libDirOf(runtimeRoot))) {
+          return runtimeRoot;
+        }
+        await downloadTo(host, signal, {
+          url: asset.url,
+          destination: archivePath,
+          kind: 'engine',
+          after: async () => {
+            // Extract into a staging dir (extractArchive wipes destDir on failure and
+            // engineRoot holds other engines), then move the archive's top folder up.
+            const stagingDir = join(paths.engineRoot, `${topDir}.staging`);
+            await (host.extract ?? extractArchive)({ archivePath, destDir: stagingDir, signal });
+            // A previous interrupted install can leave the target shell behind; rename
+            // onto an existing directory fails on Windows.
+            await rm(runtimeRoot, { recursive: true, force: true });
+            if (!existsSync(join(stagingDir, topDir))) {
+              await rm(archivePath, { force: true });
+              throw new Error(`OpenVINO runtime archive is corrupt or incomplete — deleted ${archivePath}, retry the start to re-download.`);
+            }
+            await rename(join(stagingDir, topDir), runtimeRoot);
+            await rm(stagingDir, { recursive: true, force: true });
           for (const entry of await readdir(paths.engineRoot)) {
             // Stale installs from the previous two-level layout (ov-genai-<version>/...).
             if (entry.startsWith('ov-genai-')) {
@@ -386,9 +405,12 @@ export async function ensureOvGenaiRuntime(
             }
           }
         },
-      });
-      await rm(archivePath, { force: true });
-      return runtimeRoot;
+        });
+        await rm(archivePath, { force: true });
+        return runtimeRoot;
+      } finally {
+        await releaseClaim();
+      }
     },
   });
   if (!existsSync(libDirOf(root))) {
