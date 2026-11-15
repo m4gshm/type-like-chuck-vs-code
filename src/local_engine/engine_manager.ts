@@ -17,7 +17,7 @@ import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
 import { SharedRunnerOptions, findLiveMatch, isPidAlive, localListenEndpoint, newToken, writeRecord } from './runner_discovery';
-import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime } from './provisioning';
+import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
 
@@ -630,6 +630,21 @@ export class EngineManager {
       return;
     }
     this.modelDownloadAsked = true;
+    // The question goes only to the focused window; a background window waits
+    // (or skips the question entirely once a peer took over provisioning).
+    for (;;) {
+      if (isProvisioningLocked(paths.engineRoot)) {
+        return;
+      }
+      if (this.host.isWindowFocused?.() ?? true) {
+        break;
+      }
+      this.host.onStatus({
+        status: ENGINE_STATUS.awaitingInput,
+        prompt: 'waiting: activate this window to choose which model to download',
+      });
+      await sleep(2000, this.activeSignal);
+    }
     this.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: 'choose which model to download' });
     const chosen = await ask(settings.modelId, choices);
     if (chosen === undefined) {

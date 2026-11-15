@@ -255,6 +255,7 @@ export function activate(context: vscode.ExtensionContext): void {
     warn: warn,
     askDistroOrDownload,
     askModelDownload,
+    isWindowFocused: () => vscode.window.state.focused,
     setLocalModel: async (id) => {
       await vscode.workspace.getConfiguration('tlc').update('local.model', id, vscode.ConfigurationTarget.Global);
       await vscode.workspace.getConfiguration('tlc').update('local.customModelPath', undefined, vscode.ConfigurationTarget.Global);

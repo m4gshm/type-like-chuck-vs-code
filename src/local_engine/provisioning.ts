@@ -29,6 +29,8 @@ export interface ProvisioningHost {
    * the call blocks while a peer holds the claim.
    */
   claimProvisioning?: (engineRoot: string) => Promise<void>;
+  /** Whether this window currently has focus: setup questions go only here. */
+  isWindowFocused?: () => boolean;
 }
 
 export function findBinary(dir: string, platform: NodeJS.Platform, kind: 'llama-server'): string | undefined {
@@ -60,8 +62,22 @@ async function askDistroThenDownload<T>(deps: {
 }): Promise<T> {
   const ask = deps.host.askDistroOrDownload;
   if (ask !== undefined) {
-    // Leadership goes to the window the user answered in: while a peer is
-    // provisioning, skip the question and reuse its files via the markers.
+    // Only the focused window asks: background windows wait until they are
+    // activated (or until a peer takes over provisioning and the question
+    // becomes moot).
+    for (;;) {
+      if (isProvisioningLocked(deps.engineRoot)) {
+        break;
+      }
+      if ((deps.host.isWindowFocused?.() ?? true)) {
+        break;
+      }
+      deps.host.onStatus({
+        status: ENGINE_STATUS.awaitingInput,
+        prompt: 'waiting: activate this window to choose the local engine runtime setup',
+      });
+      await sleep(2000, deps.signal);
+    }
     if (!isProvisioningLocked(deps.engineRoot)) {
       // A status before the question: it blocks the flow, and the progress
       // toast would otherwise keep showing the previous stage.
@@ -79,7 +95,8 @@ async function askDistroThenDownload<T>(deps: {
   return deps.downloadAsset();
 }
 
-const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
+/** Pauses with abort support; shared by the provisioning wait loops. */
+export const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException('Download canceled', 'AbortError'));
