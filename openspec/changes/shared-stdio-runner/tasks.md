@@ -8,6 +8,8 @@ Runner-side work (listen mode, refcount, token ids, PID) lives in the backend re
 - [ ] 1.2 Implement the discovery directory (`<engineDir>/runners/`): file naming (`<kind>-<key>.json`), read/write/reap (`{ pid, transport, endpoint, port?, options }`), directory scan with option matching (ovgenai: model+device+ctx; mlx: model); verify shapes and match/no-match branches with unit tests
 - [ ] 1.3 Implement PID liveness check (`process.kill(pid, 0)` + ready-handshake model/device match) used before connecting; verify stale-PID, PID-reuse, and dead-endpoint branches in unit tests
 - [ ] 1.4 Implement TCP transport fallback: spawner passes `--listen-tcp 0`, records the ready-reported port in the discovery file; `connectSharedRunner` connects over `127.0.0.1:<port>` when `transport` is `tcp`; verify with a fake TCP server in a unit test
+- [ ] 1.5 Implement the per-instance token: generate on spawn, pass `--token`, record in the discovery file, send `auth` as the first message on connect; verify reject-without-token with a fake server in a unit test
+- [ ] 1.6 Add `tlc.local.sharedRunnerTransport` (`pipe` | `tcp` | `auto`, default `pipe`) to `config.ts` and `package.json`; connecting windows follow the discovery-file transport; verify the setting plumbs through with a unit test
 
 ## 2. Engine manager lifecycle
 
@@ -17,9 +19,9 @@ Runner-side work (listen mode, refcount, token ids, PID) lives in the backend re
 
 ## 3. Settings, status, docs
 
-- [ ] 3.1 Add `tlc.local.sharedRunner` (boolean, default true) to `config.ts` and `package.json` contributes; verify `npm run check-types` and that disabling spawns a private runner (unit test)
+- [ ] 3.1 Add `tlc.local.sharedRunner` (boolean, default true) and `tlc.local.sharedRunnerTransport` (`pipe` | `tcp` | `auto`, default `pipe`) to `config.ts` and `package.json` contributes; verify `npm run check-types` and that disabling spawns a private runner (unit test)
 - [ ] 3.2 Show "shared, pid N" in `local_mode_status.ts` / status bar and log endpoint+PID to the output channel; verify via unit test on the status text
-- [ ] 3.3 Update `README.md` (local engine section) to describe sharing, the setting, the self-termination behavior, and the dependency on new runner releases; verify README matches `package.json` descriptions
+- [ ] 3.3 Update `README.md` (local engine section) to describe sharing, the transport setting, the per-instance token, and the self-termination behavior; verify README matches `package.json` descriptions
 
 ## 4. Integration verification
 

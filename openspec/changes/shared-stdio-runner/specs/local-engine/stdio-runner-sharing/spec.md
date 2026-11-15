@@ -58,6 +58,32 @@ When the extension loses the connection to a shared runner while local mode is a
 - **WHEN** a window tries to connect while the runner exits before the handshake completes
 - **THEN** the connection attempt is treated as failed and the window spawns a new shared runner
 
+### Requirement: Per-instance token authentication
+Every shared runner SHALL require a per-instance random token: the spawner generates one, passes it to the runner at start and records it in the discovery file; a connecting client SHALL authenticate by sending an `auth` request with the token as the first message on its connection. The runner SHALL close the connection (or reject it) on a missing or wrong token without processing any request. The token SHALL NOT be persisted anywhere besides the discovery file and the runner's command line, and SHALL be regenerated on every spawn. Stdin/stdout (private pipe) mode SHALL NOT require authentication.
+
+#### Scenario: Client authenticates with the token
+- **WHEN** a window connects to a shared runner using the token from its discovery file
+- **THEN** the runner accepts the `auth` request and serves generate requests normally
+
+#### Scenario: Wrong or missing token rejected
+- **WHEN** a local process connects and sends a generate request without a valid `auth` first
+- **THEN** the runner rejects it with an `error` event and closes the connection
+
+#### Scenario: Token rotates per spawn
+- **WHEN** a shared runner is spawned
+- **THEN** a new random token is generated and the previous token no longer authenticates
+
+### Requirement: Transport selection setting
+The extension SHALL let the user choose the shared-runner transport via `tlc.local.sharedRunnerTransport`: `pipe` (platform pipe/socket, the default), `tcp` (localhost TCP), or `auto` — pipe/socket first, with automatic fallback to TCP when the IPC transport cannot connect plugin and backend (VS Code remote/WSL setups). The chosen transport is recorded in the discovery file, and connecting windows use the transport recorded there rather than their own setting, so clients of one runner always agree on its transport.
+
+#### Scenario: TCP selected explicitly
+- **WHEN** `tlc.local.sharedRunnerTransport` is `tcp` and a window spawns a shared runner
+- **THEN** the runner starts with a localhost TCP listener (random port) and the discovery file records `transport: tcp` with the port
+
+#### Scenario: Clients follow the recorded transport
+- **WHEN** a runner was spawned with the TCP transport and a second window connects to it
+- **THEN** the second window connects over `127.0.0.1:<port>` from the discovery file even if its own setting is `pipe`
+
 ### Requirement: Status for a shared runner
 The status bar and TLC output channel SHALL distinguish a connected shared runner from a privately spawned one (e.g. "ovgenai runner (shared, pid 1234)"), and log the endpoint and PID.
 
