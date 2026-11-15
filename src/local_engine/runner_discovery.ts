@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { EngineKind } from './kind_catalog';
@@ -39,8 +39,14 @@ export function recordKey(options: SharedRunnerOptions): string {
   return createHash('sha1').update(matchFields(options.kind, options).join('\u0000')).digest('hex').slice(0, 12);
 }
 
-export function newToken(): string {
-  return randomBytes(16).toString('hex');
+/**
+ * Deterministic per-combo token: every window can compute it, so a live
+ * runner is joinable even when its discovery record was lost (an orphan).
+ * It gates only opportunistic local connections — the pipe lives in the
+ * user's own namespace; TCP is opt-in.
+ */
+export function deriveToken(options: SharedRunnerOptions): string {
+  return createHash('sha1').update('tlc-token:' + matchFields(options.kind, options).join('\u0000')).digest('hex').slice(0, 32);
 }
 
 export function discoveryDir(engineRoot: string): string {

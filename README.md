@@ -51,7 +51,7 @@ All settings (keys, defaults, descriptions) live in the Settings UI under `tlc.*
 
 ## Shared runner across windows
 
-`tlc.local.sharedRunner` (default on, ovgenai/mlx kinds) makes VS Code windows share one backend process instead of each loading its own model copy: a starting window scans the runner discovery directory (`<engine dir>/runners/`, one file per live runner) and connects to a runner whose settings match its own. A runner exits by itself when its last client disconnects — closing a window never kills a runner other windows still use. The connection is authenticated with a per-instance token from the discovery file; without a valid token the runner rejects every request.
+`tlc.local.sharedRunner` (default on, ovgenai/mlx kinds) makes VS Code windows share one backend process instead of each loading its own model copy: a starting window scans the runner discovery directory (`<engine dir>/runners/`, one file per live runner) and connects to a runner whose settings match its own. A runner exits by itself when its last client disconnects — closing a window never kills a runner other windows still use. The connection is authenticated with a token derived from the shared settings (model, device, context length), so windows can join a runner even when its discovery record was lost; without a valid token the runner rejects every request.
 
 What counts as "matching" is engine-specific: **ovgenai** matches model + device + context length (the NPU graph is compiled per context window — two windows with the same model but ctx 4096 and 8192 get two runners and two compilations); **mlx** matches the model only (MLX compiles once and serves any context length, so such windows share one runner).
 
