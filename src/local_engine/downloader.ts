@@ -24,6 +24,8 @@ export interface DownloadOptions {
   onProgress?: (progress: DownloadProgress) => void;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Retry backoff for transient network failures and 5xx (3 attempts). */
+  retryDelayMs?: number;
 }
 
 export function proxyUrlFromEnv(): string | undefined {
@@ -56,6 +58,23 @@ function nodeRequest(url: URL, agent: ProxyAgentInstance | undefined, signal: Ab
     req.end();
   });
 }
+
+const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Download canceled', 'AbortError'));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException('Download canceled', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort);
+  });
 
 const REDIRECT_LIMIT = 5;
 
@@ -100,12 +119,37 @@ async function defaultRequest(url: string, signal?: AbortSignal): Promise<{ stat
   return { status: response.status, headers, body: response.stream };
 }
 
+/** A non-retryable HTTP status (4xx). */
+class HttpError extends Error {
+  constructor(readonly status: number, url: string) {
+    super(`Download failed (${status}): ${url}`);
+  }
+}
+
 /**
  * Streams the URL into `<destination>.part` and renames it into place on
  * success; a canceled or failed download leaves no destination file and the
- * `.part` file is removed.
+ * `.part` file is removed. Network failures and 5xx are retried (a dropped
+ * Wi-Fi connection must not kill a multi-GB download on the first blink);
+ * a canceled download and client errors are not.
  */
-export async function downloadFile({ url, destination, onProgress, signal, fetchImpl }: DownloadOptions): Promise<void> {
+export async function downloadFile({ url, destination, onProgress, signal, fetchImpl, retryDelayMs = 3000 }: DownloadOptions): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await downloadOnce({ url, destination, onProgress, signal, fetchImpl });
+      return;
+    } catch (err) {
+      const canceled = err instanceof Error && err.name === 'AbortError';
+      const clientError = err instanceof HttpError && err.status < 500;
+      if (canceled || clientError || attempt >= 3) {
+        throw err;
+      }
+      await sleep(retryDelayMs, signal);
+    }
+  }
+}
+
+async function downloadOnce({ url, destination, onProgress, signal, fetchImpl }: DownloadOptions): Promise<void> {
   let totalBytes: number | undefined;
   let source: Readable;
   if (fetchImpl !== undefined) {
@@ -116,7 +160,7 @@ export async function downloadFile({ url, destination, onProgress, signal, fetch
       throw downloadError(err, url, signal);
     }
     if (!response.ok || response.body === null) {
-      throw new Error(`Download failed (${response.status}): ${url}`);
+      throw new HttpError(response.status, url);
     }
     const totalHeader = response.headers.get('content-length');
     totalBytes = totalHeader !== null && Number.isFinite(+totalHeader) ? Number(totalHeader) : undefined;
@@ -129,7 +173,7 @@ export async function downloadFile({ url, destination, onProgress, signal, fetch
       throw downloadError(err, url, signal);
     }
     if (response.status !== 200) {
-      throw new Error(`Download failed (${response.status}): ${url}`);
+      throw new HttpError(response.status, url);
     }
     const totalHeader = response.headers.get('content-length');
     totalBytes = totalHeader !== null && Number.isFinite(+totalHeader) ? Number(totalHeader) : undefined;
