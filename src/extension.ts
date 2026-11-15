@@ -155,46 +155,70 @@ export function activate(context: vscode.ExtensionContext): void {
       return distroDecision;
     }
     const kindLabel = kind === 'ovgenai' ? 'OpenVINO GenAI runtime' : 'llama.cpp build';
-    const chosen = await vscode.window.showQuickPick(
-      [
-        { label: '$(cloud-download) Download', detail: `Download the ${kindLabel} archive on demand`, value: DISTRO_CHOICE_DOWNLOAD },
-        { label: '$(folder-opened) Use an existing folder…', detail: `Pick an unpacked ${kindLabel} on disk (saved to tlc.local.distroDir)`, value: 'disk' as const },
-      ],
-      { title: `${BRAND}: Local Engine Runtime`, placeHolder: `Download the ${kindLabel} or use an existing unpacked distribution?` },
-    );
-    if (chosen === undefined) {
-      return undefined;
+    const items = [
+      { label: '$(cloud-download) Download', detail: `Download the ${kindLabel} archive on demand`, value: DISTRO_CHOICE_DOWNLOAD },
+      { label: '$(folder-opened) Use an existing folder…', detail: `Pick an unpacked ${kindLabel} on disk (saved to tlc.local.distroDir)`, value: 'disk' as const },
+      { label: '$(close) Cancel', detail: 'Do not start the local engine now', value: 'cancel' as const },
+    ];
+    // A dismissal (a click outside, e.g. into the log pane) re-opens the
+    // question; the start resets only through the explicit Cancel item.
+    for (;;) {
+      const chosen = await vscode.window.showQuickPick(items, {
+        title: `${BRAND}: Local Engine Runtime`,
+        placeHolder: `Download the ${kindLabel} or use an existing unpacked distribution?`,
+        ignoreFocusOut: true,
+      });
+      if (chosen === undefined) {
+        continue;
+      }
+      if (chosen.value === 'cancel') {
+        return undefined;
+      }
+      if (chosen.value === DISTRO_CHOICE_DOWNLOAD) {
+        distroDecision = DISTRO_CHOICE_DOWNLOAD;
+        return DISTRO_CHOICE_DOWNLOAD;
+      }
+      const folder = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        title: `${BRAND}: Select Unpacked Engine Distribution`,
+      });
+      if (folder?.[0] !== undefined) {
+        const dir = folder[0].fsPath;
+        await vscode.workspace.getConfiguration('tlc').update('local.distroDir', dir, vscode.ConfigurationTarget.Global);
+        distroDecision = dir;
+        return dir;
+      }
     }
-    if (chosen.value === DISTRO_CHOICE_DOWNLOAD) {
-      distroDecision = DISTRO_CHOICE_DOWNLOAD;
-      return DISTRO_CHOICE_DOWNLOAD;
-    }
-    const folder = await vscode.window.showOpenDialog({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      title: `${BRAND}: Select Unpacked Engine Distribution`,
-    });
-    if (folder?.[0] === undefined) {
-      return undefined;
-    }
-    const dir = folder[0].fsPath;
-    await vscode.workspace.getConfiguration('tlc').update('local.distroDir', dir, vscode.ConfigurationTarget.Global);
-    distroDecision = dir;
-    return dir;
   };
   // The pick persists as tlc.local.model so later starts skip the question.
+  const kCancelPick = '__cancel__';
   const askModelDownload = async (currentId: string, choices: ModelDownloadChoice[]): Promise<string | undefined> => {
-    const picked = await vscode.window.showQuickPick(
-      choices.map((c) => ({
-        label: `${c.downloaded ? '$(check)' : '$(cloud-download)'} ${c.label}`,
-        description: c.id === currentId ? '$(check) configured' : undefined,
-        detail: c.detail,
-        id: c.id,
-      })),
-      { title: `${BRAND}: Local Model Download`, placeHolder: 'The configured model is not downloaded yet — choose which model to download' },
-    );
-    return picked?.id;
+    // A dismissal (a click outside, e.g. into the log pane) re-opens the
+    // question; the start resets only through the explicit Cancel item.
+    for (;;) {
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...choices.map((c) => ({
+            label: `${c.downloaded ? '$(check)' : '$(cloud-download)'} ${c.label}`,
+            description: c.id === currentId ? '$(check) configured' : undefined,
+            detail: c.detail,
+            id: c.id,
+          })),
+          { label: '$(close) Cancel', description: undefined, detail: 'Do not download a model now', id: kCancelPick as ModelDownloadChoice['id'] },
+        ],
+        {
+          title: `${BRAND}: Local Model Download`,
+          placeHolder: 'The configured model is not downloaded yet — choose which model to download',
+          ignoreFocusOut: true,
+        },
+      );
+      if (picked === undefined) {
+        continue;
+      }
+      return picked.id === (kCancelPick as ModelDownloadChoice['id']) ? undefined : picked.id;
+    }
   };
   const engineManager = new EngineManager({
     platform: process.platform,
