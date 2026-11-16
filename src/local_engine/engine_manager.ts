@@ -394,6 +394,14 @@ export class EngineManager {
           if (late !== undefined) {
             return this.connectToRecord(engineRoot, late.record, spawnOptions, label);
           }
+          // The record may not be visible yet (the winner is mid-start):
+          // the busy endpoint itself is still joinable — pipe clients need
+          // no token and the handshake rejects a foreign listener.
+          try {
+            return await adopt();
+          } catch (adoptErr) {
+            this.host.log(`${label}: busy endpoint not joinable (${messageOf(adoptErr)}).`);
+          }
         }
         // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
         // (remote/WSL) falls back to a localhost TCP listener. The stale pipe

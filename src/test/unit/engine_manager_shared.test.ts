@@ -64,8 +64,8 @@ interface Fixture {
   engineRoot: string;
   modelPath: string;
   shared: FakeSharedRunner;
-  /** Makes the first connect (the adoption attempt) fail with ENOENT. */
-  rejectFirstConnect: boolean;
+  /** Rejects the first N connects (initial adoption, busy-endpoint adoption). */
+  rejectFirstConnects: number;
 }
 
 const makeFixture = async (
@@ -104,7 +104,7 @@ const makeFixture = async (
     engineRoot,
     modelPath,
     shared,
-    rejectFirstConnect: false,
+    rejectFirstConnects: 0,
     host: {
       platform: 'linux',
       arch: 'x64',
@@ -130,7 +130,7 @@ const makeFixture = async (
       // requested pipe/port; rejectFirstConnect simulates an empty endpoint
       // for the adoption attempt.
       connectImpl: async (target: { path?: string; port?: number }) => {
-        if (fixture.rejectFirstConnect && connects++ === 0) {
+        if (fixture.rejectFirstConnects > connects++) {
           throw Object.assign(new Error(`connect ${target.path ?? target.port} ENOENT`), { code: 'ENOENT' });
         }
         return await new Promise<net.Socket>((resolve, reject) => {
@@ -148,18 +148,20 @@ const cleanup = async (f: Fixture): Promise<void> => {
   await rm(f.root, { recursive: true, force: true });
 };
 
-const busyPipeSpawn = (f: Fixture): EngineManagerHost['spawnImpl'] =>
+const busyPipeSpawn = (f: Fixture, { publishRecord = true } = {}): EngineManagerHost['spawnImpl'] =>
   ((_path: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
     const child = new FakeRunnerChild(args, opts.env);
     f.spawned.push(child);
     // The winning window publishes its record while this one is retrying.
-    void writeRecord(f.engineRoot, {
-      pid: process.pid,
-      transport: 'tcp',
-      port: f.shared.port,
-      token: '',
-      options: { kind: 'ovgenai', modelPath: f.modelPath, device: 'NPU', contextLength: 8192 },
-    });
+    if (publishRecord) {
+      void writeRecord(f.engineRoot, {
+        pid: process.pid,
+        transport: 'tcp',
+        port: f.shared.port,
+        token: '',
+        options: { kind: 'ovgenai', modelPath: f.modelPath, device: 'NPU', contextLength: 8192 },
+      });
+    }
     setTimeout(() => child.stdout.write(`${JSON.stringify({ type: 'error', message: 'listen endpoint already in use: \\\\.\\pipe\\tlc-runner-x' })}\n`), 0);
     return child;
   }) as never;
@@ -194,12 +196,24 @@ describe('EngineManager (shared runner)', () => {
 
   it('a busy pipe retries, then connects to the peer record the winner wrote', { timeout: 40_000 }, async () => {
     const f = await makeFixture();
-    f.rejectFirstConnect = true;
+    f.rejectFirstConnects = 1;
     (f.host as EngineManagerHost).spawnImpl = busyPipeSpawn(f) as never;
     const manager = new EngineManager(f.host);
     const status = await readyStatus(manager);
     expect(status.device).toBe('npu');
     expect(f.spawned.length).toBeGreaterThan(0);
+    expect(status.sharedPid).toBe(process.pid);
+    await manager.stop();
+    await cleanup(f);
+  });
+
+  it('a busy pipe with no visible record adopts the endpoint owner', { timeout: 40_000 }, async () => {
+    const f = await makeFixture();
+    f.rejectFirstConnects = 1;
+    (f.host as EngineManagerHost).spawnImpl = busyPipeSpawn(f, { publishRecord: false }) as never;
+    const manager = new EngineManager(f.host);
+    const status = await readyStatus(manager);
+    expect(status.device).toBe('npu');
     expect(status.sharedPid).toBe(process.pid);
     await manager.stop();
     await cleanup(f);
@@ -216,7 +230,9 @@ describe('EngineManager (shared runner)', () => {
       setTimeout(() => child.stdout.write(`${JSON.stringify({ type: 'ready', model: f.modelPath, device: 'NPU', ctx: 8192 })}\n`), 0);
       return child;
     }) as never);
-    f.rejectFirstConnect = true;
+    // Both pipe connects (initial adoption, busy-endpoint adoption) fail:
+    // the transport cannot bridge the plugin to the pipe owner.
+    f.rejectFirstConnects = 2;
     const manager = new EngineManager(f.host);
     const status = await readyStatus(manager);
     expect(status.device).toBe('npu');

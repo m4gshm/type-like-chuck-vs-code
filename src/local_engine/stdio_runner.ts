@@ -506,7 +506,7 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
     client.markExited(err);
   });
 
-  const readyInfo = await new Promise<{ model: string; device: string; port?: number }>((resolve, reject) => {
+  const readyInfo = await new Promise<{ model: string; device: string; pid?: number; port?: number }>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -539,6 +539,7 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
         resolve({
           model: String(event.model ?? ''),
           device: String(event.device ?? ''),
+          pid: typeof event.pid === 'number' ? event.pid : undefined,
           port: typeof event.port === 'number' ? event.port : undefined,
         });
       } else if (event.type === 'error') {
@@ -559,7 +560,8 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
   return {
     device: readyInfo.device,
     modelPath: options.modelPath,
-    pid: options.pid,
+    // An adopted runner has no record pid; the ready event carries one.
+    pid: options.pid ?? readyInfo.pid,
     stream: client.stream,
     stop: () =>
       new Promise((resolve) => {
