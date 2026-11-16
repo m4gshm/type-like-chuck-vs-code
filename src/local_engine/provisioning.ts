@@ -398,13 +398,13 @@ export async function ensureOvGenaiRuntime(
             }
             await rename(join(stagingDir, topDir), runtimeRoot);
             await rm(stagingDir, { recursive: true, force: true });
-          for (const entry of await readdir(paths.engineRoot)) {
-            // Stale installs from the previous two-level layout (ov-genai-<version>/...).
-            if (entry.startsWith('ov-genai-')) {
-              await rm(join(paths.engineRoot, entry), { recursive: true, force: true });
+            for (const entry of await readdir(paths.engineRoot)) {
+              // Stale installs from the previous two-level layout (ov-genai-<version>/...).
+              if (entry.startsWith('ov-genai-')) {
+                await rm(join(paths.engineRoot, entry), { recursive: true, force: true });
+              }
             }
-          }
-        },
+          },
         });
         await rm(archivePath, { force: true });
         return runtimeRoot;

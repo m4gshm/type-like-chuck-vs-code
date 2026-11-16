@@ -72,6 +72,19 @@ describe('startStdioRunner', () => {
       return child;
     };
     await expect(startStdioRunner(baseOptions(), { spawnImpl: spawn as never })).rejects.toThrow('load failed: bad model');
+    // A failed start must not leave the child loading in the background.
+    expect(children[0].killed).toBe(true);
+  });
+
+  it('kills the child when the ready wait times out', async () => {
+    const children: FakeChild[] = [];
+    const spawn = (_cmd: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+      const child = new FakeChild(args, opts.env);
+      children.push(child);
+      return child;
+    };
+    await expect(startStdioRunner(baseOptions({ readyTimeoutMs: 100 }), { spawnImpl: spawn as never })).rejects.toThrow('did not become ready in time');
+    expect(children[0].killed).toBe(true);
   });
 
   it('skips non-JSON stdout noise before the ready event', async () => {    const children: FakeChild[] = [];

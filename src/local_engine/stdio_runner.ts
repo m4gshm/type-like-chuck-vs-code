@@ -101,7 +101,7 @@ interface ProtocolClient {
   stream(prompt: string, maxTokens: number, stop: string[], signal?: AbortSignal): AsyncIterable<string>;
 }
 
-function createProtocolClient(label: string, write: (line: string) => void): ProtocolClient {
+function createProtocolClient(label: string, write: (line: string) => void, log: (message: string) => void = () => undefined): ProtocolClient {
   let nextId = 1;
   let exited: Error | undefined;
   const requests = new Map<number, PendingRequest>();
@@ -121,6 +121,9 @@ function createProtocolClient(label: string, write: (line: string) => void): Pro
     }
     const type = event.type;
     if (type === 'error' && event.id === null) {
+      // Runner-level failures (no request to answer) must at least surface
+      // in the log; completions just stop otherwise.
+      log(`${label}: runner error: ${String(event.message ?? '')}`);
       return;
     }
     // Tokens route by request id when the runner supplies it (listen mode,
@@ -301,7 +304,7 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
   child.stderr?.setEncoding('utf8');
 
   let cleanStop = false;
-  const client = createProtocolClient(label, (line) => child.stdin?.write(line));
+  const client = createProtocolClient(label, (line) => child.stdin?.write(line), log);
   const progressListeners: Array<() => void> = [];
   const lines = createInterface({ input: child.stdout! });
   lines.on('line', client.handleLine);
@@ -371,6 +374,7 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
       timer = Number.isFinite(timeoutMs)
         ? setTimeout(() => {
             cleanup();
+            child.kill();
             reject(new Error(`${label} runner did not become ready in time`));
           }, timeoutMs)
         : undefined;
@@ -406,6 +410,7 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
           });
         } else if (event.type === 'error') {
           cleanup();
+          child.kill();
           reject(new Error(String(event.message)));
         }
       };
@@ -487,7 +492,7 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
   socket.setEncoding('utf8');
 
   let cleanStop = false;
-  const client = createProtocolClient(label, (line) => socket.write(line));
+  const client = createProtocolClient(label, (line) => socket.write(line), deps.log ?? (() => undefined));
   const lines = createInterface({ input: socket });
   lines.on('line', client.handleLine);
   socket.on('close', () => {

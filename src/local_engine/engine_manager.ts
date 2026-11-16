@@ -15,7 +15,7 @@ import { catalogModelDir, catalogModelFiles, catalogSpec, EngineKind, removeCata
 import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
-import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner } from './stdio_runner';
+import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner, type SharedConnectDeps } from './stdio_runner';
 import { SharedRunnerOptions, RunnerRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
 import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
@@ -62,6 +62,8 @@ export interface EngineManagerHost extends RunnerDeps, ProvisioningHost {
   warn: (message: string) => void;
   /** Injectable runner `--version` probe (defaults to the real spawn). */
   probeRunnerVersion?: typeof probeRunnerVersion;
+  /** Injectable shared-runner socket factory (defaults to net.connect). */
+  connectImpl?: SharedConnectDeps['connectImpl'];
   /** Injectable NPU generation probe (defaults to cached platform WMI/PCI probing). */
   npuGeneration?: typeof npuGeneration;
   /** Offered while no catalog model is selected yet (tlc.local.model unset); returns the picked id, or undefined when dismissed. */
@@ -320,16 +322,24 @@ export class EngineManager {
     // The pipe name is derived from the combo and pipe clients need no token:
     // a live runner without a discovery record (an orphan from an older
     // build) is still joinable — try it before spawning a doomed duplicate.
-    const adopted = await connectSharedRunner(
-      { transport: 'pipe', endpoint: pipeName, token: '', modelPath: spawnOptions.modelPath, label, signal: spawnOptions.signal, onUnexpectedExit: spawnOptions.onUnexpectedExit, readyTimeoutMs: 5000 },
-      this.host,
-    ).then(
-      (runner) => runner,
-      () => undefined,
-    );
-    if (adopted !== undefined) {
+    // No ready timeout: the orphan may be mid-NPU-compile (15+ min), and
+    // failing here would push this start onto another device.
+    const adopt = (): Promise<RunningStdioRunner> =>
+      connectSharedRunner(
+        { transport: 'pipe', endpoint: pipeName, token: '', modelPath: spawnOptions.modelPath, label, signal: spawnOptions.signal, onUnexpectedExit: spawnOptions.onUnexpectedExit },
+        this.host,
+      );
+    try {
+      const adopted = await adopt();
       this.host.log(`${label}: adopted a live runner on ${pipeName}`);
       return adopted;
+    } catch (err) {
+      // Any adoption failure (nothing listening, half-dead orphan, handshake
+      // mismatch) falls through to spawn — only a user cancel aborts.
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw err;
+      }
+      this.host.log(`${label}: no runner to adopt on ${pipeName} (${messageOf(err)})`);
     }
     this.host.log(
       `${label}: no live shared runner for this combo — spawning (${recordKey(sharedOptions)})`,
@@ -352,7 +362,7 @@ export class EngineManager {
       writeRecord(engineRoot, {
         pid,
         transport: 'pipe',
-        endpoint: listen.transport === 'pipe' ? listen.pipeName : undefined,
+        endpoint: pipeName,
         token,
         options: sharedOptions,
       }).catch((err) => this.host.warn(`${label}: discovery record write failed: ${messageOf(err)}`));
@@ -398,9 +408,9 @@ export class EngineManager {
         throw err;
       }
     }
-    if (!recordWritten) {
+    if (!recordWritten && runner.pid !== undefined) {
       await writeRecord(engineRoot, {
-        pid: runner.pid ?? -1,
+        pid: runner.pid,
         transport: 'tcp',
         port: runner.port,
         token,
@@ -548,20 +558,24 @@ export class EngineManager {
     activeDevice = started.device;
     this.notifyFallbacks(activeDevice, started.fallbacks);
     this.engine = runner;
-    const status: EngineStatus = {
+    const status = this.stdioStatus(runner, settings, lastModelPath, activeDevice);
+    this.host.onStatus(status);
+    return status;
+  }
+
+  private stdioStatus(runner: RunningStdioRunner, settings: EngineManagerSettings, modelPath: string, device?: SupportedDevice): EngineStatus {
+    return {
       status: ENGINE_STATUS.ready,
       // The stdio runner has no HTTP endpoint; completions go through
       // `EngineManager.stdioRunner` instead of a base URL.
       baseUrl: '',
       apiKey: undefined,
       model: settings.modelId,
-      modelPath: lastModelPath,
-      device: activeDevice,
+      modelPath,
+      ...(device !== undefined ? { device } : {}),
       sharedPid: settings.sharedRunner ? runner.pid : undefined,
       pid: runner.pid,
     };
-    this.host.onStatus(status);
-    return status;
   }
 
   /** The running stdio runner, for the completions transport (ovgenai kind). */
@@ -601,15 +615,7 @@ export class EngineManager {
         'mlx',
       );
       this.engine = runner;
-      const status: EngineStatus = {
-        status: ENGINE_STATUS.ready,
-        baseUrl: '',
-        apiKey: undefined,
-        model: settings.modelId,
-        modelPath,
-        sharedPid: settings.sharedRunner ? runner.pid : undefined,
-        pid: runner.pid,
-      };
+      const status = this.stdioStatus(runner, settings, modelPath, 'gpu');
       this.host.onStatus(status);
       return status;
     }
@@ -627,14 +633,7 @@ export class EngineManager {
       this.host,
     );
     this.engine = runner;
-    const status: EngineStatus = {
-      status: ENGINE_STATUS.ready,
-      baseUrl: '',
-      apiKey: undefined,
-      model: settings.modelId,
-      modelPath,
-      pid: runner.pid,
-    };
+    const status = this.stdioStatus(runner, settings, modelPath);
     this.host.onStatus(status);
     return status;
   }
