@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v5
+      - name: guard clean version
+        run: node -p "const v=require('./package.json').version; if (/-local|-build/.test(v)) { console.error('stamped version in the repo: ' + v + ' — stamp-version.mjs must not be committed'); process.exit(1) }"
       - name: init Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v5
         with:
