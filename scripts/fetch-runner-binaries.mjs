@@ -26,6 +26,10 @@ import { fileURLToPath } from 'node:url';
 
 const OWNER = 'm4gshm';
 const releaseOnly = process.argv.includes('--release');
+// --local: never download and never build — package whatever is already in
+// binaries/ (the output of `task runner:import`); fail loudly on a missing
+// binary instead of silently replacing local builds with release ones.
+const localOnly = process.argv.includes('--local');
 const TARGETS = [
   // hostPlatform: the runner binary built by `task build` in the sibling backend repo
   // (build/<asset>) matches this target only on the host platform.
@@ -34,6 +38,21 @@ const TARGETS = [
   { repo: 'type-like-chuck-backed-openvino', dir: 'binaries/ovgenai/linux-arm64', releaseDir: 'binaries/ovgenai-release/linux-arm64', asset: 'tlc-ovgenai-runner-linux-arm64', finalName: 'tlc-ovgenai-runner' },
   { repo: 'type-like-chuck-backed-mlx', dir: 'binaries/mlx/darwin-arm64', asset: 'tlc-mlx-runner-macos-arm64.tar.gz', finalName: 'tlc-mlx-runner', hostPlatform: 'darwin', bundleRequired: 'mlx.metallib' },
 ];
+
+// True for the target this machine can actually build (runner:import output):
+// the platform must match, and for linux the architecture must too.
+const isHostTarget = (target) => {
+  if (target.hostPlatform === undefined) {
+    return !target.asset.includes('arm64') || (process.platform === 'linux' && process.arch === 'arm64');
+  }
+  if (target.hostPlatform !== process.platform) {
+    return false;
+  }
+  if (target.hostPlatform === 'linux') {
+    return target.asset.includes('arm64') === (process.arch === 'arm64');
+  }
+  return true;
+};
 
 const githubToken = process.env.GITHUB_TOKEN;
 const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubToken}` } : {};
@@ -120,6 +139,18 @@ for (const target of TARGETS) {
   const destination = join(dir, target.finalName);
   const expected = version(target.repo);
   const bundleMissing = target.bundleRequired !== undefined && !existsSync(join(dir, target.bundleRequired));
+  if (localOnly) {
+    if (isHostTarget(target)) {
+      if (!existsSync(destination) || bundleMissing) {
+        console.error(`--local: runner binary missing: ${destination} — run "task runner:import" first.`);
+        process.exit(1);
+      }
+      console.log(`--local: using existing ${destination}`);
+    } else {
+      console.log(`--local: not a host-platform target (${target.asset}) — skipped`);
+    }
+    continue;
+  }
   if (existsSync(destination)) {
     const diskTag = onDiskTag(destination);
     const versionOk = expected === undefined ? diskTag === 'local' || diskTag === '' : diskTag === expected;

@@ -15,8 +15,9 @@ import { catalogModelDir, catalogModelFiles, catalogSpec, EngineKind, removeCata
 import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
-import { probeRunnerVersion, RunningStdioRunner, startStdioRunner } from './stdio_runner';
-import { ProvisioningHost, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime } from './provisioning';
+import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner, type SharedConnectDeps } from './stdio_runner';
+import { SharedRunnerOptions, RunnerRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
+import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
 
@@ -40,6 +41,10 @@ export interface EngineManagerSettings {
   mlxRunnerPath?: string;
   /** When false the engine runs without key authentication (engine debugging). */
   apiKeyEnabled: boolean;
+  /** Shared-runner mode (stdio kinds): connect to a live runner or spawn one others can connect to. */
+  sharedRunner: boolean;
+  /** Shared-runner transport: platform pipe/socket, localhost TCP, or pipe with a TCP fallback. */
+  sharedRunnerTransport: 'pipe' | 'tcp' | 'auto';
 }
 
 /** One entry of the "which model to download" picker. */
@@ -57,6 +62,8 @@ export interface EngineManagerHost extends RunnerDeps, ProvisioningHost {
   warn: (message: string) => void;
   /** Injectable runner `--version` probe (defaults to the real spawn). */
   probeRunnerVersion?: typeof probeRunnerVersion;
+  /** Injectable shared-runner socket factory (defaults to net.connect). */
+  connectImpl?: SharedConnectDeps['connectImpl'];
   /** Injectable NPU generation probe (defaults to cached platform WMI/PCI probing). */
   npuGeneration?: typeof npuGeneration;
   /** Offered while no catalog model is selected yet (tlc.local.model unset); returns the picked id, or undefined when dismissed. */
@@ -221,8 +228,8 @@ export class EngineManager {
         this.host.warn(`${BRAND} local engine: the NPU is supported only by the OpenVINO GenAI engine; using GPU instead.`);
       }
 
-      const serverPath = await ensureLlamaEngine(this.host, paths, settings, this.activeSignal);
-      const modelPath = await ensureGgufModel(this.host, paths, model, settings, this.activeSignal);
+      const serverPath = await ensureLlamaEngine(this.provisioningHost, paths, settings, this.activeSignal);
+      const modelPath = await ensureGgufModel(this.provisioningHost, paths, model, settings, this.activeSignal);
       this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: false });
 
       const { engine, device: activeDevice, fallbacks } = await this.startWithDeviceFallback(devices, (device) => {
@@ -263,7 +270,223 @@ export class EngineManager {
       }
       await this.stop();
       throw err;
+    } finally {
+      await this.provisioningRelease?.();
+      this.provisioningRelease = undefined;
     }
+  }
+
+  /**
+   * Cross-window leadership: the window whose user answered "Download" claims
+   * the provisioning lock; a peer that claims later blocks until the leader
+   * finished, then reuses its files. Released by `start`'s finally.
+   */
+  private async claimProvisioning(engineRoot: string): Promise<void> {
+    if (this.provisioningRelease !== undefined) {
+      return;
+    }
+    this.provisioningRelease = await acquireProvisionLock(engineRoot, this.activeSignal, this.host);
+  }
+
+  private provisioningRelease?: () => Promise<void>;
+
+  /** `this.host` plus the leadership claim, for the provisioning functions. */
+  private get provisioningHost(): ProvisioningHost {
+    return { ...this.host, claimProvisioning: (root) => this.claimProvisioning(root) };
+  }
+
+  /**
+   * Connect-or-spawn for one resolved set of start options: scan the
+   * discovery directory for a live runner with matching options, connect to
+   * it; otherwise spawn a private-pipe or shared listen-mode runner and
+   * publish its discovery file. `auto` retries a failed pipe spawn over TCP.
+   */
+  private async startSharedRunner(
+    engineRoot: string,
+    kind: EngineKind,
+    settings: EngineManagerSettings,
+    spawnOptions: StdioRunnerStartOptions & { modelPath: string },
+    label: string,
+  ): Promise<RunningStdioRunner> {
+    const sharedOptions: SharedRunnerOptions = {
+      kind,
+      modelPath: spawnOptions.modelPath,
+      device: spawnOptions.device,
+      contextLength: spawnOptions.contextLength,
+    };
+    const found = await findLiveMatch(engineRoot, sharedOptions);
+    if (found !== undefined) {
+      return this.connectToRecord(engineRoot, found.record, spawnOptions, label);
+    }
+    const pipeName = localListenEndpoint(engineRoot, sharedOptions);
+    // The pipe name is derived from the combo and pipe clients need no token:
+    // a live runner without a discovery record (an orphan from an older
+    // build) is still joinable — try it before spawning a doomed duplicate.
+    // No ready timeout: the orphan may be mid-NPU-compile (15+ min), and
+    // failing here would push this start onto another device.
+    const adopt = (): Promise<RunningStdioRunner> =>
+      connectSharedRunner(
+        { transport: 'pipe', endpoint: pipeName, token: '', modelPath: spawnOptions.modelPath, label, signal: spawnOptions.signal, onUnexpectedExit: spawnOptions.onUnexpectedExit },
+        this.host,
+      );
+    try {
+      const adopted = await adopt();
+      this.host.log(`${label}: adopted a live runner on ${pipeName}`);
+      return adopted;
+    } catch (err) {
+      // Any adoption failure (nothing listening, half-dead orphan, handshake
+      // mismatch) falls through to spawn — only a user cancel aborts.
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw err;
+      }
+      this.host.log(`${label}: no runner to adopt on ${pipeName} (${messageOf(err)})`);
+    }
+    this.host.log(
+      `${label}: no live shared runner for this combo — spawning (${recordKey(sharedOptions)})`,
+    );
+    const transport: 'pipe' | 'tcp' = settings.sharedRunnerTransport === 'tcp' ? 'tcp' : 'pipe';
+    const token = transport === 'tcp' ? newToken() : '';
+    const listen = transport === 'tcp'
+      ? { transport: 'tcp' as const }
+      : { transport: 'pipe' as const, pipeName };
+    // The record goes out right after the process exists — long before the
+    // model loads — so concurrent windows find it instead of racing to spawn
+    // on the same endpoint. TCP records need the ready-reported port and are
+    // written after the start below.
+    let recordWritten = false;
+    const writePipeRecord = (pid: number | undefined): void => {
+      if (recordWritten || transport !== 'pipe' || pid === undefined) {
+        return;
+      }
+      recordWritten = true;
+      writeRecord(engineRoot, {
+        pid,
+        transport: 'pipe',
+        endpoint: pipeName,
+        token,
+        options: sharedOptions,
+      }).catch((err) => this.host.warn(`${label}: discovery record write failed: ${messageOf(err)}`));
+    };
+    let runner: RunningStdioRunner;
+    let spawnTries = 0;
+    for (;;) {
+      try {
+        runner = await startStdioRunner(
+          { ...spawnOptions, listen, token, onSpawned: (pid) => writePipeRecord(pid) },
+          this.host,
+        );
+        break;
+      } catch (err) {
+        if (transport === 'pipe' && /already in use/.test(messageOf(err))) {
+          if (spawnTries < 3) {
+            spawnTries++;
+            this.host.log(`${label}: pipe endpoint is busy (${spawnTries}/3), retrying.`);
+            // The failed child had its pid written by onSpawned: the record
+            // must point at the *successful* spawn, so allow a rewrite.
+            recordWritten = false;
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          // The endpoint owner is a live runner of this combo whose record was
+          // published after our first scan: connect to it instead of pushing
+          // this start onto another device.
+          const late = await findLiveMatch(engineRoot, sharedOptions);
+          if (late !== undefined) {
+            return this.connectToRecord(engineRoot, late.record, spawnOptions, label);
+          }
+          // The record may not be visible yet (the winner is mid-start):
+          // the busy endpoint itself is still joinable — pipe clients need
+          // no token and the handshake rejects a foreign listener.
+          try {
+            return await adopt();
+          } catch (adoptErr) {
+            this.host.log(`${label}: busy endpoint not joinable (${messageOf(adoptErr)}).`);
+          }
+        }
+        // auto: a pipe endpoint that cannot bridge the plugin/backend boundary
+        // (remote/WSL) falls back to a localhost TCP listener. The stale pipe
+        // record (a pid of an exited child) must not survive the fallback.
+        recordWritten = false;
+        await deleteRecord(engineRoot, `${kind}-${recordKey(sharedOptions)}.json`);
+        if (settings.sharedRunnerTransport === 'auto' && transport === 'pipe') {
+          this.host.warn(`${label}: pipe listen failed (${messageOf(err)}); retrying over TCP.`);
+          runner = await startStdioRunner({ ...spawnOptions, listen: { transport: 'tcp' }, token }, this.host);
+          break;
+        }
+        throw err;
+      }
+    }
+    if (!recordWritten && runner.pid !== undefined) {
+      await writeRecord(engineRoot, {
+        pid: runner.pid,
+        transport: 'tcp',
+        port: runner.port,
+        token,
+        options: sharedOptions,
+      });
+    }
+    // Spawning a *shared* runner is a distinct decision worth a log line:
+    // every model/device/ctx combo gets its own shared instance.
+    this.host.log(
+      `${label}: spawned shared runner pid=${runner.pid} (${transport === 'pipe' ? 'pipe' : `tcp:${runner.port}`})`,
+    );
+    return runner;
+  }
+
+  /** Connects to a discovered shared record, retrying while its runner warms up. */
+  private async connectToRecord(
+    engineRoot: string,
+    record: RunnerRecord,
+    spawnOptions: StdioRunnerStartOptions & { modelPath: string },
+    label: string,
+  ): Promise<RunningStdioRunner> {
+    const connect = (): Promise<RunningStdioRunner> =>
+      connectSharedRunner(
+        {
+          transport: record.transport,
+          endpoint: record.endpoint,
+          port: record.port,
+          token: record.token,
+          modelPath: spawnOptions.modelPath,
+          pid: record.pid,
+          label,
+          signal: spawnOptions.signal,
+          onUnexpectedExit: spawnOptions.onUnexpectedExit,
+        },
+        this.host,
+      );
+    let runner: RunningStdioRunner;
+    try {
+      runner = await connect();
+    } catch (err) {
+      // Transient connect failures mean the runner process is alive but its
+      // listener is not up yet (spawned moments ago, model still loading):
+      // retry within the discovery record instead of spawning a duplicate.
+      const message = messageOf(err);
+      if (!/ENOENT|ECONNREFUSED|EACCES/.test(message)) {
+        throw err;
+      }
+      let connected: RunningStdioRunner | undefined;
+      for (let attempt = 0; attempt < 5 && connected === undefined; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (!isPidAlive(record.pid)) {
+          break;
+        }
+        try {
+          connected = await connect();
+        } catch (retryErr) {
+          if (!/ENOENT|ECONNREFUSED|EACCES/.test(messageOf(retryErr))) {
+            throw retryErr;
+          }
+        }
+      }
+      if (connected === undefined) {
+        throw err;
+      }
+      runner = connected;
+    }
+    this.host.log(`${label}: connected to shared runner pid=${record.pid} (${record.transport})`);
+    return runner;
   }
 
   private async startOvgenai(paths: EnginePaths, settings: EngineManagerSettings): Promise<EngineStatus> {
@@ -285,7 +508,7 @@ export class EngineManager {
       await this.chooseModelToDownload(paths, settings, formatFor(devices[0]));
     }
     const model = isLocalModelId(settings.modelId) ? irModel(settings.modelId) : undefined;
-    const runtimeRoot = await ensureOvGenaiRuntime(this.host, paths, settings, this.activeSignal);
+    const runtimeRoot = await ensureOvGenaiRuntime(this.provisioningHost, paths, settings, this.activeSignal);
     const libDir = ovGenaiLibDir(this.host.platform, runtimeRoot);
     // The Windows runner links TBB directly; its dlls sit outside the OpenVINO bin dir.
     const tbbDir = ovGenaiTbbDir(this.host.platform, runtimeRoot);
@@ -310,50 +533,57 @@ export class EngineManager {
     let activeDevice: SupportedDevice;
     let lastModelPath = '';
     const started = await this.startWithDeviceFallback(devices, async (device) => {
-      const modelPath = model !== undefined ? await ensureDirModel(this.host, paths, irModel(model.id, formatFor(device)), settings, this.activeSignal) : settings.modelPath;
+      const modelPath = model !== undefined ? await ensureDirModel(this.provisioningHost, paths, irModel(model.id, formatFor(device)), settings, this.activeSignal) : settings.modelPath;
       lastModelPath = modelPath;
       this.host.log(`ovgenai: loading ${model?.label ?? settings.modelPath} on ${device.toUpperCase()} (${modelPath})`);
       this.host.onStatus({ status: ENGINE_STATUS.starting, npuCompile: device === 'npu' });
-      return startStdioRunner(
-        {
-          runnerPath,
-          modelPath,
-          device: device.toUpperCase(),
-          contextLength,
-          // The runner's own CACHE_DIR default is relative to its cwd (the
-          // extension host's, unpredictable); pin it to the model cache so
-          // compiled blobs persist across starts. Blob caches are
-          // device-specific (incompatible blobs) — one folder per device.
-          props: device === 'npu' || device === 'gpu' ? { CACHE_DIR: join(paths.modelCacheDir, `${device}-blobs`) } : undefined,
-          signal: this.activeSignal,
-          // NPU watcher: a graph compile can take unbounded wall time, so
-          // re-arm on each stderr line instead; 30 min of silence means a
-          // hung compiler pass. A dead runner is still detected via the
-          // exit check.
-          readyIdleTimeoutMs: device === 'npu' ? NPU_READY_IDLE_TIMEOUT_MS : undefined,
-          libraryDirs,
-          onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
-          onStderr: (line) => this.host.log(`ovgenai: ${line}`),
-        },
-        this.host,
-      );
+      const spawnOptions: StdioRunnerStartOptions & { modelPath: string } = {
+        runnerPath,
+        modelPath,
+        device: device.toUpperCase(),
+        contextLength,
+        // The runner's own CACHE_DIR default is relative to its cwd (the
+        // extension host's, unpredictable); pin it to the model cache so
+        // compiled blobs persist across starts. Blob caches are
+        // device-specific (incompatible blobs) — one folder per device.
+        props: device === 'npu' || device === 'gpu' ? { CACHE_DIR: join(paths.modelCacheDir, `${device}-blobs`) } : undefined,
+        signal: this.activeSignal,
+        // NPU watcher: a graph compile can take unbounded wall time, so
+        // re-arm on each stderr line instead; 30 min of silence means a
+        // hung compiler pass. A dead runner is still detected via the
+        // exit check.
+        readyIdleTimeoutMs: device === 'npu' ? NPU_READY_IDLE_TIMEOUT_MS : undefined,
+        libraryDirs,
+        onUnexpectedExit: (message) => this.handleUnexpectedExit(`ovgenai ${message}`),
+        onStderr: (line) => this.host.log(`ovgenai: ${line}`),
+      };
+      if (settings.sharedRunner) {
+        return this.startSharedRunner(paths.engineRoot, 'ovgenai', settings, spawnOptions, 'ovgenai');
+      }
+      return startStdioRunner(spawnOptions, this.host);
     });
     runner = started.engine;
     activeDevice = started.device;
     this.notifyFallbacks(activeDevice, started.fallbacks);
     this.engine = runner;
-    const status: EngineStatus = {
+    const status = this.stdioStatus(runner, settings, lastModelPath, activeDevice);
+    this.host.onStatus(status);
+    return status;
+  }
+
+  private stdioStatus(runner: RunningStdioRunner, settings: EngineManagerSettings, modelPath: string, device?: SupportedDevice): EngineStatus {
+    return {
       status: ENGINE_STATUS.ready,
       // The stdio runner has no HTTP endpoint; completions go through
       // `EngineManager.stdioRunner` instead of a base URL.
       baseUrl: '',
       apiKey: undefined,
       model: settings.modelId,
-      modelPath: lastModelPath,
-      device: activeDevice,
+      modelPath,
+      ...(device !== undefined ? { device } : {}),
+      sharedPid: settings.sharedRunner ? runner.pid : undefined,
+      pid: runner.pid,
     };
-    this.host.onStatus(status);
-    return status;
   }
 
   /** The running stdio runner, for the completions transport (ovgenai kind). */
@@ -374,8 +604,29 @@ export class EngineManager {
       await this.chooseModelToDownload(paths, settings);
       model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : model;
     }
-    const modelPath = await ensureDirModel(this.host, paths, model, settings, this.activeSignal);
+    const modelPath = await ensureDirModel(this.provisioningHost, paths, model, settings, this.activeSignal);
     this.host.onStatus({ status: ENGINE_STATUS.starting });
+    if (settings.sharedRunner) {
+      const runner = await this.startSharedRunner(
+        paths.engineRoot,
+        'mlx',
+        settings,
+        {
+          runnerPath,
+          modelPath,
+          contextLength: model !== undefined ? model.contextLength : CUSTOM_MODEL_CONTEXT_LENGTH,
+          label: 'mlx',
+          onUnexpectedExit: (message) => this.handleUnexpectedExit(`mlx ${message}`),
+          onStderr: (line) => this.host.log(`mlx: ${line}`),
+          signal: this.activeSignal,
+        },
+        'mlx',
+      );
+      this.engine = runner;
+      const status = this.stdioStatus(runner, settings, modelPath, 'gpu');
+      this.host.onStatus(status);
+      return status;
+    }
     // Metal is the only MLX backend; no device fallback chain.
     const runner = await startStdioRunner(
       {
@@ -390,13 +641,7 @@ export class EngineManager {
       this.host,
     );
     this.engine = runner;
-    const status: EngineStatus = {
-      status: ENGINE_STATUS.ready,
-      baseUrl: '',
-      apiKey: undefined,
-      model: settings.modelId,
-      modelPath,
-    };
+    const status = this.stdioStatus(runner, settings, modelPath);
     this.host.onStatus(status);
     return status;
   }
@@ -422,6 +667,21 @@ export class EngineManager {
       return;
     }
     this.modelDownloadAsked = true;
+    // The question goes only to the focused window; a background window waits
+    // (or skips the question entirely once a peer took over provisioning).
+    for (;;) {
+      if (isProvisioningLocked(paths.engineRoot)) {
+        return;
+      }
+      if (this.host.isWindowFocused?.() ?? true) {
+        break;
+      }
+      this.host.onStatus({
+        status: ENGINE_STATUS.awaitingInput,
+        prompt: 'waiting: activate this window to choose which model to download',
+      });
+      await sleep(2000, this.activeSignal);
+    }
     this.host.onStatus({ status: ENGINE_STATUS.awaitingInput, prompt: 'choose which model to download' });
     const chosen = await ask(settings.modelId, choices);
     if (chosen === undefined) {
@@ -431,6 +691,8 @@ export class EngineManager {
       settings.modelId = chosen;
       await this.host.setLocalModel?.(chosen);
     }
+    // The user's model choice makes this window the provisioning leader.
+    await this.claimProvisioning(paths.engineRoot);
   }
 
   private modelDownloadChoices(paths: EnginePaths, kind: EngineKind, format: IrFormat): ModelDownloadChoice[] {

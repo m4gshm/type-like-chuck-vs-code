@@ -31,6 +31,8 @@ export interface ExtensionConfig {
   localOpenvinoUrl: string;
   localCustomModelPath: string;
   localApiKeyEnabled: boolean;
+  localSharedRunner: boolean;
+  localSharedRunnerTransport: 'pipe' | 'tcp' | 'auto';
   promptTemplate: string | undefined;
   customTemplate: CustomTemplateDefinition | undefined;
   prefixMaxLength: number;
@@ -102,6 +104,8 @@ export function readConfig(): ExtensionConfig {
     localOpenvinoUrl: c.get<string>('local.openvinoUrl', DEFAULT_OPENVINO_URL),
     localCustomModelPath: c.get<string>('local.customModelPath', ''),
     localApiKeyEnabled: c.get<boolean>('local.apiKeyEnabled', true),
+    localSharedRunner: c.get<boolean>('local.sharedRunner', true),
+    localSharedRunnerTransport: c.get<'pipe' | 'tcp' | 'auto'>('local.sharedRunnerTransport', 'pipe'),
     promptTemplate: c.get<string>('promptTemplate'),
     customTemplate: hasMarkers
       ? { id: 'custom', prefix, suffix, middle, stop }

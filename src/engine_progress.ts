@@ -83,7 +83,14 @@ export class EngineTaskRunner {
     };
     await this.host.withProgress({ title, cancellable: true }, async (bar, token) => {
       const cancel = new AbortController();
-      token.onCancellationRequested(() => cancel.abort());
+      // Cancel only stops a download; after the downloads are done (compile,
+      // connect-or-spawn wait) a stray click on the toast must not kill the
+      // start — it would discard the whole NPU compilation.
+      token.onCancellationRequested(() => {
+        if (!this.stagesCleared) {
+          cancel.abort();
+        }
+      });
       const ticker = setInterval(() => {
         const elapsed = Math.round((Date.now() - startedAt) / 1000);
         const elapsedLabel = elapsed >= 10 ? ` (${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed)` : '';
@@ -106,10 +113,11 @@ export class EngineTaskRunner {
       try {
         await task(cancel.signal);
       } catch (err) {
-        if (!(err instanceof Error && err.name === 'AbortError')) {
-          const message = `${BRAND} local engine: ${messageOf(err)}`;
-          this.host.offerRetry(message, () => void this.run(title, task));
-        }
+        // Cancellation included: a dismissed question (a click outside the
+        // model picker) surfaces as AbortError and would otherwise end the
+        // start with a silent "canceled" and no way back but restarting.
+        const message = `${BRAND} local engine: ${messageOf(err)}`;
+        this.host.offerRetry(message, () => void this.run(title, task));
       } finally {
         clearInterval(ticker);
         this.listener = undefined;

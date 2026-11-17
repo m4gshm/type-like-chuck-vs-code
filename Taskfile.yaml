@@ -106,6 +106,10 @@ tasks:
           echo "mlx backend repo '{{.BACKEND_MLX}}' not found — skipping local import (use runner:fetch)"
           exit 0
         fi
+        if ! command -v swift >/dev/null 2>&1; then
+          echo "swift not found on {{OS}} — mlx builds only on macOS arm64; skipping the mlx build (runner:fetch covers it from the release)"
+          exit 0
+        fi
         task -d '{{.BACKEND_MLX}}' build
       - |
         if [ -f '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' ]; then
@@ -130,10 +134,32 @@ tasks:
       - binaries/ovgenai/linux-x64/tlc-ovgenai-runner
       - binaries/mlx/darwin-arm64/tlc-mlx-runner
 
-  package:
-    desc: Build the .vsix (delegates to npm run package)
+  # --- packaging ------------------------------------------------------------
+
+  # Scenario A: backends come from the backend repos' GitHub releases
+  # (this is what CI does; RUNNER_VERSION pins a tag, empty = latest).
+  package:release:
+    desc: Build the .vsix with runner binaries from the backend GitHub releases (downloads them)
     cmds:
-      - npm run package
+      - npm run package:release
+      - task: prune:vsix
+
+  # Scenario B: backends are rebuilt locally (runner:import) and the .vsix
+  # packages exactly those binaries — nothing is downloaded. The version gets
+  # a "-local.<timestamp>" suffix so the installed build is identifiable in
+  # VS Code next to a release and a "-build.<date>" nightly. Rewrites the
+  # package.json version in the working tree (do not commit it).
+  package:local:
+    desc: Rebuild the local backend repos and build the .vsix with those binaries (no downloads)
+    deps: [runner:import]
+    cmds:
+      - npm run package:local
+      - task: prune:vsix
+
+  # Keep only the 3 newest tlc-*.vsix in the repo root.
+  prune:vsix:
+    cmds:
+      - node -e "const fs=require('fs');const f=fs.readdirSync('.').filter(n=>/^tlc-.*\.vsix$/.test(n)).map(n=>[n,fs.statSync(n).mtimeMs]).sort((a,b)=>b[1]-a[1]);for(const[n]of f.slice(3)){fs.unlinkSync(n);console.log('removed old vsix:',n)}"
 
   clean:
     desc: Remove build artifacts (incl. runner binaries; they re-download from the pinned releases)

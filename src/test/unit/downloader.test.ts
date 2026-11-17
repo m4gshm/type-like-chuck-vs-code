@@ -54,9 +54,25 @@ describe('downloadFile', () => {
 
   it('removes the part file and destination on failure', async () => {
     const destination = join(dir, 'missing.bin');
-    await expect(downloadFile({ url: `${baseUrl}/nope`, destination })).rejects.toThrow(/404/);
+    await expect(downloadFile({ url: `${baseUrl}/nope`, destination, retryDelayMs: 10 })).rejects.toThrow(/404/);
     await expect(stat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(stat(`${destination}.part`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('retries a transient failure and succeeds', async () => {
+    const destination = join(dir, 'flaky.bin');
+    let attempts = 0;
+    const flaky: typeof fetch = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('connection reset');
+      }
+      const response = await fetch(`${baseUrl}/file`);
+      return response as never;
+    };
+    await downloadFile({ url: `${baseUrl}/file`, destination, fetchImpl: flaky, retryDelayMs: 10 });
+    expect(attempts).toBe(2);
+    expect(await readFile(destination, 'utf8')).toBe('0123456789'.repeat(100));
   });
 
   it('cleans up when canceled mid-stream', async () => {
@@ -71,7 +87,7 @@ describe('downloadFile', () => {
 
   it('wraps a server-side mid-stream connection drop with context', async () => {
     const destination = join(dir, 'drop.bin');
-    await expect(downloadFile({ url: `${baseUrl}/drop`, destination })).rejects.toThrow(/Download failed after \d+ bytes: .+ \(.+\/drop\)/);
+    await expect(downloadFile({ url: `${baseUrl}/drop`, destination, retryDelayMs: 10 })).rejects.toThrow(/Download failed after \d+ bytes: .+ \(.+\/drop\)/);
     await expect(stat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(stat(`${destination}.part`)).rejects.toMatchObject({ code: 'ENOENT' });
   });

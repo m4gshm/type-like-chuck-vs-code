@@ -2,7 +2,7 @@
   "name": "tlc",
   "displayName": "Type like Chuck",
   "description": "Type like Chuck - one more AI autocomplete tool",
-  "version": "0.1.1",
+  "version": "0.2.0-local.20261117-0808",
   "publisher": "m4gshm",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -350,6 +350,23 @@
             "default": true,
             "description": "Require the per-session key from engine clients. Keep enabled; turn off only to call the engine directly (e.g. curl) without the key."
           },
+          "tlc.local.sharedRunner": {
+            "type": "boolean",
+            "order": 2,
+            "default": true,
+            "description": "Share one stdio runner (ovgenai/mlx) across VS Code windows: a window connects to a live runner with matching settings instead of loading its own model copy. The runner exits by itself when the last window disconnects. Only the ovgenai and mlx kinds are shared."
+          },
+          "tlc.local.sharedRunnerTransport": {
+            "type": "string",
+            "order": 2,
+            "enum": [
+              "pipe",
+              "tcp",
+              "auto"
+            ],
+            "default": "pipe",
+            "description": "Shared-runner transport (local mode only): a platform named pipe/unix socket (pipe), localhost TCP (tcp, for VS Code remote/WSL setups where the pipe cannot cross), or pipe with an automatic TCP fallback (auto)."
+          },
           "tlc.local.llamaCppRelease": {
             "type": "string",
             "order": 3,
@@ -440,8 +457,11 @@
     "vscode-test": "vscode-test",
     "lint": "eslint src",
     "build": "npm run test && npm run lint",
-    "package": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies",
-    "package:win": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies --ignoreFile .vscodeignore-win"
+    "package": "npm run package:release",
+    "package:release": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies",
+    "package:local": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs --local && node scripts/stamp-version.mjs local && vsce package --no-dependencies",
+    "package:win": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs && vsce package --no-dependencies --ignoreFile .vscodeignore-win",
+    "package:win:local": "npm run vscode:prepublish && node scripts/make-icon.mjs && node scripts/fetch-runner-binaries.mjs --local && node scripts/stamp-version.mjs local && vsce package --no-dependencies --ignoreFile .vscodeignore-win"
   },
   "dependencies": {
     "https-proxy-agent": "^5.0.1",
@@ -462,7 +482,7 @@
     "@vitest/coverage-v8": "^3.2.7",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
     "mocha": "^11.8.0",
