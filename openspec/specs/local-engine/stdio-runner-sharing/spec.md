@@ -67,10 +67,10 @@ When the extension loses the connection to a shared runner while local mode is a
 - **THEN** the connection attempt is treated as failed and the window spawns a new shared runner
 
 ### Requirement: Per-instance token authentication
-Every shared runner SHALL require a per-instance random token: the spawner generates one, passes it to the runner at start and records it in the discovery file; a connecting client SHALL authenticate by sending an `auth` request with the token as the first message on its connection. The runner SHALL close the connection (or reject it) on a missing or wrong token without processing any request. The token SHALL NOT be persisted anywhere besides the discovery file and the runner's command line, and SHALL be regenerated on every spawn. Stdin/stdout (private pipe) mode SHALL NOT require authentication.
+Every shared runner SHALL require a per-instance random token: the spawner generates one, passes it to the runner at start and records it in the discovery file; a connecting client over the **TCP** transport SHALL authenticate by sending an `auth` request with the token as the first message on its connection. The runner SHALL close the connection (or reject it) on a missing or wrong token without processing any request. The token SHALL NOT be persisted anywhere besides the discovery file and the runner's command line, and SHALL be regenerated on every spawn. Local IPC transports (the platform pipe/socket; a privately spawned stdin/stdout runner) SHALL NOT require authentication: the endpoint is user-namespace local and stdin is inherited by trust.
 
 #### Scenario: Client authenticates with the token
-- **WHEN** a window connects to a shared runner using the token from its discovery file
+- **WHEN** a window connects to a shared runner over the TCP transport using the token from its discovery file
 - **THEN** the runner accepts the `auth` request and serves generate requests normally
 
 #### Scenario: Wrong or missing token rejected
