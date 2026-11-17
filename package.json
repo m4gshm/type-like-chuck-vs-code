@@ -2,7 +2,7 @@
   "name": "tlc",
   "displayName": "Type like Chuck",
   "description": "Type like Chuck - one more AI autocomplete tool",
-  "version": "0.2.0",
+  "version": "0.2.0-local.20261117-0808",
   "publisher": "m4gshm",
   "license": "Apache-2.0",
   "icon": "icon.png",
