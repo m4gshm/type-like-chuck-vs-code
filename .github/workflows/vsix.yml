@@ -30,6 +30,13 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22.x
+          cache: npm
+      - name: cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+          restore-keys: node-modules-${{ runner.os }}-node22-
       - name: static checks, tests and lint
         run: |
           command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
