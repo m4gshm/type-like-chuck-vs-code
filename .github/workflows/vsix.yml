@@ -30,7 +30,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22.x
-          cache: npm
       - name: cache node_modules
         uses: actions/cache@v4
         with:
