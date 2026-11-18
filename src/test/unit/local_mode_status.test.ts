@@ -48,12 +48,13 @@ describe('LocalModeStatusUi', () => {
   it('wires the stdio pipe and unblocks completions when a runner-based engine is ready', () => {
     const { ui, recorded, setRunner } = makeHost();
     setRunner({ stream: async function* () { yield 'x'; } });
-    ui.handle({ status: 'ready', model: 'm', modelPath: '/p', device: 'gpu', baseUrl: '', apiKey: undefined });
+    ui.handle({ status: 'ready', model: 'm', modelPath: '/p', device: 'gpu', baseUrl: '', apiKey: undefined, endpoint: '\\\\.\\pipe\\tlc-runner-x' });
     expect(recorded.stdioSet).toHaveLength(1);
     expect(recorded.blocked).toEqual([false]);
     expect(recorded.endpoint).toEqual([]);
     expect(recorded.successes).toBe(1);
     expect(recorded.details.at(-1)).toBe('m (gpu)');
+    expect(recorded.logs.at(-1)).toBe('Type like Chuck local engine ready: llama.cpp runner model=/p device=gpu endpoint=\\\\.\\pipe\\tlc-runner-x');
   });
 
   it('switches the endpoint when a server-based engine is ready', () => {

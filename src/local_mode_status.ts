@@ -59,7 +59,7 @@ export class LocalModeStatusUi {
         this.host.statusBar.setEngine(undefined);
         const shared = status.sharedPid !== undefined ? ` (shared, pid ${status.sharedPid})` : status.pid !== undefined ? ` (pid ${status.pid})` : '';
         this.host.statusBar.setEngineDetail(`${status.model}${status.device !== undefined ? ` (${status.device})` : ''}${shared}`);
-        this.host.log.info(`${BRAND} local engine ready: ${this.host.engineKind()} runner model=${status.modelPath}${status.device !== undefined ? ` device=${status.device}` : ''}${shared}`);
+        this.host.log.info(`${BRAND} local engine ready: ${this.host.engineKind()} runner model=${status.modelPath}${status.device !== undefined ? ` device=${status.device}` : ''}${shared}${status.endpoint !== undefined ? ` endpoint=${status.endpoint}` : ''}`);
         this.host.watchdog.reportSuccess();
       } else {
         this.host.setEndpoint(status.baseUrl);
