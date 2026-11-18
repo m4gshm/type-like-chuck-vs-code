@@ -14,6 +14,8 @@ vars:
   BACKEND_REPO: 'type-like-chuck-backed-openvino'
   BACKEND_MLX: 'type-like-chuck-backed-mlx'
   RUNNER_VERSION: '' # pin a backend release tag here, empty = latest release
+  DEFAULT_LLAMA_TAG: 'b12499'
+  DEFAULT_LLAMA_MODEL: '.cache/models/qwen2.5-coder-0.5b-q4_k_m.gguf'
 
 env:
   RUNNER_VERSION: '{{.RUNNER_VERSION}}'
@@ -133,6 +135,43 @@ tasks:
       - binaries/ovgenai/win32-x64/tlc-ovgenai-runner.exe
       - binaries/ovgenai/linux-x64/tlc-ovgenai-runner
       - binaries/mlx/darwin-arm64/tlc-mlx-runner
+
+  # --- llama.cpp engine e2e ---------------------------------------------------------
+
+  llama:distro:
+    desc: Download and unpack the llama.cpp release build into .cache/llama/<tag> (tag pins the release)
+    cmds:
+      - python3 scripts/llama-e2e.py download-distro --tag '{{.TAG}}'
+    vars:
+      TAG: '{{.TAG | default .DEFAULT_LLAMA_TAG}}'
+
+  llama:model:
+    desc: Download the e2e test model (Qwen2.5-Coder 0.5B Q4_K_M GGUF) into .cache/models/
+    cmds:
+      - python3 scripts/llama-e2e.py download-model
+
+  smoke:llama:
+    desc: llama-server --version from the downloaded distro
+    deps: [llama:distro]
+    cmds:
+      - python3 scripts/llama-e2e.py smoke --tag '{{.TAG}}'
+    vars:
+      TAG: '{{.TAG | default .DEFAULT_LLAMA_TAG}}'
+
+  e2e:llama:
+    desc: llama.cpp engine e2e suite (server startup, health, FIM generation, max_tokens, stop strings)
+    deps: [llama:distro, llama:model]
+    cmds:
+      - python3 scripts/llama-e2e.py test --tag '{{.TAG}}' --model '{{.MODEL}}'
+    vars:
+      TAG: '{{.TAG | default .DEFAULT_LLAMA_TAG}}'
+      MODEL: '{{.MODEL | default .DEFAULT_LLAMA_MODEL}}'
+
+  ci:llama:
+    desc: Full llama.cpp engine cycle on this machine — distro + model downloads (cached), version smoke and the e2e suite
+    cmds:
+      - task: smoke:llama
+      - task: e2e:llama
 
   # --- packaging ------------------------------------------------------------
 
