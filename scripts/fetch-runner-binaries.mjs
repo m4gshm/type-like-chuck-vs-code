@@ -58,8 +58,8 @@ const githubToken = process.env.GITHUB_TOKEN;
 const headers = githubToken !== undefined ? { Authorization: `Bearer ${githubToken}` } : {};
 const versionOverride = process.env.RUNNER_VERSION?.trim() || undefined;
 const DEFAULT_RUNNER_VERSIONS = {
-  'type-like-chuck-backed-openvino': 'v0.1.0',
-  'type-like-chuck-backed-mlx': 'v0.1.1',
+  'type-like-chuck-backed-openvino': 'v0.2.0',
+  'type-like-chuck-backed-mlx': 'v0.2.0',
 };
 const version = (repo) => versionOverride ?? DEFAULT_RUNNER_VERSIONS[repo];
 
