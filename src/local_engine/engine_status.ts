@@ -17,5 +17,5 @@ export type EngineStatus =
   | { status: typeof ENGINE_STATUS.preparingEngine }
   | { status: typeof ENGINE_STATUS.preparingModel }
   | { status: typeof ENGINE_STATUS.starting; /** Only the NPU compiles the model graph; the hint is shown just for it. */ npuCompile?: boolean }
-  | { status: typeof ENGINE_STATUS.ready; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device?: LocalDevice; /** Set for a shared stdio runner: the backend process id shown in the UI. */ sharedPid?: number; /** The backend process id (stdio runner), shown in the UI for support diagnostics. */ pid?: number }
+  | { status: typeof ENGINE_STATUS.ready; baseUrl: string; apiKey: string | undefined; model: string; modelPath: string; device?: LocalDevice; /** Set for a shared stdio runner: the backend process id shown in the UI. */ sharedPid?: number; /** The backend process id (stdio runner), shown in the UI for support diagnostics. */ pid?: number; /** Pipe name/socket path or 127.0.0.1:port of the stdio runner, for the ready log. */ endpoint?: string }
   | { status: typeof ENGINE_STATUS.error; message: string };

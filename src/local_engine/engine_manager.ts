@@ -599,6 +599,7 @@ export class EngineManager {
       ...(device !== undefined ? { device } : {}),
       sharedPid: settings.sharedRunner ? runner.pid : undefined,
       pid: runner.pid,
+      endpoint: runner.endpoint,
     };
   }
 

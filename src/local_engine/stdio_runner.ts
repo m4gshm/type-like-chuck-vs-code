@@ -64,6 +64,8 @@ export interface RunningStdioRunner {
   pid?: number;
   /** Bound TCP port in listen-tcp mode (from the ready event). */
   port?: number;
+  /** Reachable endpoint for diagnostics: pipe name/socket path or 127.0.0.1:port. */
+  endpoint?: string;
   stream(prompt: string, maxTokens: number, stop: string[], signal?: AbortSignal): AsyncIterable<string>;
   stop(): Promise<void>;
 }
@@ -423,6 +425,9 @@ export async function startStdioRunner(options: StdioRunnerStartOptions, deps: S
     modelPath: options.modelPath,
     pid: child.pid,
     port: readyInfo.port,
+    endpoint: options.listen?.transport === 'pipe'
+      ? options.listen.pipeName
+      : readyInfo.port !== undefined ? `127.0.0.1:${readyInfo.port}` : undefined,
     stream: client.stream,
     stop: () =>
       new Promise((resolve) => {
@@ -562,6 +567,9 @@ export async function connectSharedRunner(options: SharedConnectOptions, deps: S
     modelPath: options.modelPath,
     // An adopted runner has no record pid; the ready event carries one.
     pid: options.pid ?? readyInfo.pid,
+    endpoint: options.transport === 'pipe'
+      ? options.endpoint
+      : options.port !== undefined ? `127.0.0.1:${options.port}` : undefined,
     stream: client.stream,
     stop: () =>
       new Promise((resolve) => {
