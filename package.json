@@ -218,7 +218,7 @@
             "type": "boolean",
             "order": 1,
             "default": true,
-            "description": "Trigger completions automatically after a typing pause. When off, completions are only requested via the manual shortcut (Ctrl+Alt+Space)."
+            "description": "Trigger completions automatically after a typing pause. When off, completions are only requested via the manual shortcuts (Ctrl+Alt+Space or Alt+\\)."
           },
           "tlc.debounceMs": {
             "type": "integer",
@@ -352,13 +352,13 @@
           },
           "tlc.local.sharedRunner": {
             "type": "boolean",
-            "order": 2,
+            "order": 3,
             "default": true,
             "description": "Share one stdio runner (ovgenai/mlx) across VS Code windows: a window connects to a live runner with matching settings instead of loading its own model copy. The runner exits by itself when the last window disconnects. Only the ovgenai and mlx kinds are shared."
           },
           "tlc.local.sharedRunnerTransport": {
             "type": "string",
-            "order": 2,
+            "order": 4,
             "enum": [
               "pipe",
               "tcp",
@@ -370,7 +370,7 @@
           "tlc.local.llamaCppRelease": {
             "type": "string",
             "order": 3,
-            "default": "b11935",
+            "default": "b12499",
             "description": "llama.cpp release tag used for the local engine download (llama.cpp engine)."
           },
           "tlc.local.distroDir": {
