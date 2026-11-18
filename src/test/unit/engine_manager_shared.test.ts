@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { EngineManager, EngineManagerHost, EngineManagerSettings } from '../../local_engine/engine_manager';
 import { ENGINE_STATUS, EngineStatus } from '../../local_engine/engine_status';
 import { OV_GENAI_VERSION } from '../../local_engine/ov_runtime';
-import { writeRecord } from '../../local_engine/runner_discovery';
+import { writeRecord, findLiveMatch } from '../../local_engine/runner_discovery';
 import { defaultEngineManagerSettings, FakeRunnerChild } from './fixtures';
 
 /** FakeRunnerChild whose stdin.end() ends the process (listen-mode stop waits for close). */
@@ -215,6 +215,30 @@ describe('EngineManager (shared runner)', () => {
     const status = await readyStatus(manager);
     expect(status.device).toBe('npu');
     expect(status.sharedPid).toBe(process.pid);
+    await manager.stop();
+    await cleanup(f);
+  });
+
+  it('drops a record whose pid is alive but endpoint never opens, then spawns fresh', { timeout: 60_000 }, async () => {
+    const f = await makeFixture({}, ((_path: string, args: string[]) => {
+      const child = new ListenFakeChild(args, {});
+      f.spawned.push(child);
+      setTimeout(() => child.stdout.write(`${JSON.stringify({ type: 'ready', model: f.modelPath, device: 'NPU', ctx: 8192 })}\n`), 0);
+      return child;
+    }) as never);
+    f.rejectFirstConnects = Number.MAX_SAFE_INTEGER;
+    await writeRecord(f.engineRoot, {
+      pid: process.pid,
+      transport: 'pipe',
+      endpoint: 'unused-endpoint',
+      token: '',
+      options: { kind: 'ovgenai', modelPath: f.modelPath, device: 'NPU', contextLength: 8192 },
+    });
+    const manager = new EngineManager(f.host);
+    const status = await readyStatus(manager);
+    expect(status.device).toBe('npu');
+    expect(f.spawned).toHaveLength(1);
+    expect(await findLiveMatch(f.engineRoot, { kind: 'ovgenai', modelPath: f.modelPath, device: 'NPU', contextLength: 8192 })).toBeUndefined();
     await manager.stop();
     await cleanup(f);
   });

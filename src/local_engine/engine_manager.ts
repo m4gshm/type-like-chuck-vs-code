@@ -16,7 +16,7 @@ import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner, type SharedConnectDeps } from './stdio_runner';
-import { SharedRunnerOptions, RunnerRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
+import { SharedRunnerOptions, ScannedRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
 import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -316,7 +316,11 @@ export class EngineManager {
     };
     const found = await findLiveMatch(engineRoot, sharedOptions);
     if (found !== undefined) {
-      return this.connectToRecord(engineRoot, found.record, spawnOptions, label);
+      const connected = await this.connectToRecord(engineRoot, found, spawnOptions, label);
+      if (connected !== undefined) {
+        return connected;
+      }
+      // The record was stale (dropped by connectToRecord): spawn below.
     }
     const pipeName = localListenEndpoint(engineRoot, sharedOptions);
     // The pipe name is derived from the combo and pipe clients need no token:
@@ -392,7 +396,10 @@ export class EngineManager {
           // this start onto another device.
           const late = await findLiveMatch(engineRoot, sharedOptions);
           if (late !== undefined) {
-            return this.connectToRecord(engineRoot, late.record, spawnOptions, label);
+            const lateConnected = await this.connectToRecord(engineRoot, late, spawnOptions, label);
+            if (lateConnected !== undefined) {
+              return lateConnected;
+            }
           }
           // The record may not be visible yet (the winner is mid-start):
           // the busy endpoint itself is still joinable — pipe clients need
@@ -433,13 +440,20 @@ export class EngineManager {
     return runner;
   }
 
-  /** Connects to a discovered shared record, retrying while its runner warms up. */
+  /**
+   * Connects to a discovered shared record, retrying while its runner warms
+   * up. Returns undefined — after dropping the record — when the pid is
+   * alive but the endpoint never opens (a runner from an older build that
+   * ignores `--listen` keeps the pid forever without ever listening): the
+   * caller falls through to a fresh spawn.
+   */
   private async connectToRecord(
     engineRoot: string,
-    record: RunnerRecord,
+    found: ScannedRecord,
     spawnOptions: StdioRunnerStartOptions & { modelPath: string },
     label: string,
-  ): Promise<RunningStdioRunner> {
+  ): Promise<RunningStdioRunner | undefined> {
+    const record = found.record;
     const connect = (): Promise<RunningStdioRunner> =>
       connectSharedRunner(
         {
@@ -481,7 +495,9 @@ export class EngineManager {
         }
       }
       if (connected === undefined) {
-        throw err;
+        void deleteRecord(engineRoot, found.file).catch(() => undefined);
+        this.host.log(`${label}: no endpoint from record pid=${record.pid} after the retries — dropping the stale record`);
+        return undefined;
       }
       runner = connected;
     }
