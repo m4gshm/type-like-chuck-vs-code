@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'crypto';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { tmpdir, userInfo } from 'os';
+import { dirname, join } from 'path';
 import type { EngineKind } from './kind_catalog';
 
 /** Start options that decide whether two windows may share one runner. */
@@ -52,8 +53,32 @@ export function discoveryDir(engineRoot: string): string {
   return join(engineRoot, 'runners');
 }
 
-export function localListenEndpoint(engineRoot: string, options: SharedRunnerOptions): string {
-  return process.platform === 'win32' ? `\\\\.\\pipe\\tlc-runner-${recordKey(options)}` : join(discoveryDir(engineRoot), `${recordKey(options)}.sock`);
+export function localListenEndpoint(_engineRoot: string, options: SharedRunnerOptions): string {
+  if (process.platform === 'win32') {
+    return `\\\\.\\pipe\\tlc-runner-${recordKey(options)}`;
+  }
+  // A unix socket path is limited to ~104 bytes (sun_path); the globalStorage
+  // root alone can exceed that, so the socket lives in the OS temp dir,
+  // scoped to the user account that created it.
+  return join(tmpdir(), `tlc-${userScope()}`, `runner-${recordKey(options)}.sock`);
+}
+
+/** Creates the parent directory of a unix-socket endpoint (no-op for Windows pipes). */
+export async function ensureListenDir(endpoint: string): Promise<void> {
+  if (process.platform !== 'win32' && endpoint.endsWith('.sock')) {
+    await mkdir(dirname(endpoint), { recursive: true });
+  }
+}
+
+function userScope(): string {
+  try {
+    if (typeof process.getuid === 'number') {
+      return String(process.getuid);
+    }
+    return userInfo().username;
+  } catch {
+    return 'u';
+  }
 }
 
 export function isPidAlive(pid: number): boolean {

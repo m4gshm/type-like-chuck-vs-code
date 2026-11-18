@@ -1,5 +1,7 @@
 # Everything the packaged extension does not need at runtime.
 # Windows-only vsix: same as .vscodeignore plus the non-Windows runners.
+.cache/**
+.thinkrail/**
 .vscode/**
 .vscodeignore
 .vscodeignore-win

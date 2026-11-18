@@ -1,9 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   findLiveMatch,
+  ensureListenDir,
   localListenEndpoint,
   matchFields,
   newToken,
@@ -48,6 +49,24 @@ describe('runner_discovery', () => {
     const b = localListenEndpoint(root, { kind: 'ovgenai', modelPath: '/m', device: 'NPU', contextLength: 8192 });
     expect(a).not.toBe(b);
     expect(newToken()).not.toBe(newToken());
+  });
+
+  it('the unix socket endpoint stays within the 104-byte sun_path limit', () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+    const endpoint = localListenEndpoint(join(root, 'a-very-long-globalstorage-path'), { kind: 'mlx', modelPath: '/m' });
+    expect(endpoint.startsWith(tmpdir())).toBe(true);
+    expect(Buffer.byteLength(endpoint)).toBeLessThanOrEqual(103);
+  });
+
+  it('ensureListenDir creates the socket parent directory and skips Windows pipes', async () => {
+    if (process.platform !== 'win32') {
+      const socket = join(root, 'nested', 'dir', 'runner-x.sock');
+      await ensureListenDir(socket);
+      await expect(readdir(join(root, 'nested', 'dir'))).resolves.toEqual([]);
+    }
+    await expect(ensureListenDir('\\\\.\\pipe\\tlc-runner-x')).resolves.toBeUndefined();
   });
 
   it('scan finds a written record with its options intact', async () => {
