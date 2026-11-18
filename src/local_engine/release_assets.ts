@@ -3,7 +3,7 @@ export interface ResolvedEngineAsset {
   url: string;
 }
 
-export const DEFAULT_RELEASE_TAG = 'b11935';
+export const DEFAULT_RELEASE_TAG = 'b12499';
 export const DEFAULT_GITHUB_BASE = 'https://github.com';
 
 interface AssetEntry {
