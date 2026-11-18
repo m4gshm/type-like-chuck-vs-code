@@ -22,6 +22,11 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v5
+      - name: guard tag matches package.json version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node -e "const t=process.env.TAG.replace(/^v/,''); const v=require('./package.json').version; if (t!==v) { console.error('tag '+process.env.TAG+' does not match package.json version '+v+' - move the tag onto the version-bump commit'); process.exit(1) }"
       - name: init Node.js
         uses: actions/setup-node@v5
         with:
