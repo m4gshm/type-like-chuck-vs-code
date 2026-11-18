@@ -1,4 +1,8 @@
 # Everything the packaged extension does not need at runtime.
+# Engine runtime and models live in VS Code global storage; .cache/ is a
+# dev-time download cache and must not be shipped.
+.cache/**
+.thinkrail/**
 # Extension runtime needs: dist/, fonts/, binaries/ovgenai/, icon.png,
 # package.json, README.md, LICENSE.txt.
 .vscode/**

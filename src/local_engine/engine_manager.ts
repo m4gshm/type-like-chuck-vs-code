@@ -16,7 +16,7 @@ import { mlxModel } from './mlx_model_catalog';
 import { EnginePaths } from './paths';
 import { ovGenaiLibDir, ovGenaiTbbDir } from './ov_runtime';
 import { probeRunnerVersion, RunningStdioRunner, StdioRunnerStartOptions, connectSharedRunner, startStdioRunner, type SharedConnectDeps } from './stdio_runner';
-import { SharedRunnerOptions, ScannedRecord, deleteRecord, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
+import { SharedRunnerOptions, ScannedRecord, deleteRecord, ensureListenDir, findLiveMatch, isPidAlive, localListenEndpoint, newToken, recordKey, writeRecord } from './runner_discovery';
 import { ProvisioningHost, acquireProvisionLock, ensureDirModel, ensureGgufModel, ensureLlamaEngine, ensureOvGenaiRuntime, isProvisioningLocked, sleep } from './provisioning';
 
 export type ResetTarget = 'engine' | 'model' | 'cache';
@@ -323,6 +323,7 @@ export class EngineManager {
       // The record was stale (dropped by connectToRecord): spawn below.
     }
     const pipeName = localListenEndpoint(engineRoot, sharedOptions);
+    await ensureListenDir(pipeName);
     // The pipe name is derived from the combo and pipe clients need no token:
     // a live runner without a discovery record (an orphan from an older
     // build) is still joinable — try it before spawning a doomed duplicate.
