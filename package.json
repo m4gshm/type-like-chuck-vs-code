@@ -120,7 +120,7 @@
             ],
             "enumDescriptions": [
               "External OpenAI-compatible server from the Base URL setting",
-              "TLC-managed local engine: a llama.cpp llama-server started by the extension (downloaded on demand)"
+              "TLC-managed local engine: mlx on macOS arm64, ovgenai on Intel CPUs (Windows/Linux), llama.cpp elsewhere; model and runtime download on demand"
             ],
             "description": "Completion source. Use \"TLC: Select Mode\" to switch; switching to local downloads the engine and model on first use."
           }
