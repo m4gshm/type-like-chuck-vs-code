@@ -159,19 +159,18 @@ tasks:
       TAG: '{{.TAG | default .DEFAULT_LLAMA_TAG}}'
 
   e2e:llama:
-    desc: llama.cpp engine e2e suite (server startup, health, FIM generation, max_tokens, stop strings)
+    desc: llama.cpp engine e2e suite (server startup, health, FIM generation, max_tokens, stop strings); DEVICE=gpu|cpu (gpu runs -ngl 99)
     deps: [llama:distro, llama:model]
     cmds:
-      - python3 scripts/llama-e2e.py test --tag '{{.TAG}}' --model '{{.MODEL}}'
+      - python3 scripts/llama-e2e.py test --tag '{{.TAG}}' --model '{{.MODEL}}' --device '{{.DEVICE}}'
     vars:
       TAG: '{{.TAG | default .DEFAULT_LLAMA_TAG}}'
       MODEL: '{{.MODEL | default .DEFAULT_LLAMA_MODEL}}'
+      DEVICE: '{{.DEVICE | default "gpu"}}'
 
   ci:llama:
-    desc: Full llama.cpp engine cycle on this machine — distro + model downloads (cached), version smoke and the e2e suite
-    cmds:
-      - task: smoke:llama
-      - task: e2e:llama
+    desc: Full llama.cpp engine cycle on this machine — distro + model downloads (cached), version smoke and the e2e suite on GPU
+    deps: [smoke:llama, e2e:llama]
 
   # --- packaging ------------------------------------------------------------
 

@@ -147,8 +147,9 @@ def cmd_test(args):
         return ok
 
     port = free_port()
+    ngl = "99" if args.device == "gpu" else "0"
     proc = subprocess.Popen([server, "-m", args.model, "--port", str(port),
-                             "--host", "127.0.0.1"],
+                             "--host", "127.0.0.1", "-ngl", ngl],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         ok &= check(wait_health(port), "server reaches /health")
@@ -175,6 +176,8 @@ def main():
     common.add_argument("--tag", default=DEFAULT_TAG, help="llama.cpp release tag")
     common.add_argument("--distro", help="existing distro dir (default .cache/llama/<tag>)")
     common.add_argument("--model", help="GGUF model file (default the cached Qwen2.5-Coder 0.5B)")
+    common.add_argument("--device", choices=("cpu", "gpu"), default="gpu",
+                        help="gpu = -ngl 99 (default, needs a working Vulkan driver), cpu = -ngl 0 (CI)")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cmd = ap.add_subparsers(dest="cmd", required=True)
     cmd.add_parser("download-distro", parents=[common]).add_argument("--out")

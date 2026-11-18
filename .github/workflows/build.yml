@@ -42,6 +42,18 @@ jobs:
           path: .vscode-test
           key: vscode-test-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: vscode-test-${{ runner.os }}-
+      - name: cache llama.cpp e2e distro and model
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/llama
+            .cache/models
+          key: llama-e2e-b12499
+      - name: llama.cpp engine e2e (CPU)
+        run: |
+          python3 scripts/llama-e2e.py download-distro --tag b12499
+          python3 scripts/llama-e2e.py download-model
+          python3 scripts/llama-e2e.py test --tag b12499 --model .cache/models/qwen2.5-coder-0.5b-q4_k_m.gguf --device cpu
       - name: static checks and coverage
         run: |
           npm install
