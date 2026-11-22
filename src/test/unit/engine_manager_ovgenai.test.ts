@@ -88,6 +88,52 @@ describe('EngineManager (ovgenai engine)', () => {
     await manager.stop();
   });
 
+  it('prunes gpu kernel caches unused for 7 days, keeps recently read ones and compiled blobs', async () => {
+    const f = await makeFixture();
+    const { existsSync } = await import('fs');
+    const { utimes } = await import('fs/promises');
+    const gpuBlobs = join(f.root, 'cache', 'gpu-blobs');
+    const npuBlobs = join(f.root, 'cache', 'npu-blobs');
+    await mkdir(gpuBlobs, { recursive: true });
+    await mkdir(npuBlobs, { recursive: true });
+    const unused = join(gpuBlobs, 'unused.cl_cache');
+    const oldButRecentlyRead = join(gpuBlobs, 'read.cl_cache');
+    const freshUnused = join(gpuBlobs, 'fresh.cl_cache');
+    const oldModelBlob = join(gpuBlobs, 'old.blob');
+    const oldNpuBlob = join(npuBlobs, 'old.blob');
+    for (const file of [unused, oldButRecentlyRead, freshUnused, oldModelBlob, oldNpuBlob]) {
+      await writeFile(file, 'data');
+    }
+    const weekAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await utimes(unused, weekAgo, weekAgo);
+    await utimes(oldButRecentlyRead, new Date(), weekAgo);
+    await utimes(freshUnused, weekAgo, new Date());
+    await utimes(oldModelBlob, weekAgo, weekAgo);
+    await utimes(oldNpuBlob, weekAgo, weekAgo);
+    const manager = new EngineManager(f.host);
+    await manager.ensureReady();
+    expect(existsSync(unused)).toBe(false);
+    expect(existsSync(oldButRecentlyRead)).toBe(true);
+    expect(existsSync(freshUnused)).toBe(true);
+    expect(existsSync(oldModelBlob)).toBe(true);
+    expect(existsSync(oldNpuBlob)).toBe(true);
+    await manager.stop();
+  });
+
+  it('never prunes the kernel cache when tlc.local.cacheMaxAgeDays is 0', async () => {
+    const f = await makeFixture({ cacheMaxAgeDays: 0 });
+    const { existsSync } = await import('fs');
+    const { utimes } = await import('fs/promises');
+    const blobs = join(f.root, 'cache', 'gpu-blobs');
+    await mkdir(blobs, { recursive: true });
+    const unused = join(blobs, 'unused.cl_cache');
+    await writeFile(unused, 'data');
+    const yearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+    await utimes(unused, yearAgo, yearAgo);
+    await new EngineManager(f.host).ensureReady();
+    expect(existsSync(unused)).toBe(true);
+  });
+
   it('restarts the runner when the model changes', async () => {
     const f = await makeFixture();
     const manager = new EngineManager(f.host);

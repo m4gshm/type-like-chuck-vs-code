@@ -2,7 +2,7 @@
   "name": "tlc",
   "displayName": "Type like Chuck",
   "description": "Type like Chuck - one more AI autocomplete tool",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "m4gshm",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -396,6 +396,13 @@
             "order": 7,
             "default": "",
             "description": "Directory for the local model cache (local mode only). Empty uses the extension storage."
+          },
+          "tlc.local.cacheMaxAgeDays": {
+            "type": "number",
+            "order": 8,
+            "default": 7,
+            "minimum": 0,
+            "description": "OpenVINO GPU kernel-cache files (*.cl_cache) not read for this many days are deleted on engine start (compiled model blobs are never deleted). 0 disables the cleanup."
           },
           "tlc.local.huggingfaceUrl": {
             "type": "string",

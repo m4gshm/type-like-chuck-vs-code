@@ -1,6 +1,6 @@
 import { BRAND } from '../brand';
 import { existsSync } from 'fs';
-import { mkdir, rm } from 'fs/promises';
+import { mkdir, readdir, rm, stat } from 'fs/promises';
 import { join } from 'path';
 import { LocalDevice } from '../config';
 import { messageOf } from '../errors';
@@ -45,6 +45,8 @@ export interface EngineManagerSettings {
   sharedRunner: boolean;
   /** Shared-runner transport: platform pipe/socket, localhost TCP, or pipe with a TCP fallback. */
   sharedRunnerTransport: 'pipe' | 'tcp' | 'auto';
+  /** Days a GPU kernel-cache file may stay unread before deletion; 0 disables the cleanup. */
+  cacheMaxAgeDays: number;
 }
 
 /** One entry of the "which model to download" picker. */
@@ -547,6 +549,7 @@ export class EngineManager {
     }
 
     let runner: RunningStdioRunner | undefined;
+    await this.pruneGpuKernelCache();
     let activeDevice: SupportedDevice;
     let lastModelPath = '';
     const started = await this.startWithDeviceFallback(devices, async (device) => {
@@ -586,6 +589,36 @@ export class EngineManager {
     const status = this.stdioStatus(runner, settings, lastModelPath, activeDevice);
     this.host.onStatus(status);
     return status;
+  }
+
+  /**
+   * .cl_cache kernel blobs go stale with driver/runtime updates; .blob files are compiled models — never delete those.
+   * A cache file is unused when neither its mtime nor atime (refreshed by the OS on read) is recent.
+   */
+  private async pruneGpuKernelCache(): Promise<void> {
+    const maxAgeDays = this.host.settings().cacheMaxAgeDays;
+    if (maxAgeDays <= 0) {
+      return;
+    }
+    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+    const dir = join(this.host.paths().modelCacheDir, 'gpu-blobs');
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => undefined);
+    if (entries === undefined) {
+      return;
+    }
+    const now = Date.now();
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.cl_cache')) {
+        continue;
+      }
+      const file = join(dir, entry.name);
+      const stats = await stat(file).catch(() => undefined);
+      const lastUsed = stats === undefined ? undefined : Math.max(stats.atimeMs, stats.mtimeMs);
+      if (lastUsed !== undefined && now - lastUsed > maxAgeMs) {
+        this.host.log(`ovgenai: pruning unused GPU kernel cache: ${file}`);
+        await rm(file, { recursive: true, force: true }).catch((error) => this.host.log(`ovgenai: failed to prune GPU kernel cache ${file}: ${String(error)}`));
+      }
+    }
   }
 
   private stdioStatus(runner: RunningStdioRunner, settings: EngineManagerSettings, modelPath: string, device?: SupportedDevice): EngineStatus {

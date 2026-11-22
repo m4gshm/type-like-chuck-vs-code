@@ -26,6 +26,7 @@ export interface ExtensionConfig {
   localDistroDir: string;
   localDownloadedModelsDir: string;
   localModelCacheDir: string;
+  localCacheMaxAgeDays: number;
   localHuggingfaceUrl: string;
   localGithubUrl: string;
   localOpenvinoUrl: string;
@@ -99,6 +100,7 @@ export function readConfig(): ExtensionConfig {
     localDistroDir: c.get<string>('local.distroDir', ''),
     localDownloadedModelsDir: c.get<string>('local.downloadedModelsDir', ''),
     localModelCacheDir: c.get<string>('local.modelCacheDir', ''),
+    localCacheMaxAgeDays: c.get<number>('local.cacheMaxAgeDays', 7),
     localHuggingfaceUrl: c.get<string>('local.huggingfaceUrl', DEFAULT_HF_BASE),
     localGithubUrl: c.get<string>('local.githubUrl', DEFAULT_GITHUB_BASE),
     localOpenvinoUrl: c.get<string>('local.openvinoUrl', DEFAULT_OPENVINO_URL),

@@ -243,6 +243,7 @@ export function activate(context: vscode.ExtensionContext): void {
       apiKeyEnabled: config().localApiKeyEnabled,
       sharedRunner: config().localSharedRunner,
       sharedRunnerTransport: config().localSharedRunnerTransport,
+      cacheMaxAgeDays: config().localCacheMaxAgeDays,
     }),
     onStatus: (status) => localModeUi.handle(status),
     onProgress: engineTasks.onDownloadProgress,

@@ -41,6 +41,7 @@ export const defaultEngineManagerSettings = (overrides: Partial<EngineManagerSet
   apiKeyEnabled: true,
   sharedRunner: false,
   sharedRunnerTransport: 'pipe',
+  cacheMaxAgeDays: 7,
   ...overrides,
 });
 
@@ -59,6 +60,7 @@ export const defaultExtensionConfig = (overrides: Partial<ExtensionConfig> = {})
   localDistroDir: '',
   localDownloadedModelsDir: '',
   localModelCacheDir: '',
+  localCacheMaxAgeDays: 7,
   localHuggingfaceUrl: 'https://huggingface.co',
   localGithubUrl: 'https://github.com',
   localOpenvinoUrl: 'https://storage.openvinotoolkit.org',
