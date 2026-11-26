@@ -98,8 +98,9 @@ tasks:
         fi
       - |
         if [ -f '{{.BACKEND_REPO}}/build/tlc-ovgenai-runner-linux-x64' ]; then
-          mkdir -p binaries/ovgenai/linux-x64 binaries/ovgenai/win32-x64
+          mkdir -p binaries/ovgenai/linux-x64
           cp '{{.BACKEND_REPO}}/build/tlc-ovgenai-runner-linux-x64' binaries/ovgenai/linux-x64/tlc-ovgenai-runner
+          git -C '{{.BACKEND_REPO}}' describe --tags --dirty > binaries/ovgenai/linux-x64/tlc-ovgenai-runner.tag
         fi
       - cmd: powershell -Command "Copy-Item type-like-chuck-backed-openvino\build\tlc-ovgenai-runner-win32-x64.exe binaries\ovgenai\win32-x64\tlc-ovgenai-runner.exe"
         platforms: [windows]
@@ -117,6 +118,9 @@ tasks:
         if [ -f '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' ]; then
           mkdir -p binaries/mlx/darwin-arm64
           cp '{{.BACKEND_MLX}}/build/tlc-mlx-runner-macos-arm64' binaries/mlx/darwin-arm64/tlc-mlx-runner
+          # Same derivation as the backend build stamps into the binary; the
+          # package guard rejects dev stamps (a dev build must never ship).
+          git -C '{{.BACKEND_MLX}}' describe --tags --dirty > binaries/mlx/darwin-arm64/tlc-mlx-runner.tag
         fi
     sources:
       - '{{.BACKEND_REPO}}/src/**/*'
