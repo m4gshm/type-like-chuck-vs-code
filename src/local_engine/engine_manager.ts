@@ -315,6 +315,7 @@ export class EngineManager {
       contextLength: spawnOptions.contextLength,
     };
     const found = await findLiveMatch(engineRoot, sharedOptions);
+    this.host.log(`${label}: discovery ${found === undefined ? 'found no live record' : `found record pid=${found.record.pid} (${found.record.transport})`}`);
     if (found !== undefined) {
       const connected = await this.connectToRecord(engineRoot, found, spawnOptions, label);
       if (connected !== undefined) {
@@ -619,10 +620,13 @@ export class EngineManager {
     }
     let model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : undefined;
     if (model !== undefined) {
+      this.host.log('mlx: checking the model catalog');
       await this.chooseModelToDownload(paths, settings);
       model = isLocalModelId(settings.modelId) ? mlxModel(settings.modelId) : model;
     }
+    this.host.log('mlx: checking the local model files');
     const modelPath = await ensureDirModel(this.provisioningHost, paths, model, settings, this.activeSignal);
+    this.host.log(`mlx: model ready at ${modelPath} — starting the runner`);
     this.host.onStatus({ status: ENGINE_STATUS.starting });
     if (settings.sharedRunner) {
       const runner = await this.startSharedRunner(
